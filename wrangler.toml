@@ -1,0 +1,10 @@
+# Cloudflare Pages — DiscipleSpaces
+# Deploy: npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces
+# Docs: DEPLOYMENT.md
+
+name = "disciple-spaces"
+compatibility_date = "2026-07-01"
+pages_build_output_dir = "dist"
+
+# Optional: set in dashboard or:
+# npx wrangler pages project create disciple-spaces

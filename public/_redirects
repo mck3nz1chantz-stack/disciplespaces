@@ -1,0 +1,3 @@
+# Cloudflare Pages SPA fallback
+# https://developers.cloudflare.com/pages/configuration/redirects/
+/*    /index.html   200

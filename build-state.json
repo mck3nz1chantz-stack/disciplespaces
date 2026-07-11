@@ -1,0 +1,182 @@
+{
+  "project": "DiscipleSpaces",
+  "phase": "5 – Sharing, Invites & Polish",
+  "status": "completed",
+  "created": "2026-07-08T19:23:18.941Z",
+  "updated": "2026-07-09T12:00:00.000Z",
+  "launcher": "/Users/kenzi/Desktop/ChantzMediaLauncher",
+  "version": "0.9.1",
+  "stack": [
+    "Vite 6",
+    "React 18",
+    "TypeScript 5.7 (strict)",
+    "Tailwind CSS 4",
+    "Dexie.js + dexie-react-hooks",
+    "vite-plugin-pwa",
+    "date-fns",
+    "lucide-react",
+    "sonner",
+    "zustand",
+    "react-router-dom",
+    "qrcode",
+    "Cloudflare Pages"
+  ],
+  "envVars": [],
+  "artifacts": [
+    {
+      "name": "Source",
+      "path": "src/",
+      "notes": "Live queries, migration schema, offline banner, storage UI, pagination, space templates"
+    },
+    {
+      "name": "Migrations",
+      "path": "MIGRATIONS.md",
+      "notes": "Dexie versioned schema system in src/lib/db/schema.ts (v4: spaceTemplate + session notes)"
+    },
+    {
+      "name": "Space templates",
+      "path": "src/lib/spaceTemplates.ts",
+      "notes": "Custom / Guided / Advanced / Freeform space templates + first-session mapping"
+    },
+    {
+      "name": "Deploy config",
+      "path": "public/_headers + public/_redirects + wrangler.toml",
+      "notes": "Cloudflare Pages PWA headers + SPA fallback"
+    },
+    {
+      "name": "Deployment guide",
+      "path": "DEPLOYMENT.md",
+      "command": "npm run deploy"
+    },
+    {
+      "name": "KJV data",
+      "path": "public/data/bible/"
+    },
+    {
+      "name": "Production build",
+      "path": "dist/",
+      "command": "npm run build"
+    }
+  ],
+  "limitations": [
+    "Cloudflare deploy requires wrangler login on the machine that deploys",
+    "Invite is fully offline: join requires full DS1 package or QR",
+    "New members do not receive past sessions by default",
+    "iOS install is manual via Safari Share → Add to Home Screen",
+    "GrokLaw pre-build still pending"
+  ],
+  "complianceNotes": [
+    "Local-only data storage",
+    "Manual export/import for sharing (no server)",
+    "PrivateNote never exported",
+    "Bible text limited to public domain KJV",
+    "No auth / no accounts / no cloud sync"
+  ],
+  "inviteBehavior": {
+    "newMembersGetPastSessions": false,
+    "packagePrefix": "DS1.",
+    "exportPrefix": "DSX1."
+  },
+  "finalPolish": [
+    {
+      "name": "Final Polish + In-App Tutorial",
+      "date": "2026-07-09"
+    },
+    {
+      "name": "Onboarding + PWA Distribution Polish",
+      "date": "2026-07-09"
+    },
+    {
+      "name": "Offline Experience Hardening + Cloudflare Deployment",
+      "date": "2026-07-09",
+      "notes": "dexie-react-hooks live queries on Space timeline + dashboard; schema migrations module + MIGRATIONS.md; session timeline pagination; Storage used in Settings; offline banner + /offline page; SW navigateFallback; Cloudflare _headers/_redirects/wrangler.toml/DEPLOYMENT.md; deployable for testing"
+    },
+    {
+      "name": "Space Templates + Freeform Sessions Overhaul",
+      "date": "2026-07-09",
+      "notes": "Templates are now a central app concept. Space-level templates: Custom, Guided, Advanced, Freeform. Create Space flow selects template and auto-creates first session. Session notes on every session. Freeform session template (notes + manual passages). Advanced Journey session template. Manual passage logging improved (book datalist, verse range, study notes). Change space template later with confirmation. Schema v4 migration for spaceTemplate/defaultSessionTemplateId + notes defaults. Existing session templates preserved (Discipleship Start, Weekly Study, Book Study)."
+    }
+  ],
+  "featureNotes": {
+    "spaceTemplates": {
+      "ids": [
+        "custom",
+        "guided",
+        "advanced",
+        "freeform"
+      ],
+      "autoFirstSession": true,
+      "changeableLater": true,
+      "defaultSessionTemplateOnSpace": true
+    },
+    "sessionTemplates": [
+      "tpl-discipleship-start",
+      "tpl-weekly-study",
+      "tpl-book-study",
+      "tpl-freeform",
+      "tpl-advanced-journey"
+    ],
+    "sessionNotes": "notes field on all sessions",
+    "manualPassageLogging": "book + chapter + verse range + study notes without Bible reader"
+  },
+  "distributionReady": true,
+  "cloudflarePages": {
+    "projectName": "disciple-spaces",
+    "config": "wrangler.toml",
+    "deployCommand": "npm run deploy",
+    "status": "deployed",
+    "productionUrl": "https://disciple-spaces.pages.dev",
+    "latestDeploymentUrl": "https://8a7f52e7.disciple-spaces.pages.dev",
+    "deployedAt": "2026-07-11T00:00:00Z",
+    "releaseNotes": "Preview: scroll-locked Session/Private tabs, draft sessions, scroll preserve, full tutorial refresh, theme, modes, prayer board, Family"
+  },
+  "grokBuildStatus": "preview-deployed-scroll-lock-tutorial",
+  "grokDocsStatus": "pending",
+  "grokLawStatus": "pending-prebuild",
+  "nextPhase": "Optional: section-scoped private notes per template step; redeploy Cloudflare after QA; GrokDocs / GrokLaw",
+  "recentFeatures": {
+    "privateNotes": {
+      "status": "ui-live",
+      "scope": "session + space-level + section-scoped (steps, notes, passages)",
+      "export": "never included",
+      "schema": "privateNotes table (v1+); sectionKey/updatedAt optional fields"
+    },
+    "prayerBoard": {
+      "status": "ui-live",
+      "tabs": ["individual", "group"],
+      "kinds": ["request", "prayed", "update"],
+      "export": "included in Space Updates",
+      "schemaVersion": 6,
+      "availableOn": "all session templates + space detail"
+    },
+    "spaceKind": {
+      "group": { "maxMembers": 5 },
+      "family": { "maxMembers": 10 },
+      "schemaVersion": 5
+    }
+  },
+  "pdfPackagePath": null,
+  "clientFormPath": null,
+  "packageZipPath": null,
+  "documentDeployment": {
+    "status": "pending",
+    "mode": "local-pdf",
+    "packageMode": "deployment",
+    "packageVersion": null,
+    "packageDir": null,
+    "autoTrigger": true,
+    "completedAt": null,
+    "pdfPackagePath": null,
+    "clientFormPath": null,
+    "packageZipPath": null,
+    "webDeploy": false,
+    "cloudflareDeploy": true
+  },
+  "webDeployment": {
+    "optIn": true,
+    "target": "cloudflare",
+    "projectSlug": "disciple-spaces",
+    "addedAt": "2026-07-08T21:16:27.034Z",
+    "deployCommand": "npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces"
+  }
+}
