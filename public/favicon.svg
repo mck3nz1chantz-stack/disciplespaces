@@ -1,5 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DiscipleSpaces">
+  <!-- Rounded app tile -->
   <rect width="64" height="64" rx="14" fill="#1e3a2f"/>
-  <path d="M32 12c-6 8-14 14-14 24a14 14 0 0 0 28 0c0-10-8-16-14-24z" fill="#c4a35a"/>
-  <circle cx="32" cy="38" r="4" fill="#f7f5f0"/>
+  <!-- Soft gold glow behind the cross -->
+  <circle cx="32" cy="34" r="20" fill="#c4a35a" opacity="0.18"/>
+  <!-- Latin cross — balanced, slightly raised for visual center -->
+  <path
+    fill="#c4a35a"
+    d="
+      M28 14
+      h8
+      a2 2 0 0 1 2 2
+      v10
+      h10
+      a2 2 0 0 1 2 2
+      v8
+      a2 2 0 0 1 -2 2
+      H38
+      v16
+      a2 2 0 0 1 -2 2
+      h-8
+      a2 2 0 0 1 -2 -2
+      V38
+      H16
+      a2 2 0 0 1 -2 -2
+      v-8
+      a2 2 0 0 1 2 -2
+      h10
+      V16
+      a2 2 0 0 1 2 -2
+      z
+    "
+  />
+  <!-- Subtle highlight on the upright for depth -->
+  <rect x="30" y="16" width="2.5" height="34" rx="1" fill="#f7f5f0" opacity="0.22"/>
 </svg>
