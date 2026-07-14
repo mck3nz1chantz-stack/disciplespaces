@@ -29,6 +29,7 @@ import {
   buildInvitePayload,
   deriveInviteCode,
   membersForJoin,
+  type MemberJoinPayload,
   type SpaceInvitePayload,
 } from "../lib/invite";
 import {
@@ -144,11 +145,39 @@ interface AppState {
   /**
    * Join from offline invite package.
    * Creates local space with same id; does not import sessions.
+   * Returns the joiner Member so the UI can offer a join confirmation for the host.
    */
   joinFromInvite: (input: {
     payload: SpaceInvitePayload;
     joinerName: string;
-  }) => Promise<{ space: Space; alreadyHad: boolean }>;
+  }) => Promise<{
+    space: Space;
+    alreadyHad: boolean;
+    joiner: Member | null;
+  }>;
+
+  /**
+   * Join / seed from a Space Update (history). Optionally add joiner to members.
+   */
+  joinFromExport: (input: {
+    payload: SpaceExportPayload;
+    joinerName?: string;
+  }) => Promise<{
+    space: Space;
+    alreadyHad: boolean;
+    joiner: Member | null;
+    addedSessions: number;
+    skippedSessions: number;
+    addedPrayers: number;
+    skippedPrayers: number;
+  }>;
+
+  /**
+   * Host applies a joiner's "I'm in" receipt so local member list / count updates.
+   */
+  applyMemberJoin: (
+    payload: MemberJoinPayload,
+  ) => Promise<{ space: Space; added: boolean }>;
 
   buildSpaceExportPayload: (spaceId: string) => Promise<SpaceExportPayload>;
   importSpaceExport: (
@@ -732,12 +761,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         ) &&
         existing.members.length < max
       ) {
+        const joiner = createMember(name);
         const nextRow: SpaceRow = {
           ...existing,
-          members: [
-            ...existing.members,
-            createMember(name),
-          ],
+          members: [...existing.members, joiner],
           inviteCode: existing.inviteCode || payload.code,
         };
         await db.spaces.put(nextRow);
@@ -745,10 +772,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => ({
           spaces: patchSpaceInState(state.spaces, updated),
         }));
-        return { space: updated, alreadyHad: true };
+        return { space: updated, alreadyHad: true, joiner };
       }
       const space = await hydrateSpace(existing);
-      return { space, alreadyHad: true };
+      const existingJoiner =
+        space.members.find(
+          (m) => m.name.toLowerCase() === name.toLowerCase(),
+        ) ?? null;
+      return { space, alreadyHad: true, joiner: existingJoiner };
     }
 
     const kind = normalizeSpaceKind(payload.spaceKind);
@@ -758,6 +789,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       joinerName,
       maxMembersForSpace(kind),
     );
+    const joinKey = joinerName.trim().toLowerCase();
+    const joiner =
+      members.find((m) => m.name.toLowerCase() === joinKey) ??
+      members[members.length - 1] ??
+      null;
     const space: Space = {
       id: payload.spaceId,
       name: payload.name,
@@ -775,7 +811,109 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       spaces: sortSpaces([space, ...state.spaces]),
     }));
-    return { space, alreadyHad: false };
+    return { space, alreadyHad: false, joiner };
+  },
+
+  joinFromExport: async ({ payload, joinerName }) => {
+    const had = Boolean(await db.spaces.get(payload.space.id));
+    const result = await get().importSpaceExport(payload);
+
+    let joiner: Member | null = null;
+    const name = joinerName?.trim();
+    if (name) {
+      const row = await db.spaces.get(payload.space.id);
+      if (row) {
+        const max = maxMembersForSpace(row.spaceKind);
+        const existing = row.members.find(
+          (m) => m.name.toLowerCase() === name.toLowerCase(),
+        );
+        if (existing) {
+          joiner = existing;
+        } else if (row.members.length < max) {
+          joiner = createMember(name);
+          const nextRow: SpaceRow = {
+            ...row,
+            members: [...row.members, joiner],
+          };
+          await db.spaces.put(nextRow);
+          const updated = await hydrateSpace(nextRow);
+          set((state) => ({
+            spaces: patchSpaceInState(state.spaces, updated),
+          }));
+          return {
+            space: updated,
+            alreadyHad: had,
+            joiner,
+            addedSessions: result.addedSessions,
+            skippedSessions: result.skippedSessions,
+            addedPrayers: result.addedPrayers,
+            skippedPrayers: result.skippedPrayers,
+          };
+        }
+      }
+    }
+
+    return {
+      space: result.space,
+      alreadyHad: had,
+      joiner,
+      addedSessions: result.addedSessions,
+      skippedSessions: result.skippedSessions,
+      addedPrayers: result.addedPrayers,
+      skippedPrayers: result.skippedPrayers,
+    };
+  },
+
+  applyMemberJoin: async (payload) => {
+    const row = await db.spaces.get(payload.spaceId);
+    if (!row) {
+      throw new Error(
+        "This join confirmation is for a space that is not on this device. Open DiscipleSpaces on the host phone that created the invite.",
+      );
+    }
+    if (
+      payload.code &&
+      row.inviteCode &&
+      payload.code.replace(/-/g, "").toUpperCase() !==
+        row.inviteCode.replace(/-/g, "").toUpperCase()
+    ) {
+      throw new Error(
+        "Invite code on this confirmation does not match this space. Double-check you opened the right Space.",
+      );
+    }
+
+    const name = payload.member.name.trim();
+    if (!name) throw new Error("Join confirmation is missing a name");
+
+    const max = maxMembersForSpace(row.spaceKind);
+    if (
+      row.members.some((m) => m.name.toLowerCase() === name.toLowerCase())
+    ) {
+      const space = await hydrateSpace(row);
+      return { space, added: false };
+    }
+    if (row.members.length >= max) {
+      throw new Error(
+        `This space already has ${max} members. Remove someone before adding ${name}.`,
+      );
+    }
+
+    const member: Member = {
+      id: payload.member.id || crypto.randomUUID(),
+      name,
+      joinedAt: payload.joinedAt || new Date().toISOString(),
+    };
+    const nextRow: SpaceRow = {
+      ...row,
+      members: [...row.members, member],
+      inviteCode: row.inviteCode || payload.code,
+    };
+    await db.spaces.put(nextRow);
+    const space = await hydrateSpace(nextRow);
+    set((state) => ({
+      spaces: patchSpaceInState(state.spaces, space),
+    }));
+    return { space, added: true };
   },
 
   buildSpaceExportPayload: async (spaceId) => {

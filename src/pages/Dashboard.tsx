@@ -11,7 +11,10 @@ import { JoinSpaceModal } from "../components/JoinSpaceModal";
 import { QuickStartChecklist } from "../components/QuickStartChecklist";
 import { ShareUpdateModal } from "../components/ShareUpdateModal";
 import { DataBackupCard } from "../components/DataBackupCard";
-import { consumePendingHomeAction } from "../components/Layout";
+import {
+  consumePendingHomeAction,
+  consumePendingJoinRaw,
+} from "../components/Layout";
 import { lastActivityIso, useAppStore } from "../stores/useAppStore";
 import { useLiveSpaces } from "../hooks/useLiveDb";
 import {
@@ -44,6 +47,7 @@ export function Dashboard() {
 
   const [open, setOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [joinInitialRaw, setJoinInitialRaw] = useState<string | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupMode, setBackupMode] = useState<"export" | "import">("export");
   const [spaceTemplate, setSpaceTemplate] =
@@ -61,11 +65,24 @@ export function Dashboard() {
     void initialize();
   }, [initialize]);
 
-  // Honor onboarding CTAs
+  // Honor onboarding CTAs + deep-link invites from text messages
   useEffect(() => {
-    const action = consumePendingHomeAction();
-    if (action === "create") setOpen(true);
-    if (action === "join") setJoinOpen(true);
+    function openPendingFromHandoff() {
+      const action = consumePendingHomeAction();
+      if (action === "create") setOpen(true);
+      if (action === "join") setJoinOpen(true);
+
+      const pendingJoin = consumePendingJoinRaw();
+      if (pendingJoin) {
+        setJoinInitialRaw(pendingJoin);
+        setJoinOpen(true);
+      }
+    }
+
+    openPendingFromHandoff();
+    window.addEventListener("ds-pending-join", openPendingFromHandoff);
+    return () =>
+      window.removeEventListener("ds-pending-join", openPendingFromHandoff);
   }, []);
 
   const hasAnySessions = useMemo(
@@ -439,7 +456,14 @@ export function Dashboard() {
         </form>
       </Modal>
 
-      <JoinSpaceModal open={joinOpen} onClose={() => setJoinOpen(false)} />
+      <JoinSpaceModal
+        open={joinOpen}
+        initialRaw={joinInitialRaw}
+        onClose={() => {
+          setJoinOpen(false);
+          setJoinInitialRaw(null);
+        }}
+      />
       <ShareUpdateModal
         open={backupOpen}
         defaultMode={backupMode}

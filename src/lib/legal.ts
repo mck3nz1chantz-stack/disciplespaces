@@ -56,6 +56,9 @@ export const INVITE_PRIVACY_NOTE =
   "DiscipleSpaces is a personal small-group study tool on each device. It is not a legally protected confidential space. Share invite packages only with people you trust.";
 
 export const INVITE_HISTORY_NOTE =
-  "New members join this Space for current and future sessions. Past sessions are not sent with the invite. Share a Space Update export later if you want them to import history.";
+  "Quick invite (QR / DS1.) is for joining only — past sessions stay on the host device. Use “Share with history” or a Space Update (DSX1.) so new members import discussions and notes.";
+
+export const INVITE_SYNC_NOTE =
+  "DiscipleSpaces is offline-first: each phone keeps its own copy. Adding someone’s name when you invite, or pasting their “I’m in” confirmation, keeps your member count accurate.";
 
 export const FIRST_LAUNCH_ACK_KEY = "ds-legal-ack-v1";

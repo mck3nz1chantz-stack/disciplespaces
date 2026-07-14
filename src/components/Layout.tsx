@@ -7,12 +7,14 @@ import { LegalDisclaimerModal } from "./LegalDisclaimer";
 import { Onboarding } from "./Onboarding";
 import { ThemeCycleButton } from "./ThemeToggle";
 import { useAppStore } from "../stores/useAppStore";
+import { consumeInviteFromLocation } from "../lib/invite";
 import {
   ONBOARDING_DONE_KEY,
   readFlag,
 } from "../lib/onboarding";
 
 const PENDING_ACTION_KEY = "ds-pending-home-action";
+const PENDING_JOIN_RAW_KEY = "ds-pending-join-raw";
 
 const tabs = [
   { to: "/", label: "Spaces", icon: Home, end: true },
@@ -32,6 +34,21 @@ export function Layout() {
     }
     setShowOnboarding(!readFlag(ONBOARDING_DONE_KEY));
   }, [hasAcknowledgedLegal]);
+
+  // Deep links from text messages: #invite= / #joinconfirm= / #export=
+  useEffect(() => {
+    const fromLink = consumeInviteFromLocation();
+    if (!fromLink) return;
+    try {
+      sessionStorage.setItem(PENDING_JOIN_RAW_KEY, fromLink.raw);
+      sessionStorage.setItem(PENDING_ACTION_KEY, "join");
+    } catch {
+      // ignore
+    }
+    navigate("/");
+    // Dashboard may already be mounted (same route) — notify it
+    window.dispatchEvent(new Event("ds-pending-join"));
+  }, [navigate]);
 
   function handleOnboardingFinished(action?: "create" | "join" | "skip") {
     setShowOnboarding(false);
@@ -118,4 +135,15 @@ export function consumePendingHomeAction(): "create" | "join" | null {
     // ignore
   }
   return null;
+}
+
+/** Prefill for Join modal (deep link or cross-route handoff). */
+export function consumePendingJoinRaw(): string | null {
+  try {
+    const v = sessionStorage.getItem(PENDING_JOIN_RAW_KEY);
+    sessionStorage.removeItem(PENDING_JOIN_RAW_KEY);
+    return v?.trim() ? v : null;
+  } catch {
+    return null;
+  }
 }

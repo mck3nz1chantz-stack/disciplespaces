@@ -115,11 +115,12 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
   {
     id: "invite",
     title: "Inviting others (code + QR)",
-    summary: "Join for future meetings — not past history.",
+    summary: "Link, QR, history, and member counts.",
     body: [
-      "On a Space, tap Invite for a short code and a QR with a full invite package (starts with DS1.).",
-      "They use Join a Space, paste the package or scan the QR, and enter their name.",
-      "Invites do not send past sessions. New members start fresh for current and future meetings. Use a Space Update to share history.",
+      "On a Space, tap Invite. Prefer Share invite (includes a tappable link) or QR — the short code alone cannot join offline.",
+      "Add their name when inviting so your Attendees count updates on your phone. After they join, they can send an “I’m in” confirmation (DSM1.) for the same purpose.",
+      "Quick invite (DS1.) is join-only. Turn on Share with history or send a Space Update (DSX1.) so they import past sessions and the prayer board.",
+      "Each device keeps its own copy — there is no automatic cloud sync.",
     ],
   },
   {

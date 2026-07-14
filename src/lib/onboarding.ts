@@ -49,7 +49,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   {
     id: "share",
     title: "Invite & share carefully",
-    body: "Invite others with a code or QR for future sessions. Past history only moves when you send a Space Update export. Share only with people you trust.",
+    body: "Invite with Share (tappable link) or QR — not the short code alone. Add their name so your count updates. Use “Share with history” or a Space Update for past sessions. Share only with people you trust.",
   },
   {
     id: "backup",
