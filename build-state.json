@@ -127,11 +127,11 @@
     "deployCommand": "npm run deploy",
     "status": "deployed",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://ea1e8d32.disciple-spaces.pages.dev",
-    "deployedAt": "2026-07-15T00:54:00Z",
-    "releaseNotes": "P0 UX, testing disclaimer, Online/Offline + Sync bar, Report a problem feedback inbox"
+    "latestDeploymentUrl": "https://7ea29ab9.disciple-spaces.pages.dev",
+    "deployedAt": "2026-07-15T01:17:00Z",
+    "releaseNotes": "Full pilot: UX P0–P2, relay, feedback, KJV+WEB with offline cache tips, free-forever mission"
   },
-  "grokBuildStatus": "preview-deployed-feedback-testing-ux",
+  "grokBuildStatus": "preview-deployed-web-bible-push-5c47c45",
   "grokDocsStatus": "pending",
   "grokLawStatus": "pending-prebuild",
   "nextPhase": "Deploy space-relay Worker + set VITE_SPACE_RELAY_URL; opportunistic auto-sync; custom domain when product-ready; GrokDocs / GrokLaw",
