@@ -9,6 +9,7 @@ import {
   PRODUCTION_URL,
   RESTORE_NOTE,
 } from "../lib/legal";
+import { TestingGuideCard } from "../components/TestingPhaseNotice";
 
 /**
  * Offline Help / tutorial. Content from src/lib/tutorial.ts.
@@ -39,6 +40,8 @@ export function Help() {
           <p className="text-sm text-muted mt-1">{TUTORIAL_INTRO}</p>
         </div>
       </div>
+
+      <TestingGuideCard variant="full" />
 
       <Card padding="sm" className="bg-primary/5 border-primary/15">
         <p className="text-sm text-muted">

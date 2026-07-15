@@ -23,8 +23,15 @@ Applied in `src/lib/db.ts` via `this.version(n).stores(...).upgrade(...)`.
 | 4 | Space templates (`spaceTemplate`, `defaultSessionTemplateId`) + session `notes` default |
 | 5 | `spaceKind` (`group` \| `family`) for member capacity; private notes may store `sectionKey` / `updatedAt` |
 | 6 | Shared `prayerBoard` table (individual/group scopes; included in Space Update export) |
+| 7 | `space.sync` metadata (default `local-only`) + `syncQueue` table for opportunistic shared-layer push; **privateNotes never queued** |
 
 `CURRENT_SCHEMA_VERSION` should match the highest entry.
+
+### v7 notes (Space relay readiness)
+
+- Existing Spaces get `{ mode: "local-only" }` on upgrade — **no data loss**, no network.
+- Opt-in **Connect** writes `mode: "connected"` + `roomId` / `shortCode` when `VITE_SPACE_RELAY_URL` is set.
+- File import/export (DSX1) unchanged; private notes still never leave the device.
 
 ## Adding a migration (checklist)
 

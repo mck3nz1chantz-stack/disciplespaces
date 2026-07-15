@@ -2,6 +2,24 @@
 
 Static PWA build (`dist/`) with service worker + offline KJV data.
 
+## Preview origin vs product domain
+
+**Preview / `*.pages.dev` is fine until full product deployment.**  
+IndexedDB is per-origin — keep one bookmark for real use. A custom domain can become the canonical origin later (`VITE_CANONICAL_ORIGIN`); migrate users with Back up → open new site → Restore.
+
+## Optional Space room relay
+
+Easy join (short codes) requires the Worker in `space-relay/`:
+
+```bash
+cd space-relay && npm install && npm run deploy
+# rebuild app with:
+# VITE_SPACE_RELAY_URL=https://disciple-spaces-relay.<account>.workers.dev
+npm run build && npm run deploy
+```
+
+Without `VITE_SPACE_RELAY_URL`, the app stays fully local; Connect shows “not on this build.” Existing device data is never wiped.
+
 ## Prerequisites
 
 - Cloudflare account

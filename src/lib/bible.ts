@@ -1,9 +1,51 @@
 /**
- * Offline KJV Bible loader.
- * Data lives in public/data/bible/ (public domain King James Version).
+ * Offline public-domain Bible loader.
+ * - KJV: public/data/bible/*.json
+ * - WEB: public/data/bible/web/*.json (World English Bible)
+ * Only free, no-registration translations. Never paywalled Bibles.
  */
 
 export type Testament = "OT" | "NT";
+
+/** Supported offline Bible editions (public domain only). */
+export type BibleVersionId = "kjv" | "web";
+
+export const BIBLE_VERSIONS: Array<{
+  id: BibleVersionId;
+  label: string;
+  shortLabel: string;
+  notice: string;
+}> = [
+  {
+    id: "kjv",
+    label: "King James Version",
+    shortLabel: "KJV",
+    notice: "Public domain King James Version (KJV).",
+  },
+  {
+    id: "web",
+    label: "World English Bible",
+    shortLabel: "WEB",
+    notice:
+      "Public domain World English Bible (WEB). Modern English · no registration.",
+  },
+];
+
+export function normalizeBibleVersion(value: unknown): BibleVersionId {
+  const v = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (v === "web") return "web";
+  return "kjv";
+}
+
+export function bibleVersionMeta(id: BibleVersionId) {
+  return BIBLE_VERSIONS.find((v) => v.id === id) ?? BIBLE_VERSIONS[0]!;
+}
+
+function dataBaseForVersion(version: BibleVersionId): string {
+  return version === "web" ? "/data/bible/web" : "/data/bible";
+}
 
 export interface BibleBookMeta {
   id: string;
@@ -39,68 +81,100 @@ export interface BibleVerse {
   chapter: number; // 1-based
   verse: number; // 1-based
   text: string;
+  /** Which edition this verse text came from. */
+  version?: BibleVersionId;
 }
 
 export interface ChapterData {
   book: BibleBookMeta;
   chapter: number; // 1-based
   verses: BibleVerse[];
+  version: BibleVersionId;
 }
 
-const DATA_BASE = "/data/bible";
-
-let indexPromise: Promise<BibleIndex> | null = null;
+const indexCache = new Map<BibleVersionId, Promise<BibleIndex>>();
 const bookCache = new Map<string, Promise<BibleBook>>();
 
 const POSITION_KEY = "ds-bible-position-v1";
+const VERSION_KEY = "ds-bible-version-v1";
 
 export interface ReadingPosition {
   bookId: string;
   chapter: number;
 }
 
-export function loadBibleIndex(): Promise<BibleIndex> {
-  if (!indexPromise) {
-    indexPromise = fetch(`${DATA_BASE}/index.json`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error("Could not load Bible index");
-        return (await res.json()) as BibleIndex;
-      })
-      .catch((err) => {
-        indexPromise = null;
-        throw err;
-      });
+export function loadReadingVersion(): BibleVersionId {
+  try {
+    return normalizeBibleVersion(localStorage.getItem(VERSION_KEY));
+  } catch {
+    return "kjv";
   }
-  return indexPromise;
 }
 
-export function loadBook(bookId: string): Promise<BibleBook> {
-  const existing = bookCache.get(bookId);
+export function saveReadingVersion(version: BibleVersionId): void {
+  try {
+    localStorage.setItem(VERSION_KEY, version);
+  } catch {
+    // ignore
+  }
+}
+
+export function loadBibleIndex(
+  version: BibleVersionId = "kjv",
+): Promise<BibleIndex> {
+  const v = normalizeBibleVersion(version);
+  const existing = indexCache.get(v);
   if (existing) return existing;
 
-  const promise = fetch(`${DATA_BASE}/${bookId}.json`)
+  const promise = fetch(`${dataBaseForVersion(v)}/index.json`)
     .then(async (res) => {
-      if (!res.ok) throw new Error(`Could not load book: ${bookId}`);
-      return (await res.json()) as BibleBook;
+      if (!res.ok) throw new Error(`Could not load Bible index (${v})`);
+      return (await res.json()) as BibleIndex;
     })
     .catch((err) => {
-      bookCache.delete(bookId);
+      indexCache.delete(v);
       throw err;
     });
 
-  bookCache.set(bookId, promise);
+  indexCache.set(v, promise);
   return promise;
 }
 
-export async function getBooks(): Promise<BibleBookMeta[]> {
-  const index = await loadBibleIndex();
+export function loadBook(
+  bookId: string,
+  version: BibleVersionId = "kjv",
+): Promise<BibleBook> {
+  const v = normalizeBibleVersion(version);
+  const key = `${v}:${bookId}`;
+  const existing = bookCache.get(key);
+  if (existing) return existing;
+
+  const promise = fetch(`${dataBaseForVersion(v)}/${bookId}.json`)
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`Could not load book: ${bookId} (${v})`);
+      return (await res.json()) as BibleBook;
+    })
+    .catch((err) => {
+      bookCache.delete(key);
+      throw err;
+    });
+
+  bookCache.set(key, promise);
+  return promise;
+}
+
+export async function getBooks(
+  version: BibleVersionId = "kjv",
+): Promise<BibleBookMeta[]> {
+  const index = await loadBibleIndex(version);
   return index.books;
 }
 
 export async function getBookMeta(
   bookId: string,
+  version: BibleVersionId = "kjv",
 ): Promise<BibleBookMeta | undefined> {
-  const books = await getBooks();
+  const books = await getBooks(version);
   return books.find((b) => b.id === bookId);
 }
 
@@ -108,10 +182,12 @@ export async function getBookMeta(
 export async function getChapter(
   bookId: string,
   chapter: number,
+  version: BibleVersionId = "kjv",
 ): Promise<ChapterData> {
+  const v = normalizeBibleVersion(version);
   const [meta, book] = await Promise.all([
-    getBookMeta(bookId),
-    loadBook(bookId),
+    getBookMeta(bookId, v),
+    loadBook(bookId, v),
   ]);
   if (!meta) throw new Error(`Unknown book: ${bookId}`);
   if (chapter < 1 || chapter > book.chapters.length) {
@@ -126,9 +202,10 @@ export async function getChapter(
     chapter,
     verse: i + 1,
     text,
+    version: v,
   }));
 
-  return { book: meta, chapter, verses };
+  return { book: meta, chapter, verses, version: v };
 }
 
 export function formatReference(v: Pick<BibleVerse, "bookName" | "chapter" | "verse">): string {
@@ -288,15 +365,16 @@ export function scoreVerseMatch(
  */
 export async function searchVerses(
   query: string,
-  options: SearchOptions = {},
+  options: SearchOptions & { version?: BibleVersionId } = {},
 ): Promise<SearchHit[]> {
   const qRaw = query.trim();
   const q = qRaw.toLowerCase();
   if (q.length < 2) return [];
 
+  const version = normalizeBibleVersion(options.version ?? "kjv");
   const tokens = tokenizeQuery(qRaw);
   const limit = options.limit ?? 50;
-  const books = await getBooks();
+  const books = await getBooks(version);
   const targets = options.bookId
     ? books.filter((b) => b.id === options.bookId)
     : books;
@@ -305,7 +383,7 @@ export async function searchVerses(
 
   for (const meta of targets) {
     if (options.signal?.aborted) break;
-    const book = await loadBook(meta.id);
+    const book = await loadBook(meta.id, version);
     const bookBoost =
       options.preferBookId && options.preferBookId === book.id ? 55 : 0;
 
@@ -323,6 +401,7 @@ export async function searchVerses(
           chapter: c + 1,
           verse: v + 1,
           text,
+          version,
           score: scored.score + bookBoost,
           matchType: scored.matchType,
         });

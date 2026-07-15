@@ -4,9 +4,11 @@ import type {
   PrivateNote,
   Session,
   Space,
+  SyncQueueItem,
   Template,
 } from "../types";
 import { SCHEMA_MIGRATIONS } from "./db/schema";
+import { defaultSpaceSync } from "./sync/defaults";
 
 /**
  * Space row as stored in IndexedDB.
@@ -20,6 +22,7 @@ export class DiscipleSpacesDB extends Dexie {
   templates!: EntityTable<Template, "id">;
   privateNotes!: EntityTable<PrivateNote, "id">;
   prayerBoard!: EntityTable<PrayerBoardEntry, "id">;
+  syncQueue!: EntityTable<SyncQueueItem, "id">;
 
   constructor() {
     super("discipleSpaces");
@@ -252,7 +255,20 @@ export function createMember(
 export async function hydrateSpace(row: SpaceRow): Promise<Space> {
   const sessions = await db.sessions.where("spaceId").equals(row.id).toArray();
   sessions.sort((a, b) => b.date.localeCompare(a.date));
-  return { ...row, sessions };
+  return {
+    ...row,
+    sync: row.sync ?? defaultSpaceSync(),
+    sessions,
+  };
+}
+
+/** Ensure every space row has sync metadata (idempotent; safe on every launch). */
+export async function ensureSpaceSyncDefaults(): Promise<void> {
+  await db.spaces.toCollection().modify((raw: SpaceRow) => {
+    if (!raw.sync || (raw.sync.mode !== "local-only" && raw.sync.mode !== "connected")) {
+      raw.sync = defaultSpaceSync();
+    }
+  });
 }
 
 export async function hydrateSpaces(rows: SpaceRow[]): Promise<Space[]> {

@@ -1,0 +1,27 @@
+# Light Space room relay for DiscipleSpaces (shared data only).
+# Deploy: cd space-relay && npx wrangler deploy
+# Then set VITE_SPACE_RELAY_URL on the Pages build to this Worker's URL.
+
+name = "disciple-spaces-relay"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+[[durable_objects.bindings]]
+name = "SPACE_ROOM"
+class_name = "SpaceRoom"
+
+[[durable_objects.bindings]]
+name = "FEEDBACK_INBOX"
+class_name = "FeedbackInbox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SpaceRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["FeedbackInbox"]
+
+# Set after deploy so only you can list reports:
+#   npx wrangler secret put FEEDBACK_ADMIN_SECRET
+# Then: GET /feedback?secret=YOUR_SECRET

@@ -12,6 +12,7 @@ import type {
   SessionResponses,
   Space,
   SpaceKind,
+  SpaceSyncState,
   SpaceTemplateId,
   Template,
 } from "../types";
@@ -20,11 +21,24 @@ import {
   createMember,
   db,
   ensureSeedData,
+  ensureSpaceSyncDefaults,
   hydrateSpace,
   hydrateSpaces,
   type SpaceRow,
 } from "../lib/db";
 import { FIRST_LAUNCH_ACK_KEY } from "../lib/legal";
+import {
+  buildSharedSnapshot,
+  createRoom as relayCreateRoom,
+  defaultSpaceSync,
+  deleteRoom as relayDeleteRoom,
+  isSpaceRelayConfigured,
+  joinRoom as relayJoinRoom,
+  normalizeSpaceSync,
+  pullRoom as relayPullRoom,
+  pushRoom as relayPushRoom,
+  SpaceRelayNotConfiguredError,
+} from "../lib/sync";
 import {
   buildInvitePayload,
   deriveInviteCode,
@@ -235,6 +249,34 @@ interface AppState {
     >,
   ) => Promise<PrayerBoardEntry>;
   deletePrayerBoardEntry: (id: string) => Promise<void>;
+
+  /**
+   * Opt-in: connect this Space to the light relay (shared data only).
+   * Requires VITE_SPACE_RELAY_URL. Local data is never wiped.
+   */
+  connectSpaceToRelay: (spaceId: string) => Promise<Space>;
+  /** Pull + push shared snapshot for a connected Space. */
+  syncSpaceNow: (spaceId: string) => Promise<Space>;
+  /** Pause or resume automatic network sync (local edits still save). */
+  setSpaceSyncPaused: (spaceId: string, paused: boolean) => Promise<Space>;
+  /**
+   * Unlink from remote room; keeps all local data; mode → local-only.
+   * Optionally tries to delete the remote room.
+   */
+  unlinkSpaceFromRelay: (
+    spaceId: string,
+    opts?: { deleteRemote?: boolean },
+  ) => Promise<Space>;
+  /** Join via short code when relay is configured. */
+  joinSpaceViaRelay: (input: {
+    shortCode: string;
+    displayName: string;
+  }) => Promise<{ space: Space; alreadyHad: boolean }>;
+  /** Low-level patch of sync metadata (local only). */
+  patchSpaceSync: (
+    spaceId: string,
+    sync: Partial<SpaceSyncState>,
+  ) => Promise<Space>;
 }
 
 function sortSessions(sessions: Session[]): Session[] {
@@ -330,6 +372,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       await ensureSeedData();
+      await ensureSpaceSyncDefaults();
       await Promise.all([get().loadSpaces(), get().loadTemplates()]);
     } catch (err) {
       const message =
@@ -421,6 +464,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       spaceKind: kind,
       defaultSessionTemplateId,
       inviteCode: await deriveInviteCode(id),
+      sync: defaultSpaceSync(),
       sessions: [],
     };
     await db.spaces.add(toRow(space));
@@ -805,6 +849,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       spaceKind: kind,
       defaultSessionTemplateId: defaultSessionTemplateForSpace(template),
       inviteCode: payload.code,
+      sync: defaultSpaceSync(),
       sessions: [],
     };
     await db.spaces.add(toRow(space));
@@ -956,10 +1001,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         inviteCode:
           payload.space.inviteCode ||
           (await deriveInviteCode(payload.space.id)),
+        // File import never enables relay — stays local-only (private notes never in file)
+        sync: defaultSpaceSync(),
       };
       await db.spaces.add(spaceRow);
     } else {
-      // Keep local private data; refresh name/description/members carefully
+      // Keep local private data + existing sync mode; refresh shared fields carefully
       const kind = normalizeSpaceKind(
         existing.spaceKind || payload.space.spaceKind,
       );
@@ -984,6 +1031,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           payload.space.members ?? [],
           maxMembersForSpace(kind),
         ),
+        sync: normalizeSpaceSync(existing.sync),
       };
       await db.spaces.put(spaceRow);
     }
@@ -1055,6 +1103,218 @@ export const useAppStore = create<AppState>((set, get) => ({
       addedPrayers,
       skippedPrayers,
     };
+  },
+
+  patchSpaceSync: async (spaceId, syncPatch) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const nextSync = normalizeSpaceSync({
+      ...normalizeSpaceSync(row.sync),
+      ...syncPatch,
+    });
+    const nextRow: SpaceRow = { ...row, sync: nextSync };
+    await db.spaces.put(nextRow);
+    const updated = await hydrateSpace(nextRow);
+    set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    return updated;
+  },
+
+  connectSpaceToRelay: async (spaceId) => {
+    if (!isSpaceRelayConfigured()) {
+      throw new SpaceRelayNotConfiguredError();
+    }
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const space = await hydrateSpace(row);
+    const sessions = await db.sessions.where("spaceId").equals(spaceId).toArray();
+    const prayerBoard = await db.prayerBoard
+      .where("spaceId")
+      .equals(spaceId)
+      .toArray();
+    const snapshot = buildSharedSnapshot(space, sessions, prayerBoard);
+    const result = await relayCreateRoom({
+      snapshot,
+      displayName: space.members[0]?.name,
+    });
+    return get().patchSpaceSync(spaceId, {
+      mode: "connected",
+      roomId: result.roomId,
+      shortCode: result.shortCode,
+      remoteRev: result.rev,
+      lastSyncedAt: new Date().toISOString(),
+      paused: false,
+      lastError: undefined,
+    });
+  },
+
+  syncSpaceNow: async (spaceId) => {
+    if (!isSpaceRelayConfigured()) {
+      throw new SpaceRelayNotConfiguredError();
+    }
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const sync = normalizeSpaceSync(row.sync);
+    if (sync.mode !== "connected" || !sync.roomId) {
+      throw new Error("Connect this Space first to sync over the network.");
+    }
+
+    try {
+      // Pull remote first (merge missing sessions/prayers like file import)
+      const pulled = await relayPullRoom({
+        roomId: sync.roomId,
+        sinceRev: sync.remoteRev,
+      });
+      if (!("unchanged" in pulled)) {
+        const snap = pulled.snapshot;
+        // Apply remote shared data via export-shaped merge (never touches privateNotes)
+        await get().importSpaceExport({
+          v: 1,
+          kind: "ds-export",
+          exportedAt: snap.exportedAt,
+          space: {
+            id: snap.spaceId,
+            name: snap.name,
+            description: snap.description,
+            createdAt: snap.createdAt,
+            members: snap.members,
+            preferredBibleVersion: "KJV",
+            inviteCode: snap.inviteCode,
+            spaceTemplate: snap.spaceTemplate,
+            spaceKind: snap.spaceKind,
+            defaultSessionTemplateId: snap.defaultSessionTemplateId,
+          },
+          sessions: snap.sessions,
+          prayerBoard: snap.prayerBoard,
+        });
+        // Re-apply connected sync after import (import preserves existing sync)
+        await get().patchSpaceSync(spaceId, {
+          mode: "connected",
+          roomId: sync.roomId,
+          shortCode: sync.shortCode,
+          remoteRev: pulled.rev,
+        });
+      }
+
+      // Push local shared snapshot
+      const fresh = await db.spaces.get(spaceId);
+      if (!fresh) throw new Error("Space not found");
+      const hydrated = await hydrateSpace(fresh);
+      const sessions = await db.sessions
+        .where("spaceId")
+        .equals(spaceId)
+        .toArray();
+      const prayerBoard = await db.prayerBoard
+        .where("spaceId")
+        .equals(spaceId)
+        .toArray();
+      const snapshot = buildSharedSnapshot(hydrated, sessions, prayerBoard);
+      const push = await relayPushRoom({
+        roomId: sync.roomId,
+        snapshot,
+        baseRev: normalizeSpaceSync(fresh.sync).remoteRev,
+      });
+
+      return get().patchSpaceSync(spaceId, {
+        mode: "connected",
+        roomId: sync.roomId,
+        shortCode: sync.shortCode ?? normalizeSpaceSync(fresh.sync).shortCode,
+        remoteRev: push.rev,
+        lastSyncedAt: new Date().toISOString(),
+        lastError: undefined,
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Sync failed";
+      await get().patchSpaceSync(spaceId, { lastError: message });
+      throw err;
+    }
+  },
+
+  setSpaceSyncPaused: async (spaceId, paused) => {
+    return get().patchSpaceSync(spaceId, { paused });
+  },
+
+  unlinkSpaceFromRelay: async (spaceId, opts) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const sync = normalizeSpaceSync(row.sync);
+    if (opts?.deleteRemote && sync.roomId && isSpaceRelayConfigured()) {
+      try {
+        await relayDeleteRoom(sync.roomId);
+      } catch {
+        // Keep local unlink even if remote delete fails
+      }
+    }
+    const nextRow: SpaceRow = {
+      ...row,
+      sync: {
+        mode: "local-only",
+        lastSyncedAt: sync.lastSyncedAt,
+      },
+    };
+    await db.spaces.put(nextRow);
+    const updated = await hydrateSpace(nextRow);
+    set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    return updated;
+  },
+
+  joinSpaceViaRelay: async ({ shortCode, displayName }) => {
+    if (!isSpaceRelayConfigured()) {
+      throw new SpaceRelayNotConfiguredError();
+    }
+    const name = displayName.trim();
+    if (!name) throw new Error("Enter your name to join");
+    const result = await relayJoinRoom({ shortCode, displayName: name });
+    const snap = result.snapshot;
+    const had = Boolean(await db.spaces.get(snap.spaceId));
+
+    await get().importSpaceExport({
+      v: 1,
+      kind: "ds-export",
+      exportedAt: snap.exportedAt,
+      space: {
+        id: snap.spaceId,
+        name: snap.name,
+        description: snap.description,
+        createdAt: snap.createdAt,
+        members: snap.members,
+        preferredBibleVersion: "KJV",
+        inviteCode: snap.inviteCode,
+        spaceTemplate: snap.spaceTemplate,
+        spaceKind: snap.spaceKind,
+        defaultSessionTemplateId: snap.defaultSessionTemplateId,
+      },
+      sessions: snap.sessions,
+      prayerBoard: snap.prayerBoard,
+    });
+
+    // Ensure joiner is on the member list
+    const row = await db.spaces.get(snap.spaceId);
+    if (row) {
+      const max = maxMembersForSpace(row.spaceKind);
+      if (
+        !row.members.some((m) => m.name.toLowerCase() === name.toLowerCase()) &&
+        row.members.length < max
+      ) {
+        const joiner = createMember(name);
+        await db.spaces.put({
+          ...row,
+          members: [...row.members, joiner],
+        });
+      }
+    }
+
+    const space = await get().patchSpaceSync(snap.spaceId, {
+      mode: "connected",
+      roomId: result.roomId,
+      shortCode: result.shortCode,
+      remoteRev: result.rev,
+      lastSyncedAt: new Date().toISOString(),
+      paused: false,
+      lastError: undefined,
+    });
+
+    return { space, alreadyHad: had };
   },
 
   addPrivateNote: async ({ spaceId, sessionId, sectionKey, content }) => {

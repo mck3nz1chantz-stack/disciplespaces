@@ -1,11 +1,10 @@
 import { useNavigate } from "react-router-dom";
-import { BookOpen, CalendarPlus, CircleHelp, Plus, X } from "lucide-react";
+import { CalendarPlus, Plus, UserPlus, X } from "lucide-react";
 import { Card } from "./Card";
 import { Button } from "./Button";
 import {
-  QUICKSTART_BIBLE_KEY,
   QUICKSTART_DISMISS_KEY,
-  QUICKSTART_HELP_KEY,
+  QUICKSTART_INVITE_KEY,
   QUICKSTART_ITEMS,
   readFlag,
   writeFlag,
@@ -14,21 +13,21 @@ import {
 interface QuickStartChecklistProps {
   hasSpaces: boolean;
   hasSessions: boolean;
-  /** First space id when available — used to open it for “start a session”. */
   firstSpaceId?: string | null;
   onCreateSpace: () => void;
+  onJoinSpace?: () => void;
   onDismiss: () => void;
 }
 
 /**
- * Lightweight guided checklist for brand-new users (dismissible).
- * Each row is tappable and routes to the matching part of the app.
+ * P2 quick start: group → meeting → invite (dismissible).
  */
 export function QuickStartChecklist({
   hasSpaces,
   hasSessions,
   firstSpaceId,
   onCreateSpace,
+  onJoinSpace,
   onDismiss,
 }: QuickStartChecklistProps) {
   const navigate = useNavigate();
@@ -41,8 +40,7 @@ export function QuickStartChecklist({
   const done: Record<string, boolean> = {
     space: hasSpaces,
     session: hasSessions,
-    bible: readFlag(QUICKSTART_BIBLE_KEY),
-    help: readFlag(QUICKSTART_HELP_KEY),
+    invite: readFlag(QUICKSTART_INVITE_KEY),
   };
 
   function handleItem(id: string) {
@@ -63,15 +61,15 @@ export function QuickStartChecklist({
           onCreateSpace();
         }
         break;
-      case "bible":
-        writeFlag(QUICKSTART_BIBLE_KEY, true);
-        navigate(
-          firstSpaceId ? `/bible?space=${firstSpaceId}` : "/bible",
-        );
-        break;
-      case "help":
-        writeFlag(QUICKSTART_HELP_KEY, true);
-        navigate("/help");
+      case "invite":
+        writeFlag(QUICKSTART_INVITE_KEY, true);
+        if (firstSpaceId) {
+          navigate(`/space/${firstSpaceId}`, {
+            state: { openInvite: true },
+          });
+        } else {
+          onCreateSpace();
+        }
         break;
       default:
         break;
@@ -84,7 +82,7 @@ export function QuickStartChecklist({
         <div>
           <p className="font-medium text-primary">Quick start</p>
           <p className="text-sm text-muted mt-0.5">
-            Tap any step to go there — dismiss anytime.
+            Three steps — tap any one. Dismiss anytime.
           </p>
         </div>
         <Button
@@ -144,40 +142,48 @@ export function QuickStartChecklist({
       </ul>
 
       <div className="flex flex-col gap-2">
-        {!hasSpaces && (
-          <Button fullWidth onClick={onCreateSpace}>
-            <Plus className="h-5 w-5" aria-hidden />
-            Create a Space
-          </Button>
+        {!hasSpaces ? (
+          <div className="grid grid-cols-2 gap-2">
+            <Button fullWidth onClick={onCreateSpace}>
+              <Plus className="h-5 w-5" aria-hidden />
+              New group
+            </Button>
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => onJoinSpace?.()}
+            >
+              <UserPlus className="h-5 w-5" aria-hidden />
+              Join
+            </Button>
+          </div>
+        ) : (
+          <>
+            {!hasSessions && firstSpaceId && (
+              <Button
+                fullWidth
+                onClick={() =>
+                  navigate(`/space/${firstSpaceId}`, {
+                    state: { openCreateSession: true },
+                  })
+                }
+              >
+                <CalendarPlus className="h-5 w-5" aria-hidden />
+                Start today’s meeting
+              </Button>
+            )}
+            {firstSpaceId && (
+              <Button
+                variant="secondary"
+                fullWidth
+                onClick={() => handleItem("invite")}
+              >
+                <UserPlus className="h-5 w-5" aria-hidden />
+                Invite someone
+              </Button>
+            )}
+          </>
         )}
-        {hasSpaces && !hasSessions && firstSpaceId && (
-          <Button
-            fullWidth
-            variant="secondary"
-            onClick={() =>
-              navigate(`/space/${firstSpaceId}`, {
-                state: { openCreateSession: true },
-              })
-            }
-          >
-            <CalendarPlus className="h-5 w-5" aria-hidden />
-            Start a session
-          </Button>
-        )}
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="secondary"
-            fullWidth
-            onClick={() => handleItem("bible")}
-          >
-            <BookOpen className="h-4 w-4" aria-hidden />
-            Bible
-          </Button>
-          <Button variant="ghost" fullWidth onClick={() => handleItem("help")}>
-            <CircleHelp className="h-4 w-4" aria-hidden />
-            Help
-          </Button>
-        </div>
       </div>
     </Card>
   );

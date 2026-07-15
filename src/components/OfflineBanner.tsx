@@ -1,52 +1,52 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { WifiOff } from "lucide-react";
+import { OFFLINE_BANNER_HINT } from "../lib/legal";
+import { useOnlineMode } from "../hooks/useOnlineMode";
 
 /**
- * Calm persistent banner when the network is offline.
- * Complements the header OfflineIndicator pill.
+ * Banner when browser has no network OR user chose Offline mode.
  */
 export function OfflineBanner() {
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator !== "undefined" ? navigator.onLine : true,
-  );
+  const { mode, networkOnline, setOnlineMode } = useOnlineMode();
 
-  useEffect(() => {
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
+  const noNetwork = !networkOnline;
+  const preferOffline = mode === "offline";
 
-  if (isOnline) return null;
+  if (!noNetwork && !preferOffline) return null;
 
   return (
     <div
-      className="border-b border-amber-200 bg-amber-50 text-amber-950"
+      className="border-b border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-50"
       role="status"
       aria-live="polite"
     >
-      <div className="mx-auto max-w-lg px-4 py-2 flex items-start gap-2 text-sm">
+      <div className="mx-auto max-w-lg safe-x py-2 flex items-start gap-2 text-sm">
         <WifiOff className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
         <p className="min-w-0 flex-1">
-          <span className="font-medium">You’re offline. </span>
-          Spaces, sessions, and the cached KJV Bible still work on this device.{" "}
+          {noNetwork ? (
+            <>
+              <span className="font-medium">No network. </span>
+              {OFFLINE_BANNER_HINT}{" "}
+            </>
+          ) : (
+            <>
+              <span className="font-medium">Offline mode. </span>
+              Groups stay on this phone — no sync until you turn Online on.{" "}
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2 touch-manipulation"
+                onClick={() => setOnlineMode("online")}
+              >
+                Go Online
+              </button>
+              {" · "}
+            </>
+          )}
           <Link
-            to="/help"
+            to="/bible"
             className="font-medium underline underline-offset-2"
           >
-            Help
-          </Link>
-          {" · "}
-          <Link
-            to="/offline"
-            className="font-medium underline underline-offset-2"
-          >
-            Offline tips
+            Bible
           </Link>
         </p>
       </div>

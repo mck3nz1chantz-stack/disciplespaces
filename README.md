@@ -1,7 +1,9 @@
 # DiscipleSpaces
 
 Mobile-first PWA for small-group discipleship (1–5 people).  
-**Privacy:** Personal notes never leave the device. Shared content is manually exportable. Bible text is public domain KJV only.
+**Mission:** Free forever — never a paid app or paywalled Bible. Optional donations (if ever) would be long after a real launch and would support local church/ministry, not unlock features.  
+**Privacy:** Personal notes never leave the device. Shared content is exportable / optional Space room.  
+**Bible:** Public-domain **KJV** and **WEB** only (no registration-required translations).
 
 ## Stack
 
@@ -55,9 +57,11 @@ Dexie schema notes: **[MIGRATIONS.md](./MIGRATIONS.md)**.
 
 | Data | Storage | Leaves device? |
 |------|---------|----------------|
-| Spaces, sessions, templates | IndexedDB | Only via **manual** export (Space Update) |
+| Spaces, sessions, prayer board | IndexedDB | File backup (DSX1) and/or **opt-in** Space room when Connect is used |
 | Private notes | IndexedDB (`privateNotes`) | **Never** |
 | Bible (KJV) | Local / cached | Public domain text only |
+
+Default mode is **local-only**. Preview `pages.dev` is fine until a custom product domain. See **Your Spaces & data** in Settings and `space-relay/README.md`.
 
 ## Launcher (read-only)
 

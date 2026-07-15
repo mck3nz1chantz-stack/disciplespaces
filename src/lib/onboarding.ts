@@ -6,6 +6,7 @@ export const FIRST_SPACE_TIP_KEY = "ds-first-space-tip-seen-v1";
 /** Marked when the user opens Bible from Quick Start (or we treat as visited). */
 export const QUICKSTART_BIBLE_KEY = "ds-quickstart-bible-v1";
 export const QUICKSTART_HELP_KEY = "ds-quickstart-help-v1";
+export const QUICKSTART_INVITE_KEY = "ds-quickstart-invite-v1";
 
 export function readFlag(key: string): boolean {
   try {
@@ -30,53 +31,40 @@ export interface OnboardingSlide {
   body: string;
 }
 
+/** P2: three steps only — pilot, meet, backup/same site. */
 export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   {
     id: "welcome",
-    title: "Welcome to DiscipleSpaces",
-    body: "A calm, private place for small-group discipleship. Your notes stay on this device — no accounts, no cloud sync.",
+    title: "You’re testing with us",
+    body: "DiscipleSpaces is an early pilot — not a finished public app. Features may change. Use it for real meetings if you like, and report problems with the icon at the top.",
   },
   {
-    id: "spaces",
-    title: "Spaces & members",
-    body: "A Space is a Group (up to 5) or Family (up to 10). Add members by name, then meet over time in one shared container.",
-  },
-  {
-    id: "sessions",
-    title: "Sessions & Bible",
-    body: "One Space holds every mode — Custom, Guided, Advanced, Freeform. Switch modes anytime; sessions all live together. Open the offline KJV reader and log passages as you meet.",
-  },
-  {
-    id: "share",
-    title: "Invite & share carefully",
-    body: "Invite with Share (tappable link) or QR — not the short code alone. Add their name so your count updates. Use “Share with history” or a Space Update for past sessions. Share only with people you trust.",
+    id: "meet",
+    title: "Groups, people, meetings",
+    body: "Start a group or join with a code. Add names for headcount. When you gather, tap Start today’s meeting. Bible (KJV or WEB) is free and public domain — open chapters once Online so they save for offline. Prayer and “Just for me” notes are on each group.",
   },
   {
     id: "backup",
-    title: "Keep your data safe",
-    body: "Spaces stay on this device only. Bookmark https://disciple-spaces.pages.dev, then Settings → Back up Spaces now → download each Space’s file. Store the files somewhere safe. To restore: Settings → Import → open the file.",
+    title: "Same site · back up often",
+    body: "Always open https://disciple-spaces.pages.dev. After meetings, back up from Settings or the testing guide. Online/Offline and Sync are on each group. Private notes never leave this phone.",
   },
 ];
 
+/** Quick start: create/join → meet → invite (no “browse Help” required). */
 export const QUICKSTART_ITEMS = [
   {
     id: "space",
-    label: "Create or join a Space",
-    hint: "Tap to create your group or family home",
+    label: "Start or join a group",
+    hint: "Create one, or join with a code / QR",
   },
   {
     id: "session",
-    label: "Start a guided session",
-    hint: "Tap to open your Space and log a meeting",
+    label: "Start today’s meeting",
+    hint: "Open your group when you gather",
   },
   {
-    id: "bible",
-    label: "Open the Bible reader",
-    hint: "Tap to open KJV and log a passage",
-  },
-  {
-    id: "help",
-    label: "Browse Help anytime",
-    hint: "Tap for the full offline walkthrough",
+    id: "invite",
+    label: "Invite someone",
+    hint: "Share or show QR so they can join",
   },
 ] as const;

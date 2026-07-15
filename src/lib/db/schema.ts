@@ -14,7 +14,7 @@
 
 import type { Transaction } from "dexie";
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 export interface SchemaMigration {
   /** Dexie version number (monotonic). */
@@ -226,6 +226,34 @@ export const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       templates: "id, name",
       privateNotes: "id, spaceId, sessionId, createdAt",
       prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
+    },
+  },
+  {
+    version: 7,
+    notes:
+      "Space sync metadata (local-only default) + syncQueue for opportunistic shared-layer push; privateNotes unchanged / never queued",
+    stores: {
+      spaces: "id, name, createdAt, inviteCode, spaceTemplate, spaceKind",
+      sessions: "id, spaceId, date, templateId",
+      templates: "id, name",
+      privateNotes: "id, spaceId, sessionId, createdAt",
+      prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
+      syncQueue: "id, spaceId, status, createdAt",
+    },
+    upgrade: async (tx) => {
+      await tx
+        .table("spaces")
+        .toCollection()
+        .modify((raw: Record<string, unknown>) => {
+          const existing = raw.sync as Record<string, unknown> | undefined;
+          if (!existing || typeof existing !== "object") {
+            raw.sync = { mode: "local-only" };
+            return;
+          }
+          if (existing.mode !== "connected" && existing.mode !== "local-only") {
+            raw.sync = { ...existing, mode: "local-only" };
+          }
+        });
     },
   },
 ];

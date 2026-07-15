@@ -146,21 +146,44 @@ export function buildMemberJoinDeepLink(pack: string): string {
   return `${base}/#joinconfirm=${encodeURIComponent(pack)}`;
 }
 
-/** Friendly multi-line text for clipboard / messages. */
-export function formatInviteShareText(payload: SpaceInvitePayload): string {
+/**
+ * Friendly share text for Messages / share sheet.
+ * Prefer short code when the group is Connected (easy join).
+ * Offline path still includes a tappable link (package lives in the link).
+ */
+export function formatInviteShareText(
+  payload: SpaceInvitePayload,
+  opts?: { shortCode?: string; connected?: boolean },
+): string {
+  const short =
+    opts?.shortCode?.trim() ||
+    (opts?.connected ? payload.code : undefined);
+
+  if (short && opts?.connected) {
+    return [
+      `Join my DiscipleSpaces group: ${payload.name}`,
+      "",
+      `Code: ${short}`,
+      "",
+      "1. Open https://disciple-spaces.pages.dev",
+      "2. Tap Join a group",
+      "3. Enter this code and your name",
+      "",
+      "(Testing pilot — use that same website address.)",
+    ].join("\n");
+  }
+
   const pack = encodeInvitePackage(payload);
   const link = buildInviteDeepLink(pack);
   return [
-    `DiscipleSpaces invite: ${payload.name}`,
-    `Code: ${payload.code}`,
+    `Join my DiscipleSpaces group: ${payload.name}`,
     "",
-    "Open this link on your phone (install DiscipleSpaces if needed):",
+    "Open this link on your phone:",
     link,
     "",
-    "Or open the app → Join → paste the package below:",
-    pack,
+    "Or: open the app → Join a group → scan the QR they show you.",
     "",
-    "Tip: After you join, send the “I'm in” confirmation back so your name appears on their member list.",
+    "(Testing pilot — bookmark https://disciple-spaces.pages.dev)",
   ].join("\n");
 }
 

@@ -111,8 +111,30 @@ html:not(.dark) {
     padding-top: max(0.5rem, env(safe-area-inset-top));
   }
 
+  .safe-x {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+
   .tap-target {
     min-height: 44px;
     min-width: 44px;
+  }
+
+  /**
+   * Content above fixed bottom nav (~3.5rem tabs + safe area).
+   * Prefer this over a fixed pb-28 so home-indicator devices stay clear.
+   */
+  .pb-nav {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /**
+   * Sticky primary actions in the lower thumb zone (above bottom nav).
+   */
+  .sticky-thumb-actions {
+    position: sticky;
+    bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px));
+    z-index: 10;
   }
 }

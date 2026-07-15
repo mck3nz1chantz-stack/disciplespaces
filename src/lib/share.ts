@@ -19,7 +19,7 @@ export interface SpaceExportPayload {
     description?: string;
     createdAt: string;
     members: Space["members"];
-    preferredBibleVersion: "KJV";
+    preferredBibleVersion: "KJV" | "WEB";
     inviteCode?: string;
     spaceTemplate?: Space["spaceTemplate"];
     spaceKind?: Space["spaceKind"];
@@ -109,17 +109,17 @@ export function formatExportShareText(payload: SpaceExportPayload): string {
   const n = payload.sessions.length;
   const prayers = payload.prayerBoard?.length ?? 0;
   return [
-    `DiscipleSpaces update: ${payload.space.name}`,
-    `Sessions included: ${n}`,
-    prayers > 0 ? `Prayer board entries: ${prayers}` : null,
-    `Exported: ${payload.exportedAt.slice(0, 10)}`,
+    `DiscipleSpaces group file: ${payload.space.name}`,
+    `Meetings included: ${n}`,
+    prayers > 0 ? `Prayer notes: ${prayers}` : null,
+    `Saved: ${payload.exportedAt.slice(0, 10)}`,
     "",
-    "How to import / join with history:",
-    "1. Open DiscipleSpaces on the other device",
-    "2. Home → Join (or Settings → Import) → paste this whole message",
-    "3. Enter your name and confirm — sessions import with the Space",
+    "How to open this on another phone:",
+    "1. Open https://disciple-spaces.pages.dev",
+    "2. Tap Join a group (or Settings → Restore)",
+    "3. Paste this whole message, enter your name",
     "",
-    "Shared prayer board is included. Private notes are never included.",
+    "Shared prayer is included. Notes marked “Just for me” are never included.",
     "",
     pack,
   ]

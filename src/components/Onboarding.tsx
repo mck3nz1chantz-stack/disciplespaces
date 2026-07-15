@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen, Share2, ShieldCheck, Users, Sparkles } from "lucide-react";
+import { CalendarPlus, ShieldCheck, Sparkles } from "lucide-react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import {
@@ -8,7 +8,7 @@ import {
   writeFlag,
 } from "../lib/onboarding";
 
-const ICONS = [Sparkles, Users, BookOpen, Share2, ShieldCheck] as const;
+const ICONS = [Sparkles, CalendarPlus, ShieldCheck] as const;
 
 interface OnboardingProps {
   open: boolean;
@@ -16,7 +16,7 @@ interface OnboardingProps {
 }
 
 /**
- * Calm first-launch welcome. Skippable; marks onboarding complete on dismiss.
+ * P2: three-step first launch. Skippable.
  */
 export function Onboarding({ open, onFinished }: OnboardingProps) {
   const [step, setStep] = useState(0);
@@ -60,7 +60,7 @@ export function Onboarding({ open, onFinished }: OnboardingProps) {
         <div
           className="flex justify-center gap-1.5"
           role="tablist"
-          aria-label="Onboarding steps"
+          aria-label="Welcome steps"
         >
           {ONBOARDING_SLIDES.map((s, i) => (
             <button
@@ -83,17 +83,17 @@ export function Onboarding({ open, onFinished }: OnboardingProps) {
         {isLast ? (
           <div className="space-y-2">
             <p className="text-xs text-muted text-center">
-              Ready when you are — create a Space or join with an invite.
+              Ready when you are — start a group or join one.
             </p>
             <Button fullWidth onClick={() => finish("create")}>
-              Create your first Space
+              Start a group
             </Button>
             <Button
               variant="secondary"
               fullWidth
               onClick={() => finish("join")}
             >
-              Join a Space
+              I was invited
             </Button>
             <Button variant="ghost" fullWidth onClick={() => finish("skip")}>
               Explore on my own

@@ -16,7 +16,7 @@ export default defineConfig({
         name: "DiscipleSpaces",
         short_name: "Spaces",
         description:
-          "Private small-group discipleship. Spaces, sessions, offline KJV Bible, and manual sharing — notes stay on your device.",
+          "Free small-group discipleship. Offline public-domain Bible (KJV + WEB). Notes stay on your device.",
         theme_color: "#1e3a2f",
         background_color: "#f7f5f0",
         display: "standalone",
@@ -59,13 +59,13 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
         runtimeCaching: [
           {
-            // KJV books: cache on first read (offline after visit). Index too.
+            // Public-domain KJV + WEB books: cache on first read (offline after visit).
             urlPattern: /\/data\/bible\/.*\.json$/i,
             handler: "CacheFirst",
             options: {
-              cacheName: "kjv-bible-data",
+              cacheName: "bible-data-pd",
               expiration: {
-                maxEntries: 80,
+                maxEntries: 160,
                 maxAgeSeconds: 60 * 60 * 24 * 365,
               },
               cacheableResponse: {

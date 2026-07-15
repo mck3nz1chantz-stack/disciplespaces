@@ -75,13 +75,42 @@ export interface Session {
   actionItems?: string[];
 }
 
+/**
+ * How shared Space data relates to the optional light relay.
+ * Default is always local-only — existing installs stay offline until Connect.
+ * Private notes are never part of any sync mode.
+ */
+export type SpaceSyncMode = "local-only" | "connected";
+
+/** Per-space sync metadata (shared layer only). Stored on the Space row. */
+export interface SpaceSyncState {
+  /** local-only = this device; connected = opted into Space room relay. */
+  mode: SpaceSyncMode;
+  /** Server room id when connected. */
+  roomId?: string;
+  /** Short human join code when connected (e.g. FAITH-7K2). */
+  shortCode?: string;
+  /** ISO time of last successful pull/push. */
+  lastSyncedAt?: string;
+  /** Remote revision cursor for incremental sync. */
+  remoteRev?: number;
+  /** When true, do not auto pull/push (local edits still saved). */
+  paused?: boolean;
+  /** Last sync error message for confidence UI (cleared on success). */
+  lastError?: string;
+}
+
 export interface Space {
   id: string;
   name: string;
   description?: string;
   createdAt: string;
   members: Member[];
-  preferredBibleVersion: "KJV";
+  /**
+   * Preferred public-domain edition for this Space (KJV or WEB).
+   * No paid/licensed translations.
+   */
+  preferredBibleVersion: "KJV" | "WEB";
   /**
    * Active living-space mode (lens): Custom, Guided, Advanced, or Freeform.
    * Switch anytime inside the Space — sessions of every mode stay together.
@@ -99,11 +128,31 @@ export interface Space {
   defaultSessionTemplateId?: string;
   /**
    * Short human-readable invite code (e.g. ABCD-EFGH).
-   * Full join still requires the invite package (QR / pasted payload).
+   * Offline join still uses the full invite package (QR / paste).
+   * Connected Spaces prefer shortCode under `sync`.
    */
   inviteCode?: string;
+  /**
+   * Opt-in shared-layer sync. Missing → treat as local-only (migration fills default).
+   * Never includes private notes.
+   */
+  sync?: SpaceSyncState;
   /** Hydrated at read time from the sessions table; not duplicated in Dexie. */
   sessions: Session[];
+}
+
+/** Queued shared mutation for opportunistic push (relay). */
+export interface SyncQueueItem {
+  id: string;
+  spaceId: string;
+  /** create | update | delete style op for shared entities. */
+  op: string;
+  /** JSON-serializable shared payload only — never private notes. */
+  payload: unknown;
+  createdAt: string;
+  status: "pending" | "failed";
+  attempts?: number;
+  lastError?: string;
 }
 
 export interface TemplateStep {

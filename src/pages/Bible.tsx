@@ -27,18 +27,23 @@ import {
   type PassageDraft,
 } from "../components/LogPassageModal";
 import { BibleLogContextBanner } from "../components/BibleLogContextBanner";
-import { KJV_NOTICE } from "../lib/legal";
 import {
   formatReference,
   getBooks,
   getChapter,
   groupBooksByTestament,
   loadReadingPosition,
+  loadReadingVersion,
+  normalizeBibleVersion,
   parseReference,
   saveReadingPosition,
+  saveReadingVersion,
   searchVerses,
   splitHighlight,
+  bibleVersionMeta,
+  BIBLE_VERSIONS,
   type BibleBookMeta,
+  type BibleVersionId,
   type ChapterData,
   type SearchHit,
 } from "../lib/bible";
@@ -60,6 +65,9 @@ export function Bible() {
   const setLogContext = useBibleStore((s) => s.setLogContext);
   const clearLogContext = useBibleStore((s) => s.clearLogContext);
 
+  const [bibleVersion, setBibleVersion] = useState<BibleVersionId>(() =>
+    loadReadingVersion(),
+  );
   const [books, setBooks] = useState<BibleBookMeta[]>([]);
   const [bookId, setBookId] = useState("john");
   const [chapter, setChapter] = useState(1);
@@ -67,6 +75,8 @@ export function Bible() {
   const [loadingIndex, setLoadingIndex] = useState(true);
   const [loadingChapter, setLoadingChapter] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const versionMeta = bibleVersionMeta(bibleVersion);
 
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const [chapterPickerOpen, setChapterPickerOpen] = useState(false);
@@ -184,14 +194,14 @@ export function Bible() {
     };
   }, [clearLogContext]);
 
-  // Load index + restore position
+  // Load index + restore position (per version)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoadingIndex(true);
       setError(null);
       try {
-        const list = await getBooks();
+        const list = await getBooks(bibleVersion);
         if (cancelled) return;
         setBooks(list);
         const saved = loadReadingPosition();
@@ -221,9 +231,9 @@ export function Bible() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [bibleVersion]);
 
-  // Load chapter when book/chapter changes
+  // Load chapter when book/chapter/version changes
   useEffect(() => {
     if (!bookId || loadingIndex) return;
     let cancelled = false;
@@ -233,7 +243,7 @@ export function Bible() {
       setLoadingChapter(true);
       setError(null);
       try {
-        const data = await getChapter(bookId, chapter);
+        const data = await getChapter(bookId, chapter, bibleVersion);
         if (cancelled) return;
         setChapterData(data);
         saveReadingPosition({ bookId, chapter });
@@ -249,7 +259,14 @@ export function Bible() {
     return () => {
       cancelled = true;
     };
-  }, [bookId, chapter, loadingIndex]);
+  }, [bookId, chapter, loadingIndex, bibleVersion]);
+
+  function handleVersionChange(next: BibleVersionId) {
+    const v = normalizeBibleVersion(next);
+    setBibleVersion(v);
+    saveReadingVersion(v);
+    setSearchResults([]);
+  }
 
   // Scroll to highlighted verse
   useEffect(() => {
@@ -416,6 +433,7 @@ export function Bible() {
     setSearchError(null);
     try {
       const results = await searchVerses(q, {
+        version: bibleVersion,
         bookId: searchScope === "book" ? bookId : undefined,
         preferBookId: searchScope === "all" ? bookId : undefined,
         limit: 60,
@@ -474,7 +492,9 @@ export function Bible() {
     return (
       <div className="space-y-4">
         <Header />
-        <p className="text-sm text-muted">Loading offline KJV…</p>
+        <p className="text-sm text-muted">
+          Loading {versionMeta.shortLabel}…
+        </p>
       </div>
     );
   }
@@ -485,7 +505,7 @@ export function Bible() {
         <Header />
         <Card className="space-y-2">
           <p className="text-sm text-danger">{error}</p>
-          <p className="text-xs text-muted">{KJV_NOTICE}</p>
+          <p className="text-xs text-muted">{versionMeta.notice}</p>
         </Card>
       </div>
     );
@@ -495,16 +515,72 @@ export function Bible() {
     <div className="space-y-4" ref={readerTopRef}>
       <Header />
 
+      {/* Version picker — free public-domain only */}
+      <div
+        className="grid grid-cols-2 gap-1 rounded-xl bg-surface-muted p-1"
+        role="group"
+        aria-label="Bible translation"
+      >
+        {BIBLE_VERSIONS.map((v) => {
+          const selected = bibleVersion === v.id;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => handleVersionChange(v.id)}
+              className={[
+                "rounded-lg py-2.5 text-sm font-semibold touch-manipulation tap-target",
+                selected
+                  ? "bg-surface text-primary shadow-sm"
+                  : "text-muted",
+              ].join(" ")}
+              aria-pressed={selected}
+            >
+              {v.shortLabel}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted -mt-2 px-0.5">{versionMeta.notice}</p>
+
+      {/* Offline cache tip — books save after first open while online */}
+      <Card
+        padding="sm"
+        className={[
+          "text-xs leading-relaxed",
+          isOnline
+            ? "border-primary/15 bg-primary/5 text-muted"
+            : "border-amber-300/60 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-50",
+        ].join(" ")}
+      >
+        {isOnline ? (
+          <>
+            <span className="font-semibold text-primary">For offline use: </span>
+            Open each book or chapter you care about while you have network.
+            Those pages save on this phone for later (both KJV and WEB). The
+            whole Bible is not downloaded until you open it.
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">You’re offline. </span>
+            Only books and chapters you’ve opened before on this phone will
+            load. Switch Online and open a chapter once to save it for next
+            time.
+          </>
+        )}
+      </Card>
+
       {/* Context + offline badges */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success bg-success/10 border border-success/25 rounded-full px-2.5 py-1">
           <BookOpen className="h-3.5 w-3.5" aria-hidden />
-          Offline Bible · KJV
+          {isOnline ? "Online · saves as you read" : "Offline"} ·{" "}
+          {versionMeta.shortLabel}
         </span>
         {!isOnline && (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-900 bg-amber-100 border border-amber-200 rounded-full px-2.5 py-1">
             <WifiOff className="h-3.5 w-3.5" aria-hidden />
-            Reading offline
+            Cached chapters only
           </span>
         )}
       </div>
@@ -689,7 +765,7 @@ export function Bible() {
               <h2 className="text-xl font-serif text-primary">
                 {currentBook?.name} {chapter}
               </h2>
-              <p className="text-xs text-muted mt-1">{KJV_NOTICE}</p>
+              <p className="text-xs text-muted mt-1">{versionMeta.notice}</p>
             </header>
 
             {loadingChapter && !chapterData ? (

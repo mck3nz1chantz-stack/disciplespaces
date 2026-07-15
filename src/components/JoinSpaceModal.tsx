@@ -45,12 +45,14 @@ export function JoinSpaceModal({
   const joinFromInvite = useAppStore((s) => s.joinFromInvite);
   const joinFromExport = useAppStore((s) => s.joinFromExport);
   const applyMemberJoin = useAppStore((s) => s.applyMemberJoin);
+  const joinSpaceViaRelay = useAppStore((s) => s.joinSpaceViaRelay);
 
   const [step, setStep] = useState<Step>("input");
   const [raw, setRaw] = useState("");
   const [parsed, setParsed] = useState<ParsedPackage | null>(null);
   const [joinerName, setJoinerName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [shortCodeJoin, setShortCodeJoin] = useState(false);
   const [resultSpaceId, setResultSpaceId] = useState<string | null>(null);
   const [alreadyHad, setAlreadyHad] = useState(false);
   const [historyImported, setHistoryImported] = useState(false);
@@ -71,6 +73,7 @@ export function JoinSpaceModal({
     setParsed(null);
     setJoinerName("");
     setSaving(false);
+    setShortCodeJoin(false);
     setResultSpaceId(null);
     setAlreadyHad(false);
     setHistoryImported(false);
@@ -78,6 +81,12 @@ export function JoinSpaceModal({
     setJoiner(null);
     setConfirmPayload(null);
     setHostAddedName(null);
+  }
+
+  /** FAITH-7K2 style short codes (relay) — not a full offline package. */
+  function looksLikeShortCode(text: string): boolean {
+    const t = text.trim().toUpperCase().replace(/\s+/g, "");
+    return /^[A-Z0-9]{3,8}-?[A-Z0-9]{2,6}$/.test(t) && !/DS[MX]?1\./i.test(text);
   }
 
   useEffect(() => {
@@ -117,7 +126,7 @@ export function JoinSpaceModal({
 
     if (!Detector) {
       toast.message("Camera scan not available on this device", {
-        description: "Paste the invite package or open the invite link instead.",
+        description: "Paste the invite they sent or open their link instead.",
       });
       return;
     }
@@ -155,7 +164,7 @@ export function JoinSpaceModal({
       }, 500);
     } catch {
       stopScan();
-      toast.error("Could not open camera. Paste the invite package instead.");
+      toast.error("Could not open camera. Paste the invite message instead.");
     }
   }
 
@@ -202,11 +211,47 @@ export function JoinSpaceModal({
 
   function handleContinue(e: FormEvent) {
     e.preventDefault();
+    const text = raw.trim();
+    if (looksLikeShortCode(text) && !/DS1\.|DSX1\.|DSM1\./i.test(text)) {
+      setShortCodeJoin(true);
+      setParsed(null);
+      setStep("confirm");
+      return;
+    }
+    setShortCodeJoin(false);
     tryParse(raw);
   }
 
   async function handleJoin(e: FormEvent) {
     e.preventDefault();
+
+    if (shortCodeJoin) {
+      if (!joinerName.trim()) {
+        toast.error("Enter your name for the member list");
+        return;
+      }
+      setSaving(true);
+      try {
+        const { space, alreadyHad: had } = await joinSpaceViaRelay({
+          shortCode: raw.trim(),
+          displayName: joinerName,
+        });
+        setResultSpaceId(space.id);
+        setAlreadyHad(had);
+        setHistoryImported(true);
+        setSessionsAdded(space.sessions?.length ?? 0);
+        setJoiner(null);
+        setConfirmPayload(null);
+        setStep("done");
+        toast.success(had ? "Space updated from cloud join" : "Joined space");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not join");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     if (!parsed) return;
 
     if (parsed.kind === "member-join") {
@@ -331,29 +376,30 @@ export function JoinSpaceModal({
     onClose();
   }
 
-  const confirmTitle =
-    parsed?.kind === "member-join"
+  const confirmTitle = shortCodeJoin
+    ? "Join with code"
+    : parsed?.kind === "member-join"
       ? "Add member on this device"
       : parsed?.kind === "export"
         ? "Join with history"
         : "You are joining";
 
   return (
-    <Modal open={open} title="Join a Space" onClose={handleClose}>
+    <Modal open={open} title="Join a group" onClose={handleClose}>
       {step === "input" && (
         <form onSubmit={handleContinue} className="space-y-4">
           <p className="text-sm text-muted -mt-1">
-            Paste an invite link or package (DS1.), a history package (DSX1.),
-            or a join confirmation (DSM1.). You can also scan a QR code.
+            Enter the code your host shared, open their invite link, or scan
+            their QR. Same website they use — usually disciple-spaces.pages.dev.
           </p>
 
           <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Invite / package</span>
+            <span className="text-sm font-medium">Code or invite</span>
             <textarea
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-sm min-h-[120px] resize-y font-mono"
-              placeholder="Paste link or text starting with DS1. / DSX1. / DSM1."
+              placeholder="Join code, or paste the invite they sent"
               autoFocus
             />
           </label>
@@ -395,13 +441,23 @@ export function JoinSpaceModal({
         </form>
       )}
 
-      {step === "confirm" && parsed && (
+      {step === "confirm" && (shortCodeJoin || parsed) && (
         <form onSubmit={handleJoin} className="space-y-4">
           <div className="rounded-xl border border-border bg-bg px-3 py-3 space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">
               {confirmTitle}
             </p>
-            {parsed.kind === "member-join" ? (
+            {shortCodeJoin ? (
+              <>
+                <p className="text-lg font-semibold text-primary font-mono tracking-wide">
+                  {raw.trim().toUpperCase()}
+                </p>
+                <p className="text-sm text-muted">
+                  Easy join via short code. Shared sessions load when the Space
+                  room is available. Private notes never come with a join.
+                </p>
+              </>
+            ) : parsed?.kind === "member-join" ? (
               <>
                 <p className="text-lg font-semibold text-primary">
                   {parsed.payload.member.name}
@@ -412,7 +468,7 @@ export function JoinSpaceModal({
                 </p>
                 <p className="text-xs text-muted">Code {parsed.payload.code}</p>
               </>
-            ) : parsed.kind === "invite" ? (
+            ) : parsed?.kind === "invite" ? (
               <>
                 <p className="text-lg font-semibold text-primary">
                   {parsed.payload.name}
@@ -428,7 +484,7 @@ export function JoinSpaceModal({
                   </p>
                 )}
               </>
-            ) : (
+            ) : parsed?.kind === "export" ? (
               <>
                 <p className="text-lg font-semibold text-primary">
                   {parsed.payload.space.name}
@@ -447,12 +503,12 @@ export function JoinSpaceModal({
                   </p>
                 )}
               </>
-            )}
+            ) : null}
           </div>
 
-          {parsed.kind !== "member-join" && (
+          {(shortCodeJoin || parsed?.kind !== "member-join") && (
             <label className="block space-y-1.5">
-              <span className="text-sm font-medium">Your name on this device</span>
+              <span className="text-sm font-medium">Your name</span>
               <input
                 value={joinerName}
                 onChange={(e) => setJoinerName(e.target.value)}
@@ -466,15 +522,20 @@ export function JoinSpaceModal({
           )}
 
           <div className="rounded-xl bg-surface-muted/60 border border-border px-3 py-3 text-sm text-muted space-y-2">
-            {parsed.kind === "member-join" ? (
+            {shortCodeJoin ? (
               <p>
-                This only updates the member list on <em>this</em> phone (the
-                host). It does not re-send history.
+                You’ll join when Online and the host has Connect turned on. If
+                that fails, ask them to show the QR instead.
               </p>
-            ) : parsed.kind === "export" ? (
+            ) : parsed?.kind === "member-join" ? (
               <p>
-                This package includes shared session history. Private notes are
-                never imported.
+                This only updates the people list on <em>this</em> phone (the
+                host). It doesn’t re-send past meetings.
+              </p>
+            ) : parsed?.kind === "export" ? (
+              <p>
+                This includes past shared meetings and prayer notes. Notes
+                marked “Just for me” are never imported.
               </p>
             ) : (
               <p>{INVITE_HISTORY_NOTE}</p>
@@ -496,11 +557,13 @@ export function JoinSpaceModal({
             <Button type="submit" fullWidth disabled={saving}>
               {saving
                 ? "Working…"
-                : parsed.kind === "member-join"
-                  ? "Add to my list"
-                  : parsed.kind === "export"
-                    ? "Join & import history"
-                    : "Join space"}
+                : shortCodeJoin
+                  ? "Join with code"
+                  : parsed?.kind === "member-join"
+                    ? "Add to my list"
+                    : parsed?.kind === "export"
+                      ? "Join & import meetings"
+                      : "Join group"}
             </Button>
           </div>
         </form>

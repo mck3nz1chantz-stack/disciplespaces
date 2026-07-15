@@ -17,11 +17,13 @@ import {
   ArrowLeft,
   BookOpen,
   CalendarPlus,
+  ChevronDown,
   ChevronRight,
   HandHeart,
   Layers,
   Lock,
   Pencil,
+  Plus,
   Share2,
   Trash2,
   UserPlus,
@@ -34,6 +36,8 @@ import { Modal } from "../components/Modal";
 import { MemberEditor } from "../components/MemberEditor";
 import { InviteModal } from "../components/InviteModal";
 import { ShareUpdateModal } from "../components/ShareUpdateModal";
+import { YourDataBundle } from "../components/YourDataBundle";
+import { SpaceConnectionBar } from "../components/SpaceConnectionBar";
 import { PrayerBoard } from "../components/PrayerBoard";
 import { PrivateNotesModal } from "../components/PrivateNotesModal";
 import { SessionPrivateDrawer } from "../components/SessionPrivateDrawer";
@@ -99,6 +103,7 @@ export function SpaceDetail() {
   const updateSpace = useAppStore((s) => s.updateSpace);
   const deleteSpace = useAppStore((s) => s.deleteSpace);
   const setSpaceMembers = useAppStore((s) => s.setSpaceMembers);
+  const addMember = useAppStore((s) => s.addMember);
   const createSession = useAppStore((s) => s.createSession);
   const updateSession = useAppStore((s) => s.updateSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
@@ -155,6 +160,11 @@ export function SpaceDetail() {
     PRIVATE_SECTION.notes,
   );
   const [prayerBoardOpen, setPrayerBoardOpen] = useState(false);
+  /** Collapsed power tools: modes, file share, connect/sync */
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickName, setQuickName] = useState("");
+  const [quickAdding, setQuickAdding] = useState(false);
   const sessionScrollRef = useRef<HTMLDivElement>(null);
 
   const onLockedSectionChange = useCallback((key: string) => {
@@ -188,12 +198,22 @@ export function SpaceDetail() {
     setSessionVisible(SESSION_PAGE_SIZE);
   }, [space?.id]);
 
-  // Quick Start → open create session when routed with state
+  // Quick Start → open create session or invite when routed with state
   useEffect(() => {
-    const state = location.state as { openCreateSession?: boolean } | null;
-    if (!state?.openCreateSession || !space) return;
-    openCreateSession();
-    navigate(location.pathname, { replace: true, state: {} });
+    const state = location.state as {
+      openCreateSession?: boolean;
+      openInvite?: boolean;
+    } | null;
+    if (!space || !state) return;
+    if (state.openCreateSession) {
+      void openCreateSession();
+      navigate(location.pathname, { replace: true, state: {} });
+      return;
+    }
+    if (state.openInvite) {
+      setInviteOpen(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run when landing with flag
   }, [space?.id, location.state]);
 
@@ -259,6 +279,27 @@ export function SpaceDetail() {
     if (!space) return;
     setDraftMembers(space.members.map((m) => ({ ...m })));
     setMembersOpen(true);
+  }
+
+  async function handleQuickAdd(e?: FormEvent) {
+    e?.preventDefault();
+    if (!space || !id) return;
+    const name = quickName.trim();
+    if (!name) {
+      toast.error("Enter a name");
+      return;
+    }
+    setQuickAdding(true);
+    try {
+      await addMember(id, name);
+      setQuickName("");
+      setQuickAddOpen(false);
+      toast.success(`${name} added`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not add person");
+    } finally {
+      setQuickAdding(false);
+    }
   }
 
   /**
@@ -496,7 +537,7 @@ export function SpaceDetail() {
     setSaving(true);
     try {
       await setSpaceMembers(space.id, draftMembers);
-      toast.success("Members updated");
+      toast.success("People updated");
       setMembersOpen(false);
     } catch (err) {
       toast.error(
@@ -681,6 +722,10 @@ export function SpaceDetail() {
           ? viewTemplate?.name || "Session"
           : "";
 
+  const maxPeople = maxMembersForSpace(space.spaceKind);
+  const peopleCount = space.members.length;
+  const canAddPeople = peopleCount < maxPeople;
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
@@ -690,7 +735,7 @@ export function SpaceDetail() {
             variant="ghost"
             className="!p-2"
             onClick={openEdit}
-            aria-label="Edit space"
+            aria-label="Edit group"
           >
             <Pencil className="h-5 w-5" aria-hidden />
           </Button>
@@ -698,183 +743,176 @@ export function SpaceDetail() {
             variant="ghost"
             className="!p-2 text-danger"
             onClick={() => setDeleteOpen(true)}
-            aria-label="Delete space"
+            aria-label="Delete group"
           >
             <Trash2 className="h-5 w-5" aria-hidden />
           </Button>
         </div>
       </div>
 
+      {/* Title */}
       <div>
-        <div className="flex items-start justify-between gap-2 flex-wrap">
-          <h2 className="text-2xl">{space.name}</h2>
-          <span className="inline-flex items-center rounded-full bg-surface-muted text-muted text-xs font-semibold px-2.5 py-1">
-            {spaceKindLabel(space.spaceKind)}
-          </span>
-        </div>
+        <h2 className="text-2xl leading-tight">{space.name}</h2>
         {space.description ? (
-          <p className="text-sm text-muted mt-1">{space.description}</p>
-        ) : (
-          <p className="text-sm text-muted/70 mt-1 italic">No description yet</p>
-        )}
-        <p className="text-sm mt-2 flex items-center gap-1.5 text-muted">
-          <Users className="h-4 w-4 shrink-0" aria-hidden />
-          {space.members.length === 0
-            ? "No members yet"
-            : `${space.members.length}/${maxMembersForSpace(space.spaceKind)} · ${space.members.map((m) => m.name).join(", ")}`}
+          <p className="text-sm text-muted mt-1 line-clamp-2">
+            {space.description}
+          </p>
+        ) : null}
+        <p className="text-sm mt-2 font-medium text-primary tabular-nums">
+          {peopleCount === 0
+            ? "No one listed yet"
+            : `${peopleCount} of ${maxPeople} people`}
+          <span className="text-muted font-normal">
+            {" "}
+            · {spaceKindLabel(space.spaceKind)}
+          </span>
         </p>
       </div>
 
-      {/* Living-space mode switcher */}
-      <section className="space-y-2" aria-label="Space mode">
+      {/* Zone 1 — Who’s here (people + invite before connect chrome) */}
+      <section className="space-y-2.5" aria-label="Who is here">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
-            <Layers className="h-4 w-4" aria-hidden />
-            Mode
+            <Users className="h-4 w-4" aria-hidden />
+            Who’s here
           </h3>
           <button
             type="button"
-            onClick={openChangeTemplate}
-            className="text-xs text-primary font-medium touch-manipulation tap-target"
+            onClick={openMembers}
+            className="text-xs font-medium text-primary touch-manipulation tap-target px-2"
           >
-            About modes
+            Edit list
           </button>
         </div>
-        <p className="text-xs text-muted">
-          One living Space — switch modes to log or review Custom, Guided,
-          Advanced, or Freeform. All sessions stay here.
-        </p>
-        <div
-          className="flex gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5"
-          role="tablist"
-          aria-label="Filter sessions by mode"
-        >
-          <ModeChip
-            label="All"
-            count={spaceSessions.length}
-            selected={viewMode === "all"}
-            onClick={() => void switchMode("all")}
-          />
-          {SPACE_TEMPLATES.map((tpl) => (
-            <ModeChip
-              key={tpl.id}
-              label={tpl.shortLabel}
-              count={modeCounts[tpl.id]}
-              selected={viewMode === tpl.id}
-              onClick={() => void switchMode(tpl.id)}
-            />
+
+        <div className="flex flex-wrap gap-2">
+          {space.members.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={openMembers}
+              className="inline-flex max-w-[9.5rem] min-h-11 items-center rounded-full border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-primary touch-manipulation active:scale-[0.98]"
+              title={m.name}
+            >
+              <span className="truncate">{m.name}</span>
+            </button>
           ))}
-        </div>
-        {viewMode !== "all" && (
-          <p className="text-[11px] text-muted">
-            Viewing{" "}
-            <strong className="text-text">
-              {getSpaceTemplateMeta(viewMode).name}
-            </strong>
-            : {getSpaceTemplateMeta(viewMode).description}
-          </p>
-        )}
-      </section>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Card padding="sm" className="text-center">
-          <p className="text-2xl font-semibold text-primary tabular-nums">
-            {viewMode === "all"
-              ? spaceSessions.length
-              : filteredSessions.length}
-          </p>
-          <p className="text-xs text-muted mt-0.5">
-            {viewMode === "all"
-              ? `Session${spaceSessions.length === 1 ? "" : "s"} total`
-              : `In ${getSpaceTemplateMeta(viewMode).shortLabel}`}
-          </p>
-        </Card>
-        <Card padding="sm" className="text-center">
-          <p className="text-2xl font-semibold text-primary tabular-nums">
-            {passageCount}
-          </p>
-          <p className="text-xs text-muted mt-0.5">
-            Passage{passageCount === 1 ? "" : "s"}
-            {viewMode === "all" ? " logged" : " in mode"}
-          </p>
-        </Card>
-      </div>
-
-      <div className="space-y-2">
-        <Button fullWidth onClick={openCreateSession}>
-          <CalendarPlus className="h-5 w-5" aria-hidden />
-          {viewMode === "all"
-            ? "Start New Session"
-            : `Start ${getSpaceTemplateMeta(viewMode).firstSessionLabel}`}
-        </Button>
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="secondary" fullWidth onClick={openMembers}>
-            <Users className="h-4 w-4" aria-hidden />
-            Manage Members
-          </Button>
-          <Button
-            variant="secondary"
-            fullWidth
+          {canAddPeople && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuickAddOpen((v) => !v);
+                setQuickName("");
+              }}
+              className="inline-flex min-h-11 items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-3.5 py-2.5 text-sm font-medium text-primary touch-manipulation"
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              Add
+            </button>
+          )}
+          <button
+            type="button"
             onClick={() => setInviteOpen(true)}
+            className="inline-flex min-h-11 items-center gap-1 rounded-full border border-primary/30 bg-primary text-white px-3.5 py-2.5 text-sm font-medium touch-manipulation active:scale-[0.98]"
           >
             <UserPlus className="h-4 w-4" aria-hidden />
             Invite
-          </Button>
+          </button>
         </div>
-        <Button
-          variant="secondary"
-          fullWidth
-          onClick={() => setShareOpen(true)}
-        >
-          <Share2 className="h-4 w-4" aria-hidden />
-          Share Space Update
-        </Button>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="secondary"
-            fullWidth
-            onClick={() => setPrayerBoardOpen(true)}
+
+        {quickAddOpen && canAddPeople && (
+          <form
+            onSubmit={(e) => void handleQuickAdd(e)}
+            className="flex gap-2"
           >
-            <HandHeart className="h-4 w-4" aria-hidden />
-            Prayer board
-            {typeof prayerBoardCount === "number" && prayerBoardCount > 0 ? (
-              <span className="text-xs text-muted tabular-nums">
-                ({prayerBoardCount})
-              </span>
-            ) : null}
-          </Button>
-          <Button
-            variant="secondary"
-            fullWidth
-            onClick={openSpacePrivateNotes}
-          >
-            <Lock className="h-4 w-4" aria-hidden />
-            Private notes
-          </Button>
-        </div>
-        <Button
-          variant="ghost"
-          fullWidth
-          onClick={() => openBibleForSpace()}
-        >
-          <BookOpen className="h-4 w-4" aria-hidden />
-          Open Bible (KJV)
-        </Button>
-        <p className="text-[11px] text-muted text-center">
-          Prayer board is shared (exports with updates). Private notes stay on
-          this device only.
+            <input
+              value={quickName}
+              onChange={(e) => setQuickName(e.target.value)}
+              className="min-w-0 flex-1 rounded-xl border border-border bg-bg px-3 py-3 text-base"
+              placeholder="Name"
+              maxLength={60}
+              autoFocus
+              disabled={quickAdding}
+              enterKeyHint="done"
+              autoComplete="name"
+            />
+            <Button
+              type="submit"
+              className="shrink-0"
+              disabled={quickAdding || !quickName.trim()}
+            >
+              {quickAdding ? "…" : "Save"}
+            </Button>
+          </form>
+        )}
+
+        <p className="text-xs text-muted">
+          Tap a name to edit. Invite so they can open this group on their phone.
         </p>
+      </section>
+
+      {/* Zone 2 — Primary worship CTA (sticky in lower thumb zone) */}
+      <div className="sticky-thumb-actions -mx-1 px-1 py-1">
+        <Button
+          fullWidth
+          className="!py-4 text-base shadow-md border border-primary/20"
+          onClick={() => void openCreateSession()}
+          disabled={saving}
+        >
+          <CalendarPlus className="h-5 w-5" aria-hidden />
+          {saving ? "Starting…" : "Start today’s meeting"}
+        </Button>
       </div>
 
+      {/* Connection / sync — after meet CTA so worship stays closer to thumbs */}
+      <SpaceConnectionBar space={space} />
+
+      {/* Zone 3 — While you meet (large tiles for thumb) */}
+      <section className="space-y-2" aria-label="While you meet">
+        <h3 className="text-sm font-semibold text-primary">While you meet</h3>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => openBibleForSpace()}
+            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
+          >
+            <BookOpen className="h-6 w-6 text-primary" aria-hidden />
+            <span className="text-xs font-medium text-primary leading-tight">
+              Bible
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPrayerBoardOpen(true)}
+            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
+          >
+            <HandHeart className="h-6 w-6 text-primary" aria-hidden />
+            <span className="text-xs font-medium text-primary leading-tight">
+              Prayer
+              {typeof prayerBoardCount === "number" && prayerBoardCount > 0
+                ? ` (${prayerBoardCount})`
+                : ""}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={openSpacePrivateNotes}
+            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
+          >
+            <Lock className="h-6 w-6 text-primary" aria-hidden />
+            <span className="text-xs font-medium text-primary leading-tight">
+              Just for me
+            </span>
+          </button>
+        </div>
+      </section>
+
+      {/* Zone 4 — Past meetings (timeline) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-lg">
-            {viewMode === "all"
-              ? "Sessions"
-              : `${getSpaceTemplateMeta(viewMode).name} sessions`}
-          </h3>
+          <h3 className="text-lg">Past meetings</h3>
           {filteredSessions.length > 0 && (
-            <span className="text-xs text-muted">Newest first · tap to open</span>
+            <span className="text-xs text-muted">Newest first</span>
           )}
         </div>
 
@@ -882,40 +920,24 @@ export function SpaceDetail() {
           <Card className="text-center py-8 space-y-3">
             <BookOpen className="h-9 w-9 mx-auto text-muted" aria-hidden />
             <div className="space-y-1">
-              <p className="font-medium text-primary">No sessions yet</p>
+              <p className="font-medium text-primary">No meetings yet</p>
               <p className="text-sm text-muted max-w-xs mx-auto">
-                Start a session in the current mode. Switch modes anytime — Freeform,
-                Guided, Advanced, and Custom all live in this Space.
+                Tap <strong className="text-text">Start today’s meeting</strong>{" "}
+                when you gather.
               </p>
             </div>
-            <Button onClick={openCreateSession}>
-              <CalendarPlus className="h-5 w-5" aria-hidden />
-              Start first session
-            </Button>
           </Card>
         ) : filteredSessions.length === 0 ? (
           <Card className="text-center py-8 space-y-3">
             <Layers className="h-9 w-9 mx-auto text-muted" aria-hidden />
             <div className="space-y-1">
-              <p className="font-medium text-primary">
-                No {getSpaceTemplateMeta(viewMode === "all" ? "custom" : viewMode).name}{" "}
-                sessions yet
-              </p>
+              <p className="font-medium text-primary">Nothing in this filter</p>
               <p className="text-sm text-muted max-w-xs mx-auto">
-                Log a session in this mode, or switch to{" "}
-                <button
-                  type="button"
-                  className="text-primary font-medium underline-offset-2 hover:underline"
-                  onClick={() => void switchMode("all")}
-                >
-                  All
-                </button>{" "}
-                to see the full Space history.
+                Clear the filter under More, or start a new meeting.
               </p>
             </div>
-            <Button onClick={openCreateSession}>
-              <CalendarPlus className="h-5 w-5" aria-hidden />
-              Start {getSpaceTemplateMeta(viewMode === "all" ? "custom" : viewMode).firstSessionLabel}
+            <Button variant="secondary" onClick={() => void switchMode("all")}>
+              Show all meetings
             </Button>
           </Card>
         ) : (
@@ -938,7 +960,7 @@ export function SpaceDetail() {
                   setSessionVisible((n) => n + SESSION_PAGE_SIZE)
                 }
               >
-                Load more sessions
+                Load more
                 <span className="text-xs text-muted font-normal">
                   ({filteredSessions.length - sessionVisible} left)
                 </span>
@@ -947,6 +969,95 @@ export function SpaceDetail() {
           </>
         )}
       </div>
+
+      {/* Zone 5 — More (collapsed) */}
+      <section className="border-t border-border pt-3 space-y-3">
+        <button
+          type="button"
+          onClick={() => setMoreOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 rounded-xl px-1 py-2 text-left touch-manipulation tap-target"
+          aria-expanded={moreOpen}
+        >
+          <span className="text-sm font-semibold text-muted">
+            More · meeting style, save, invite tools
+          </span>
+          <ChevronDown
+            className={[
+              "h-5 w-5 shrink-0 text-muted transition-transform",
+              moreOpen ? "rotate-180" : "",
+            ].join(" ")}
+            aria-hidden
+          />
+        </button>
+
+        {moreOpen && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                  <Layers className="h-4 w-4" aria-hidden />
+                  Meeting style filter
+                </h4>
+                <button
+                  type="button"
+                  onClick={openChangeTemplate}
+                  className="text-xs text-primary font-medium touch-manipulation"
+                >
+                  About styles
+                </button>
+              </div>
+              <p className="text-xs text-muted">
+                Optional: filter past meetings. New meetings use your group’s
+                default style.
+              </p>
+              <div
+                className="flex gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5"
+                role="tablist"
+                aria-label="Filter meetings by style"
+              >
+                <ModeChip
+                  label="All"
+                  count={spaceSessions.length}
+                  selected={viewMode === "all"}
+                  onClick={() => void switchMode("all")}
+                />
+                {SPACE_TEMPLATES.map((tpl) => (
+                  <ModeChip
+                    key={tpl.id}
+                    label={tpl.shortLabel}
+                    count={modeCounts[tpl.id]}
+                    selected={viewMode === tpl.id}
+                    onClick={() => void switchMode(tpl.id)}
+                  />
+                ))}
+              </div>
+              <p className="text-xs text-muted tabular-nums">
+                {spaceSessions.length} meeting
+                {spaceSessions.length === 1 ? "" : "s"}
+                {passageCount > 0
+                  ? ` · ${passageCount} passage${passageCount === 1 ? "" : "s"} logged`
+                  : ""}
+              </p>
+            </div>
+
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => setShareOpen(true)}
+            >
+              <Share2 className="h-4 w-4" aria-hidden />
+              Save or send a group file
+            </Button>
+
+            <YourDataBundle
+              focusSpaceId={space.id}
+              spaceCount={1}
+              onBackup={() => setShareOpen(true)}
+              onImport={() => setShareOpen(true)}
+            />
+          </div>
+        )}
+      </section>
 
       {/* Edit space */}
       <Modal
@@ -1142,21 +1253,16 @@ export function SpaceDetail() {
         </div>
       </Modal>
 
-      {/* Members */}
+      {/* Who’s here — full list editor */}
       <Modal
         open={membersOpen}
-        title="Manage members"
+        title="Who’s here"
         onClose={() => !saving && setMembersOpen(false)}
       >
         <form onSubmit={handleSaveMembers} className="space-y-4">
           <p className="text-sm text-muted -mt-1">
-            Add or rename people in this{" "}
-            {spaceKindLabel(space.spaceKind).toLowerCase()} space. Max{" "}
-            {maxMembersForSpace(space.spaceKind)}
-            {normalizeSpaceKind(space.spaceKind) === "family"
-              ? " for households"
-              : " — keep it small and personal"}
-            .
+            Add or rename people. Max {maxMembersForSpace(space.spaceKind)} for
+            this {spaceKindLabel(space.spaceKind).toLowerCase()}.
           </p>
           <MemberEditor
             members={draftMembers}
@@ -1177,7 +1283,7 @@ export function SpaceDetail() {
               Cancel
             </Button>
             <Button type="submit" fullWidth disabled={saving}>
-              {saving ? "Saving…" : "Save members"}
+              {saving ? "Saving…" : "Save people"}
             </Button>
           </div>
         </form>

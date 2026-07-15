@@ -3,6 +3,8 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { BookOpen, CircleHelp, Home, Settings } from "lucide-react";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { OfflineBanner } from "./OfflineBanner";
+import { TestingPhaseRibbon } from "./TestingPhaseNotice";
+import { FeedbackLauncher } from "./FeedbackLauncher";
 import { LegalDisclaimerModal } from "./LegalDisclaimer";
 import { Onboarding } from "./Onboarding";
 import { ThemeCycleButton } from "./ThemeToggle";
@@ -12,12 +14,14 @@ import {
   ONBOARDING_DONE_KEY,
   readFlag,
 } from "../lib/onboarding";
+import { useForegroundSpaceSync } from "../hooks/useForegroundSpaceSync";
+import { TESTING_PHASE_BADGE } from "../lib/legal";
 
 const PENDING_ACTION_KEY = "ds-pending-home-action";
 const PENDING_JOIN_RAW_KEY = "ds-pending-join-raw";
 
 const tabs = [
-  { to: "/", label: "Spaces", icon: Home, end: true },
+  { to: "/", label: "Groups", icon: Home, end: true },
   { to: "/bible", label: "Bible", icon: BookOpen, end: false },
   { to: "/settings", label: "Settings", icon: Settings, end: false },
 ] as const;
@@ -26,6 +30,9 @@ export function Layout() {
   const navigate = useNavigate();
   const hasAcknowledgedLegal = useAppStore((s) => s.hasAcknowledgedLegal);
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // Soft catch-up for connected Spaces only (no-op if relay URL unset)
+  useForegroundSpaceSync();
 
   useEffect(() => {
     if (!hasAcknowledgedLegal) {
@@ -65,15 +72,20 @@ export function Layout() {
   return (
     <div className="min-h-dvh flex flex-col bg-bg text-text">
       <header className="safe-top sticky top-0 z-20 border-b border-border bg-bg/95 backdrop-blur-sm">
-        <div className="mx-auto max-w-lg px-4 py-3 flex items-center justify-between gap-3">
+        <div className="mx-auto max-w-lg safe-x py-2.5 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted flex items-center gap-1.5 flex-wrap">
               ChantzMedia
+              <span className="inline-flex items-center rounded-full bg-amber-200 text-amber-950 dark:bg-amber-800 dark:text-amber-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide normal-case">
+                {TESTING_PHASE_BADGE}
+              </span>
             </p>
             <h1 className="text-lg leading-tight">DiscipleSpaces</h1>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Header is weak thumb zone — keep controls compact, ≥44px hits */}
+          <div className="flex items-center gap-0.5 shrink-0 -mr-1">
             <OfflineIndicator />
+            <FeedbackLauncher />
             <ThemeCycleButton />
             <Link
               to="/help"
@@ -87,14 +99,15 @@ export function Layout() {
         </div>
       </header>
 
+      <TestingPhaseRibbon />
       <OfflineBanner />
 
-      <main className="flex-1 mx-auto w-full max-w-lg px-4 py-4 pb-28">
+      <main className="flex-1 mx-auto w-full max-w-lg safe-x py-4 pb-nav">
         <Outlet />
       </main>
 
       <nav
-        className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/95 backdrop-blur-sm safe-bottom"
+        className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/95 backdrop-blur-sm safe-bottom safe-x"
         aria-label="Main"
       >
         <ul className="mx-auto max-w-lg grid grid-cols-3">
@@ -105,13 +118,13 @@ export function Layout() {
                 end={end}
                 className={({ isActive }) =>
                   [
-                    "flex flex-col items-center justify-center gap-0.5 py-2.5 px-2",
+                    "flex flex-col items-center justify-center gap-0.5 py-3 px-2",
                     "text-xs font-medium touch-manipulation tap-target",
                     isActive ? "text-primary" : "text-muted",
                   ].join(" ")
                 }
               >
-                <Icon className="h-5 w-5" aria-hidden />
+                <Icon className="h-6 w-6" aria-hidden />
                 <span>{label}</span>
               </NavLink>
             </li>

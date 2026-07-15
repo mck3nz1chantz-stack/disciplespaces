@@ -1,7 +1,7 @@
 {
   "name": "disciple-spaces",
   "private": true,
-  "version": "0.9.2",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,10 @@
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces",
-    "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces"
+    "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces",
+    "relay:dev": "npm --prefix space-relay run dev",
+    "relay:deploy": "npm --prefix space-relay run deploy",
+    "bible:fetch-web": "node scripts/fetch-web-bible.mjs"
   },
   "dependencies": {
     "date-fns": "^4.1.0",

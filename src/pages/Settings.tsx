@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CircleHelp, Download, Moon, Upload, UserPlus } from "lucide-react";
+import { CircleHelp, MessageSquareWarning, Moon, UserPlus } from "lucide-react";
 import { useAppStore } from "../stores/useAppStore";
 import { LegalDisclaimerText } from "../components/LegalDisclaimer";
 import { Card } from "../components/Card";
@@ -10,9 +10,18 @@ import { InviteModal } from "../components/InviteModal";
 import { ShareUpdateModal } from "../components/ShareUpdateModal";
 import { InstallAppCard } from "../components/InstallAppCard";
 import { StorageUsageCard } from "../components/StorageUsageCard";
-import { DataBackupCard } from "../components/DataBackupCard";
+import { YourDataBundle } from "../components/YourDataBundle";
+import { TestingGuideCard } from "../components/TestingPhaseNotice";
+import { FeedbackModal } from "../components/FeedbackModal";
 import { ThemePreferencePicker } from "../components/ThemeToggle";
-import { INVITE_PRIVACY_NOTE, PRIVACY_SUMMARY } from "../lib/legal";
+import {
+  APP_MISSION,
+  BIBLE_EDITIONS_NOTICE,
+  BIBLE_OFFLINE_TIP,
+  INVITE_PRIVACY_NOTE,
+  PRIVACY_SUMMARY,
+} from "../lib/legal";
+import { isSpaceRelayConfigured } from "../lib/sync";
 
 export function Settings() {
   const offlineReady = useAppStore((s) => s.offlineReady);
@@ -25,6 +34,7 @@ export function Settings() {
   const [shareMode, setShareMode] = useState<"export" | "import">("export");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteSpaceId, setInviteSpaceId] = useState<string | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     void initialize();
@@ -55,7 +65,7 @@ export function Settings() {
           <div className="min-w-0 flex-1">
             <p className="font-medium text-primary">Help & tutorial</p>
             <p className="text-sm text-muted mt-0.5">
-              Modes, prayer board, private notes, Bible, backup — full walkthrough
+              Modes, prayer, private notes, Bible, your data — full walkthrough
             </p>
           </div>
         </Card>
@@ -78,7 +88,32 @@ export function Settings() {
 
       <InstallAppCard />
 
-      <DataBackupCard
+      <TestingGuideCard
+        variant="full"
+        onBackup={() => openShare("export")}
+      />
+
+      <Card className="space-y-3 border-amber-300/50">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-950 dark:bg-amber-900 dark:text-amber-50">
+            <MessageSquareWarning className="h-6 w-6" aria-hidden />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-primary">
+              Report a problem
+            </h3>
+            <p className="text-sm text-muted mt-0.5">
+              Send a bug or “this confuses me” note to the builders. Optional
+              device info helps us fix faster — private notes are never included.
+            </p>
+          </div>
+        </div>
+        <Button fullWidth onClick={() => setFeedbackOpen(true)}>
+          Open report form
+        </Button>
+      </Card>
+
+      <YourDataBundle
         spaceCount={spaces.length}
         onBackup={() => openShare("export")}
         onImport={() => openShare("import")}
@@ -88,46 +123,24 @@ export function Settings() {
 
       <Card className="space-y-3">
         <h3 className="text-base font-semibold text-primary">
-          Sharing & invites
+          Join & invite
         </h3>
         <p className="text-sm text-muted">
-          Fully local. Invite packages join a space without past sessions.
-          Space Updates transfer session history manually — also your backup
-          format.
+          Join with a code or QR. Hosts invite from a group. Back up and Connect
+          live in{" "}
+          <span className="font-medium text-primary">Your Spaces &amp; data</span>{" "}
+          above.
         </p>
         <div className="flex flex-col gap-2">
           <Button variant="secondary" fullWidth onClick={() => setJoinOpen(true)}>
             <UserPlus className="h-5 w-5" aria-hidden />
-            Join a Space
+            Join a group
           </Button>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="secondary"
-              fullWidth
-              onClick={() => openShare("export")}
-              disabled={spaces.length === 0}
-            >
-              <Download className="h-4 w-4" aria-hidden />
-              Export
-            </Button>
-            <Button
-              variant="secondary"
-              fullWidth
-              onClick={() => openShare("import")}
-            >
-              <Upload className="h-4 w-4" aria-hidden />
-              Import
-            </Button>
-          </div>
-          <p className="text-xs text-muted text-center">
-            Import restores a DSX1. backup file from another device or earlier
-            export.
-          </p>
         </div>
         {spaces.length > 0 && (
           <div className="space-y-2 pt-1 border-t border-border">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-              Invite to a space
+              Invite someone (opens group invite)
             </p>
             <ul className="space-y-1.5">
               {spaces.map((s) => (
@@ -155,38 +168,46 @@ export function Settings() {
           <dt className="text-muted">Templates</dt>
           <dd className="text-right font-medium">{templates.length}</dd>
           <dt className="text-muted">Bible text</dt>
-          <dd className="text-right font-medium">KJV (offline)</dd>
+          <dd className="text-right font-medium">KJV + WEB (free)</dd>
           <dt className="text-muted">Offline shell</dt>
           <dd className="text-right font-medium">
             {offlineReady ? "Ready" : "Pending install"}
           </dd>
           <dt className="text-muted">Storage</dt>
           <dd className="text-right font-medium">IndexedDB (local)</dd>
+          <dt className="text-muted">Easy join service</dt>
+          <dd className="text-right font-medium">
+            {isSpaceRelayConfigured() ? "Configured" : "Not on this build"}
+          </dd>
         </dl>
       </Card>
 
       <Card className="space-y-2">
         <h3 className="text-base font-semibold text-primary">Data boundaries</h3>
         <ul className="text-sm text-muted space-y-1.5 list-disc pl-5">
-          <li>Personal notes never leave this device.</li>
-          <li>No server accounts or cloud sync — Cloudflare only hosts the app files.</li>
-          <li>Invites share space metadata only — not past sessions.</li>
+          <li>Private notes never leave this device.</li>
           <li>
-            Space Updates (DSX1. files) are your backup and how you move data
-            between devices or recover after a wipe.
+            By default Spaces are local-only. Connect (when available) shares
+            only group-facing data for easy join and sync.
           </li>
           <li>
-            Prefer one stable URL (production). Random preview links are separate
-            storage buckets.
+            File backups (DSX1.) are still the best safety net for a new phone
+            or wiped browser.
           </li>
-          <li>Bible text is public domain KJV.</li>
+          <li>
+            Prefer one stable URL. Preview links are separate storage buckets —
+            fine until full product domain.
+          </li>
+          <li>{BIBLE_EDITIONS_NOTICE}</li>
+          <li>{BIBLE_OFFLINE_TIP}</li>
+          <li>{APP_MISSION}</li>
         </ul>
       </Card>
 
       <LegalDisclaimerText />
 
       <p className="text-xs text-muted text-center pb-2">
-        DiscipleSpaces · v0.9.2 · ChantzMedia
+        DiscipleSpaces · v0.10.0 · ChantzMedia
       </p>
 
       <JoinSpaceModal open={joinOpen} onClose={() => setJoinOpen(false)} />
@@ -202,6 +223,10 @@ export function Settings() {
           setInviteOpen(false);
           setInviteSpaceId(null);
         }}
+      />
+      <FeedbackModal
+        open={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
       />
     </div>
   );
