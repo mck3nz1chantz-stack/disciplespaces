@@ -234,7 +234,7 @@ export function Dashboard() {
                 to={`/space/${space.id}`}
                 className="block touch-manipulation"
               >
-                <Card className="hover:border-primary/30 transition-colors active:scale-[0.99]">
+                <Card className="cursor-pointer transition-all duration-150 hover:border-primary/40 hover:shadow-md hover:-translate-y-px active:scale-[0.99] active:translate-y-0">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <h3 className="text-lg font-semibold truncate text-primary">

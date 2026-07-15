@@ -100,6 +100,15 @@ html:not(.dark) {
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* Pointer devices: clearer clickable affordance on primary-like controls */
+  @media (hover: hover) and (pointer: fine) {
+    button:not(:disabled),
+    [role="button"]:not([aria-disabled="true"]),
+    a {
+      cursor: pointer;
+    }
+  }
 }
 
 @layer utilities {

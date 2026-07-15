@@ -119,8 +119,11 @@ export function Layout() {
                 className={({ isActive }) =>
                   [
                     "flex flex-col items-center justify-center gap-0.5 py-3 px-2",
-                    "text-xs font-medium touch-manipulation tap-target",
-                    isActive ? "text-primary" : "text-muted",
+                    "text-xs font-medium touch-manipulation tap-target cursor-pointer",
+                    "transition-colors duration-150 rounded-lg",
+                    isActive
+                      ? "text-primary"
+                      : "text-muted hover:text-primary hover:bg-surface-muted/80",
                   ].join(" ")
                 }
               >
