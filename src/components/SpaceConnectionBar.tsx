@@ -10,9 +10,15 @@ import {
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { toast } from "sonner";
 import { Button } from "./Button";
+import {
+  ConnectSafelyHelpButton,
+  ConnectSafelyModal,
+} from "./ConnectSafelyGuide";
 import { useAppStore } from "../stores/useAppStore";
 import { useOnlineMode } from "../hooks/useOnlineMode";
 import {
+  canConnectSpaceToRelay,
+  isSpaceGuest,
   isSpaceRelayConfigured,
   normalizeSpaceSync,
 } from "../lib/sync";
@@ -43,10 +49,15 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const { mode, networkOnline, canSync, setOnlineMode } = useOnlineMode();
   const [busy, setBusy] = useState(false);
   const [justSynced, setJustSynced] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  /** Connect confirm uses the same guide modal with a primary action. */
+  const [connectConfirmOpen, setConnectConfirmOpen] = useState(false);
 
   const relayReady = isSpaceRelayConfigured();
   const sync = normalizeSpaceSync(space.sync);
   const connected = sync.mode === "connected" && Boolean(sync.roomId);
+  const guest = isSpaceGuest(sync);
+  const mayConnect = canConnectSpaceToRelay(sync);
   const paused = sync.paused === true;
   const ago = lastSyncedLabel(sync.lastSyncedAt);
 
@@ -71,7 +82,8 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       setJustSynced(true);
       window.setTimeout(() => setJustSynced(false), 4000);
       toast.success("Group updated", {
-        description: "Shared meetings and people are up to date. Private notes stay on this phone.",
+        description:
+          "Shared meetings and people are up to date. Private notes stay on this phone.",
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sync failed");
@@ -80,11 +92,20 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
     }
   }
 
-  async function handleConnect() {
+  function openConnectFlow() {
     if (!relayReady) {
       toast.message("Easy join not on this build", {
         description: "Use Invite (QR) or save a group file for now.",
       });
+      return;
+    }
+    if (!mayConnect) {
+      toast.message("Only the host can Connect", {
+        description:
+          "Ask them to Connect and share the join code. On this phone use Join a group — your other Spaces stay as they are.",
+        duration: 6000,
+      });
+      setGuideOpen(true);
       return;
     }
     if (!canSync) {
@@ -93,18 +114,20 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       });
       return;
     }
-    if (
-      !window.confirm(
-        `Connect “${space.name}” for easy invite?\n\nShared meetings and people can update when Online.\nPrivate notes never leave this phone.`,
-      )
-    ) {
-      return;
-    }
+    setConnectConfirmOpen(true);
+  }
+
+  async function confirmConnect() {
     setBusy(true);
     try {
       await connectSpaceToRelay(space.id);
       setJustSynced(true);
-      toast.success("Connected — share the short code to invite");
+      setConnectConfirmOpen(false);
+      toast.success("Connected — share the join code", {
+        description:
+          "Open Invite and send the code. Friends Join — they should not Connect.",
+        duration: 5500,
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not connect");
     } finally {
@@ -129,7 +152,10 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
     if (!networkOnline) return "No network — working on this phone";
     if (mode === "offline") return "Offline mode — sync paused";
     if (!relayReady) return "Local group · Invite with QR";
-    if (!connected) return "Not connected · optional easy invite";
+    if (guest && !connected) {
+      return "Joined copy · host Connects, you use their join code";
+    }
+    if (!connected) return "Not connected · host can Connect for easy invite";
     if (paused) return "Sync paused for this group";
     if (sync.lastError) return sync.lastError;
     if (ago) return `Synced ${ago}`;
@@ -233,13 +259,23 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
             )}
             {busy ? "Syncing…" : justSynced ? "Synced" : "Sync now"}
           </Button>
+        ) : guest ? (
+          <Button
+            fullWidth
+            variant="secondary"
+            className="!py-3.5"
+            onClick={() => setGuideOpen(true)}
+          >
+            <Cloud className="h-4 w-4" aria-hidden />
+            Waiting on host to Connect
+          </Button>
         ) : (
           <Button
             fullWidth
             variant="secondary"
             className="!py-3.5"
             disabled={busy || !relayReady}
-            onClick={() => void handleConnect()}
+            onClick={openConnectFlow}
           >
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -251,12 +287,46 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         )}
       </div>
 
+      {guest && !connected && (
+        <p className="text-[11px] text-muted leading-relaxed text-center">
+          You joined this group on this phone. Only the host can Connect. When
+          they share a join code, use{" "}
+          <strong className="text-text">Join a group</strong> — your other
+          Spaces are not changed.
+        </p>
+      )}
+
+      <div className="flex justify-center">
+        <ConnectSafelyHelpButton onClick={() => setGuideOpen(true)}>
+          {connected ? "How sharing & Sync work" : "How to connect safely"}
+        </ConnectSafelyHelpButton>
+      </div>
+
       {!networkOnline && (
         <p className="text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
           <CloudOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
           No Wi‑Fi or cell data — meetings and notes still work here.
         </p>
       )}
+
+      {/* Read-only guide */}
+      <ConnectSafelyModal
+        open={guideOpen}
+        onClose={() => setGuideOpen(false)}
+        audience="both"
+        title={connected ? "Sharing & Sync" : "Connect safely"}
+      />
+
+      {/* Connect consent = same steps + primary action (replaces window.confirm) */}
+      <ConnectSafelyModal
+        open={connectConfirmOpen}
+        onClose={() => !busy && setConnectConfirmOpen(false)}
+        audience="host"
+        title={`Connect “${space.name}”?`}
+        primaryLabel="Connect this group"
+        onPrimary={confirmConnect}
+        primaryBusy={busy}
+      />
     </section>
   );
 }

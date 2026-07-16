@@ -4,7 +4,12 @@ export {
   isSpaceRelayConfigured,
   SPACE_RELAY_UI_ENABLED,
 } from "./config";
-export { defaultSpaceSync, normalizeSpaceSync } from "./defaults";
+export {
+  defaultSpaceSync,
+  normalizeSpaceSync,
+  canConnectSpaceToRelay,
+  isSpaceGuest,
+} from "./defaults";
 export { getDeviceId, getDeviceSecret } from "./deviceIdentity";
 export {
   assertNoPrivateNotes,
@@ -14,11 +19,14 @@ export {
 export {
   createRoom,
   joinRoom,
+  previewRoom,
   pullRoom,
   pushRoom,
   deleteRoom,
+  normalizeShortCode,
   SpaceRelayNotConfiguredError,
   type CreateRoomResult,
   type JoinRoomResult,
+  type PreviewRoomResult,
   type PullResult,
 } from "./client";

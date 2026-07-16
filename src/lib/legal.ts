@@ -85,6 +85,8 @@ export const RELAY_COMING_NOTE =
 
 export const RELAY_CONNECT_CONSENT = `Connect “{name}” for easy invite?
 
+Only the host should Connect (you created this group on this phone).
+Friends Join with your code — they cannot Connect.
 Shared sessions, members, and prayer board can sync when online.
 Private notes never leave this device.
 You can Unlink anytime — data stays on this phone.

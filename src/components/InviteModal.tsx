@@ -28,6 +28,7 @@ import {
   INVITE_SIMPLE_HINT,
 } from "../lib/legal";
 import { normalizeSpaceSync } from "../lib/sync";
+import { ConnectSafelyDisclosure } from "./ConnectSafelyGuide";
 
 interface InviteModalProps {
   open: boolean;
@@ -310,11 +311,13 @@ export function InviteModal({ open, spaceId, onClose }: InviteModalProps) {
                 </p>
                 {connected ? (
                   <p className="text-xs text-muted">
-                    They can type this under Join a group (when Online).
+                    They Join a group → type this code + their name. They
+                    should not tap Connect.
                   </p>
                 ) : (
                   <p className="text-xs text-muted">
                     Prefer Share or QR — this code alone isn’t enough offline.
+                    Connect first if you want a simple join code.
                   </p>
                 )}
                 <Button
@@ -331,6 +334,11 @@ export function InviteModal({ open, spaceId, onClose }: InviteModalProps) {
                 </Button>
               </div>
             )}
+
+            <ConnectSafelyDisclosure
+              audience={connected ? "both" : "host"}
+              label="How to connect safely"
+            />
 
             <p className="text-[11px] text-muted text-center leading-relaxed">
               {INVITE_PRIVACY_NOTE}

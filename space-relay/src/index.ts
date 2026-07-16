@@ -49,6 +49,14 @@ interface RoomState {
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+/**
+ * Canonical short-code key for Durable Object idFromName.
+ * Strips hyphens/spaces so "ABCD-EF", "ABCDEF", and "ABCD EF" all resolve.
+ */
+function normalizeShortCode(code: string): string {
+  return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function corsHeaders(req: Request): HeadersInit {
   const origin = req.headers.get("Origin") || "*";
   return {
@@ -98,11 +106,41 @@ function makeShortCode(): string {
   return `${raw.slice(0, 4)}-${raw.slice(4)}`;
 }
 
-/** Global short-code → roomId via idFromName on a well-known code DO? 
- *  Simpler MVP: roomId = idFromName(shortCode) so join is direct. */
-function roomIdFromCode(env: Env, shortCode: string): DurableObjectId {
-  const normalized = shortCode.trim().toUpperCase().replace(/\s+/g, "");
-  return env.SPACE_ROOM.idFromName(`code:${normalized}`);
+/**
+ * Resolve short code → roomId.
+ * Tries canonical key plus legacy hyphenated keys so pilot rooms keep working.
+ */
+async function resolveRoomIdFromShortCode(
+  env: Env,
+  shortCode: string,
+): Promise<string | null> {
+  const norm = normalizeShortCode(shortCode);
+  if (!norm) return null;
+
+  const candidates = new Set<string>([norm]);
+  // Legacy bind used uppercase with hyphens left in (e.g. ABCD-EF)
+  if (norm.length === 6) {
+    candidates.add(`${norm.slice(0, 4)}-${norm.slice(4)}`);
+  }
+  if (norm.length === 8) {
+    candidates.add(`${norm.slice(0, 4)}-${norm.slice(4)}`);
+  }
+  // User typed spaces only (already stripped into norm); also try raw upper
+  const spaced = shortCode.trim().toUpperCase().replace(/\s+/g, "");
+  if (spaced) candidates.add(spaced);
+
+  for (const key of candidates) {
+    const stub = env.SPACE_ROOM.get(
+      env.SPACE_ROOM.idFromName(`code:${key}`),
+    );
+    const bindRes = await stub.fetch(
+      new Request("https://room/resolve-code", { method: "GET" }),
+    );
+    if (!bindRes.ok) continue;
+    const data = (await bindRes.json()) as { roomId?: string };
+    if (data.roomId) return data.roomId;
+  }
+  return null;
 }
 
 export default {
@@ -140,6 +178,11 @@ export default {
 
       if (path === "/rooms/join" && req.method === "POST") {
         return joinRoom(req, env);
+      }
+
+      /** Peek at group name + members without joining (for “Who are you?”). */
+      if (path === "/rooms/preview" && req.method === "POST") {
+        return previewRoom(req, env);
       }
 
       const roomMatch = path.match(/^\/rooms\/([^/]+)$/);
@@ -298,16 +341,28 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
   }
   const state = (await initRes.json()) as RoomState;
 
-  // Code index DO so join by short code works
-  const codeDoId = roomIdFromCode(env, shortCode);
-  const codeStub = env.SPACE_ROOM.get(codeDoId);
-  await codeStub.fetch(
-    new Request("https://room/bind-code", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomId, shortCode }),
-    }),
-  );
+  // Code index: bind under normalized key (and legacy hyphen key for safety)
+  const bindPayload = JSON.stringify({ roomId, shortCode });
+  const keys = new Set<string>([
+    normalizeShortCode(shortCode),
+    shortCode.trim().toUpperCase(),
+  ]);
+  for (const key of keys) {
+    if (!key) continue;
+    const codeStub = env.SPACE_ROOM.get(
+      env.SPACE_ROOM.idFromName(`code:${key}`),
+    );
+    const bindRes = await codeStub.fetch(
+      new Request("https://room/bind-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bindPayload,
+      }),
+    );
+    if (!bindRes.ok) {
+      return error("Could not publish join code", 500, req);
+    }
+  }
 
   return json(
     {
@@ -320,26 +375,88 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
   );
 }
 
+/**
+ * Resolve short code → group name + members only.
+ * Does not add the guest (used for “Who are you?” before join).
+ */
+async function previewRoom(req: Request, env: Env): Promise<Response> {
+  const body = (await req.json()) as { shortCode?: string };
+  const shortCodeRaw = body.shortCode || "";
+  if (!normalizeShortCode(shortCodeRaw)) {
+    return error("shortCode required", 400, req);
+  }
+
+  const roomId = await resolveRoomIdFromShortCode(env, shortCodeRaw);
+  if (!roomId) {
+    return error(
+      "Invalid or expired join code. Check the code (hyphens optional) and that the host Connected this group.",
+      404,
+      req,
+    );
+  }
+
+  const roomStub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`room:${roomId}`),
+  );
+  const pullRes = await roomStub.fetch(
+    new Request("https://room/pull", { method: "GET" }),
+  );
+  if (!pullRes.ok) {
+    return error("Room not found", 404, req);
+  }
+  const data = (await pullRes.json()) as {
+    rev?: number;
+    snapshot?: SharedSnapshot & {
+      members?: Array<{ id?: string; name?: string }>;
+      name?: string;
+      spaceId?: string;
+    };
+  };
+  const snap = data.snapshot;
+  if (!snap) {
+    return error("Room not found", 404, req);
+  }
+
+  const members = (Array.isArray(snap.members) ? snap.members : [])
+    .map((m) => ({
+      id: String(m.id || ""),
+      name: String(m.name || "").trim(),
+    }))
+    .filter((m) => m.name.length > 0);
+
+  return json(
+    {
+      roomId,
+      rev: data.rev ?? 0,
+      spaceId: String(snap.spaceId || ""),
+      name: String(snap.name || "Group"),
+      members,
+    },
+    200,
+    req,
+  );
+}
+
 async function joinRoom(req: Request, env: Env): Promise<Response> {
   const body = (await req.json()) as {
     shortCode?: string;
     displayName?: string;
     deviceId?: string;
   };
-  const shortCode = (body.shortCode || "").trim().toUpperCase();
+  const shortCodeRaw = body.shortCode || "";
   const displayName = (body.displayName || "").trim();
-  if (!shortCode || !displayName) {
+  if (!normalizeShortCode(shortCodeRaw) || !displayName) {
     return error("shortCode and displayName required", 400, req);
   }
 
-  const codeStub = env.SPACE_ROOM.get(roomIdFromCode(env, shortCode));
-  const bindRes = await codeStub.fetch(
-    new Request("https://room/resolve-code", { method: "GET" }),
-  );
-  if (!bindRes.ok) {
-    return error("Invalid or expired join code", 404, req);
+  const roomId = await resolveRoomIdFromShortCode(env, shortCodeRaw);
+  if (!roomId) {
+    return error(
+      "Invalid or expired join code. Check the code (hyphens optional) and that the host Connected this group.",
+      404,
+      req,
+    );
   }
-  const { roomId } = (await bindRes.json()) as { roomId: string };
 
   const roomStub = env.SPACE_ROOM.get(
     env.SPACE_ROOM.idFromName(`room:${roomId}`),

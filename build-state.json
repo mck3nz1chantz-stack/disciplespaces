@@ -1,9 +1,9 @@
 {
   "project": "DiscipleSpaces",
-  "phase": "5 – Sharing, Invites & Polish",
+  "phase": "5 \u2013 Sharing, Invites & Polish",
   "status": "completed",
   "created": "2026-07-08T19:23:18.941Z",
-  "updated": "2026-07-09T12:00:00.000Z",
+  "updated": "2026-07-16T01:01:16Z",
   "launcher": "/Users/kenzi/Desktop/ChantzMediaLauncher",
   "version": "0.10.0",
   "stack": [
@@ -62,7 +62,7 @@
     "Cloudflare deploy requires wrangler login on the machine that deploys",
     "Invite is fully offline: join requires full DS1 package or QR",
     "New members do not receive past sessions by default",
-    "iOS install is manual via Safari Share → Add to Home Screen",
+    "iOS install is manual via Safari Share \u2192 Add to Home Screen",
     "GrokLaw pre-build still pending"
   ],
   "complianceNotes": [
@@ -71,7 +71,7 @@
     "Optional opt-in Space room relay for shared data only (VITE_SPACE_RELAY_URL)",
     "Manual DSX1 export/import remains backup path",
     "Bible text limited to public domain KJV",
-    "No user accounts — device keys + room codes for MVP relay"
+    "No user accounts \u2014 device keys + room codes for MVP relay"
   ],
   "inviteBehavior": {
     "newMembersGetPastSessions": false,
@@ -127,11 +127,11 @@
     "deployCommand": "npm run deploy",
     "status": "deployed",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://7ea29ab9.disciple-spaces.pages.dev",
-    "deployedAt": "2026-07-15T01:17:00Z",
-    "releaseNotes": "Full pilot: UX P0–P2, relay, feedback, KJV+WEB with offline cache tips, free-forever mission"
+    "latestDeploymentUrl": "https://88b8178b.disciple-spaces.pages.dev",
+    "deployedAt": "2026-07-16T01:01:16Z",
+    "releaseNotes": "Who are you join picker + rooms/preview"
   },
-  "grokBuildStatus": "preview-deployed-web-bible-push-5c47c45",
+  "grokBuildStatus": "preview-deployed-who-are-you",
   "grokDocsStatus": "pending",
   "grokLawStatus": "pending-prebuild",
   "nextPhase": "Deploy space-relay Worker + set VITE_SPACE_RELAY_URL; opportunistic auto-sync; custom domain when product-ready; GrokDocs / GrokLaw",
@@ -149,7 +149,8 @@
     "schemaVersion": 7,
     "defaultMode": "local-only",
     "privateNotes": "never",
-    "autoSync": "foreground-connected-only"
+    "autoSync": "foreground-connected-only",
+    "versionId": "79d8903d-7418-4834-9c20-81b6077edc9f"
   },
   "recentFeatures": {
     "privateNotes": {
@@ -160,15 +161,26 @@
     },
     "prayerBoard": {
       "status": "ui-live",
-      "tabs": ["individual", "group"],
-      "kinds": ["request", "prayed", "update"],
+      "tabs": [
+        "individual",
+        "group"
+      ],
+      "kinds": [
+        "request",
+        "prayed",
+        "update"
+      ],
       "export": "included in Space Updates",
       "schemaVersion": 6,
       "availableOn": "all session templates + space detail"
     },
     "spaceKind": {
-      "group": { "maxMembers": 5 },
-      "family": { "maxMembers": 10 },
+      "group": {
+        "maxMembers": 5
+      },
+      "family": {
+        "maxMembers": 10
+      },
       "schemaVersion": 5
     }
   },

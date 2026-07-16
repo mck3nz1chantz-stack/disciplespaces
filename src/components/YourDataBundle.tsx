@@ -18,6 +18,8 @@ import { Card } from "./Card";
 import { Button } from "./Button";
 import {
   CANONICAL_APP_ORIGIN,
+  canConnectSpaceToRelay,
+  isSpaceGuest,
   isSpaceRelayConfigured,
   normalizeSpaceSync,
 } from "../lib/sync";
@@ -273,7 +275,7 @@ export function YourDataBundle({
                   </div>
 
                   <div className="flex flex-wrap gap-1.5">
-                    {!connected && (
+                    {!connected && canConnectSpaceToRelay(sync) && (
                       <Button
                         variant="secondary"
                         className="!py-2 !text-xs"
@@ -303,6 +305,12 @@ export function YourDataBundle({
                         )}
                         Connect for easy invite
                       </Button>
+                    )}
+                    {!connected && isSpaceGuest(sync) && (
+                      <p className="text-[11px] text-muted w-full leading-relaxed">
+                        Joined on this phone — only the host can Connect. Use
+                        Join a group with their code when they share it.
+                      </p>
                     )}
 
                     {connected && (

@@ -19,6 +19,11 @@ export class SpaceRelayNotConfiguredError extends Error {
   }
 }
 
+/** Alphanumeric-only short code (matches Worker lookup). */
+export function normalizeShortCode(code: string): string {
+  return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 export interface CreateRoomResult {
   roomId: string;
   shortCode: string;
@@ -54,11 +59,16 @@ async function relayFetch(
   headers.set("X-Device-Id", getDeviceId());
   headers.set("Authorization", `Bearer ${getDeviceSecret()}`);
 
-  const res = await fetch(`${base}${path}`, {
-    ...init,
-    headers,
-  });
-  return res;
+  try {
+    return await fetch(`${base}${path}`, {
+      ...init,
+      headers,
+    });
+  } catch {
+    throw new Error(
+      "Couldn’t reach the group connection (network). Check Wi‑Fi/cell, stay Online, and try Sync again.",
+    );
+  }
 }
 
 async function readError(res: Response): Promise<string> {
@@ -68,7 +78,16 @@ async function readError(res: Response): Promise<string> {
   } catch {
     // ignore
   }
-  return `Relay error (${res.status})`;
+  if (res.status === 404) {
+    return "Group room not found (404). The host may need to Connect again and share a fresh join code.";
+  }
+  if (res.status === 400) {
+    return "Sync request was rejected (400). Try Sync again, or reconnect the group.";
+  }
+  if (res.status >= 500) {
+    return `Group connection is having trouble (${res.status}). Try again in a moment.`;
+  }
+  return `Group connection failed (${res.status}). Try Sync again.`;
 }
 
 /** Host: create a room from shared snapshot (opt-in Connect). */
@@ -89,15 +108,47 @@ export async function createRoom(input: {
   return res.json() as Promise<CreateRoomResult>;
 }
 
+export interface PreviewRoomResult {
+  roomId: string;
+  rev: number;
+  spaceId: string;
+  name: string;
+  members: Array<{ id: string; name: string }>;
+}
+
+/**
+ * Peek at group name + people without joining.
+ * Used so guests can pick “I’m already on the list” vs a new name.
+ */
+export async function previewRoom(input: {
+  shortCode: string;
+}): Promise<PreviewRoomResult> {
+  const code = normalizeShortCode(input.shortCode);
+  if (code.length < 4) {
+    throw new Error("Enter the full join code from your host.");
+  }
+  const res = await relayFetch("/rooms/preview", {
+    method: "POST",
+    body: JSON.stringify({ shortCode: code }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json() as Promise<PreviewRoomResult>;
+}
+
 /** Guest: join with short code + name → receive shared snapshot. */
 export async function joinRoom(input: {
   shortCode: string;
   displayName: string;
 }): Promise<JoinRoomResult> {
+  const code = normalizeShortCode(input.shortCode);
+  if (code.length < 4) {
+    throw new Error("Enter the full join code from your host.");
+  }
   const res = await relayFetch("/rooms/join", {
     method: "POST",
     body: JSON.stringify({
-      shortCode: input.shortCode.trim().toUpperCase(),
+      // Server accepts with or without hyphens; send compact form
+      shortCode: code,
       displayName: input.displayName.trim(),
       deviceId: getDeviceId(),
     }),

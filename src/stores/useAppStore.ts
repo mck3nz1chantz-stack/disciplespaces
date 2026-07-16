@@ -194,8 +194,14 @@ interface AppState {
   ) => Promise<{ space: Space; added: boolean }>;
 
   buildSpaceExportPayload: (spaceId: string) => Promise<SpaceExportPayload>;
+  /**
+   * Import shared Space data.
+   * - add-only (default): file / offline packages — never overwrite local sessions.
+   * - replace-shared: relay pull — update existing shared sessions/prayers from remote.
+   */
   importSpaceExport: (
     payload: SpaceExportPayload,
+    opts?: { mergeStrategy?: "add-only" | "replace-shared" },
   ) => Promise<{
     space: Space;
     addedSessions: number;
@@ -464,7 +470,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       spaceKind: kind,
       defaultSessionTemplateId,
       inviteCode: await deriveInviteCode(id),
-      sync: defaultSpaceSync(),
+      sync: defaultSpaceSync("host"),
       sessions: [],
     };
     await db.spaces.add(toRow(space));
@@ -849,7 +855,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       spaceKind: kind,
       defaultSessionTemplateId: defaultSessionTemplateForSpace(template),
       inviteCode: payload.code,
-      sync: defaultSpaceSync(),
+      // Joined via invite on this phone → guest (host Connects; they Join)
+      sync: defaultSpaceSync("guest"),
       sessions: [],
     };
     await db.spaces.add(toRow(space));
@@ -865,6 +872,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     let joiner: Member | null = null;
     const name = joinerName?.trim();
+    // Joining with a name = guest path. Bare file restore (no name) stays host
+    // so a host can restore their own backup and Connect again.
+    if (name && !had) {
+      await get().patchSpaceSync(payload.space.id, { deviceRole: "guest" });
+    }
     if (name) {
       const row = await db.spaces.get(payload.space.id);
       if (row) {
@@ -879,6 +891,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           const nextRow: SpaceRow = {
             ...row,
             members: [...row.members, joiner],
+            sync: name && !had
+              ? { ...normalizeSpaceSync(row.sync), deviceRole: "guest" }
+              : row.sync,
           };
           await db.spaces.put(nextRow);
           const updated = await hydrateSpace(nextRow);
@@ -898,8 +913,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
+    const spaceAfter =
+      name && !had
+        ? (await get().getSpace(payload.space.id)) ?? result.space
+        : result.space;
+
     return {
-      space: result.space,
+      space: spaceAfter,
       alreadyHad: had,
       joiner,
       addedSessions: result.addedSessions,
@@ -976,7 +996,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     return buildSpaceExport(space, sessions, prayerBoard);
   },
 
-  importSpaceExport: async (payload) => {
+  importSpaceExport: async (payload, opts) => {
+    const mergeStrategy = opts?.mergeStrategy ?? "add-only";
     const existing = await db.spaces.get(payload.space.id);
     let spaceRow: SpaceRow;
 
@@ -1046,7 +1067,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (session.spaceId !== payload.space.id) continue;
         const has = await db.sessions.get(session.id);
         if (has) {
-          skippedSessions += 1;
+          if (mergeStrategy === "replace-shared") {
+            // Relay pull: remote shared fields win; never touch privateNotes table
+            await db.sessions.put({
+              ...has,
+              ...session,
+              id: has.id,
+              spaceId: payload.space.id,
+              passagesStudied: session.passagesStudied ?? [],
+              attendees: session.attendees ?? [],
+            });
+            addedSessions += 1;
+          } else {
+            skippedSessions += 1;
+          }
           continue;
         }
         await db.sessions.add({
@@ -1061,13 +1095,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       for (const entry of payload.prayerBoard ?? []) {
         if (entry.spaceId && entry.spaceId !== payload.space.id) continue;
         const has = await db.prayerBoard.get(entry.id);
-        if (has) {
-          skippedPrayers += 1;
-          continue;
-        }
         const normalized = normalizePrayerBoardEntry(entry, payload.space.id);
         if (!normalized) {
           skippedPrayers += 1;
+          continue;
+        }
+        if (has) {
+          if (mergeStrategy === "replace-shared") {
+            await db.prayerBoard.put({
+              ...has,
+              ...normalized,
+              id: has.id,
+              spaceId: payload.space.id,
+            });
+            addedPrayers += 1;
+          } else {
+            skippedPrayers += 1;
+          }
           continue;
         }
         await db.prayerBoard.add(normalized);
@@ -1125,6 +1169,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
+    const existingSync = normalizeSpaceSync(row.sync);
+
+    // Guests never open a new room (avoids two rooms for one group)
+    if (existingSync.deviceRole === "guest") {
+      if (existingSync.mode === "connected" && existingSync.roomId) {
+        return get().syncSpaceNow(spaceId);
+      }
+      throw new Error(
+        "Only the host can Connect this group. Ask them to Connect and share the join code, then use Join a group on this phone.",
+      );
+    }
+
+    // Already on a room — re-sync instead of creating a second room (orphans friends)
+    if (existingSync.mode === "connected" && existingSync.roomId) {
+      try {
+        return await get().syncSpaceNow(spaceId);
+      } catch (err) {
+        // Room gone (404) → fall through and create a fresh room
+        const msg = err instanceof Error ? err.message : "";
+        if (!/404|not found/i.test(msg)) throw err;
+      }
+    }
+
     const space = await hydrateSpace(row);
     const sessions = await db.sessions.where("spaceId").equals(spaceId).toArray();
     const prayerBoard = await db.prayerBoard
@@ -1144,6 +1211,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       lastSyncedAt: new Date().toISOString(),
       paused: false,
       lastError: undefined,
+      deviceRole: "host",
     });
   },
 
@@ -1159,33 +1227,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     try {
-      // Pull remote first (merge missing sessions/prayers like file import)
+      // Pull remote first; replace shared session/prayer fields when rev is newer
       const pulled = await relayPullRoom({
         roomId: sync.roomId,
         sinceRev: sync.remoteRev,
       });
       if (!("unchanged" in pulled)) {
         const snap = pulled.snapshot;
-        // Apply remote shared data via export-shaped merge (never touches privateNotes)
-        await get().importSpaceExport({
-          v: 1,
-          kind: "ds-export",
-          exportedAt: snap.exportedAt,
-          space: {
-            id: snap.spaceId,
-            name: snap.name,
-            description: snap.description,
-            createdAt: snap.createdAt,
-            members: snap.members,
-            preferredBibleVersion: "KJV",
-            inviteCode: snap.inviteCode,
-            spaceTemplate: snap.spaceTemplate,
-            spaceKind: snap.spaceKind,
-            defaultSessionTemplateId: snap.defaultSessionTemplateId,
+        // Apply remote shared data (never touches privateNotes)
+        await get().importSpaceExport(
+          {
+            v: 1,
+            kind: "ds-export",
+            exportedAt: snap.exportedAt,
+            space: {
+              id: snap.spaceId,
+              name: snap.name,
+              description: snap.description,
+              createdAt: snap.createdAt,
+              members: snap.members,
+              preferredBibleVersion: "KJV",
+              inviteCode: snap.inviteCode,
+              spaceTemplate: snap.spaceTemplate,
+              spaceKind: snap.spaceKind,
+              defaultSessionTemplateId: snap.defaultSessionTemplateId,
+            },
+            sessions: snap.sessions,
+            prayerBoard: snap.prayerBoard,
           },
-          sessions: snap.sessions,
-          prayerBoard: snap.prayerBoard,
-        });
+          { mergeStrategy: "replace-shared" },
+        );
         // Re-apply connected sync after import (import preserves existing sync)
         await get().patchSpaceSync(spaceId, {
           mode: "connected",
@@ -1250,6 +1321,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       sync: {
         mode: "local-only",
         lastSyncedAt: sync.lastSyncedAt,
+        // Keep host/guest so a guest cannot Connect after Unlink
+        deviceRole: sync.deviceRole === "guest" ? "guest" : "host",
       },
     };
     await db.spaces.put(nextRow);
@@ -1266,27 +1339,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!name) throw new Error("Enter your name to join");
     const result = await relayJoinRoom({ shortCode, displayName: name });
     const snap = result.snapshot;
-    const had = Boolean(await db.spaces.get(snap.spaceId));
+    const prior = await db.spaces.get(snap.spaceId);
+    const had = Boolean(prior);
+    // Keep host if this phone already owned the group; otherwise guest
+    const priorRole = prior
+      ? normalizeSpaceSync(prior.sync).deviceRole
+      : undefined;
+    const deviceRole = priorRole === "host" ? "host" : "guest";
 
-    await get().importSpaceExport({
-      v: 1,
-      kind: "ds-export",
-      exportedAt: snap.exportedAt,
-      space: {
-        id: snap.spaceId,
-        name: snap.name,
-        description: snap.description,
-        createdAt: snap.createdAt,
-        members: snap.members,
-        preferredBibleVersion: "KJV",
-        inviteCode: snap.inviteCode,
-        spaceTemplate: snap.spaceTemplate,
-        spaceKind: snap.spaceKind,
-        defaultSessionTemplateId: snap.defaultSessionTemplateId,
+    await get().importSpaceExport(
+      {
+        v: 1,
+        kind: "ds-export",
+        exportedAt: snap.exportedAt,
+        space: {
+          id: snap.spaceId,
+          name: snap.name,
+          description: snap.description,
+          createdAt: snap.createdAt,
+          members: snap.members,
+          preferredBibleVersion: "KJV",
+          inviteCode: snap.inviteCode,
+          spaceTemplate: snap.spaceTemplate,
+          spaceKind: snap.spaceKind,
+          defaultSessionTemplateId: snap.defaultSessionTemplateId,
+        },
+        sessions: snap.sessions,
+        prayerBoard: snap.prayerBoard,
       },
-      sessions: snap.sessions,
-      prayerBoard: snap.prayerBoard,
-    });
+      { mergeStrategy: "replace-shared" },
+    );
 
     // Ensure joiner is on the member list
     const row = await db.spaces.get(snap.spaceId);
@@ -1312,6 +1394,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       lastSyncedAt: new Date().toISOString(),
       paused: false,
       lastError: undefined,
+      deviceRole,
     });
 
     return { space, alreadyHad: had };

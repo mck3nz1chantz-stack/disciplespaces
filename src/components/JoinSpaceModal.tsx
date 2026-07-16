@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Camera, CheckCircle2, Copy, Share2 } from "lucide-react";
+import { Camera, CheckCircle2, Copy, Share2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
@@ -20,6 +20,8 @@ import {
   INVITE_PRIVACY_NOTE,
   INVITE_SYNC_NOTE,
 } from "../lib/legal";
+import { ConnectSafelyDisclosure } from "./ConnectSafelyGuide";
+import { previewRoom } from "../lib/sync";
 import type { Member } from "../types";
 
 interface JoinSpaceModalProps {
@@ -36,6 +38,166 @@ type ParsedPackage =
   | { kind: "export"; payload: SpaceExportPayload }
   | { kind: "member-join"; payload: MemberJoinPayload };
 
+type IdentityChoice = "pick" | "new";
+
+interface ListedPerson {
+  id: string;
+  name: string;
+}
+
+function uniquePeople(
+  list: Array<{ id?: string; name: string }>,
+): ListedPerson[] {
+  const seen = new Set<string>();
+  const out: ListedPerson[] = [];
+  for (const m of list) {
+    const name = m.name.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ id: m.id || key, name });
+  }
+  return out;
+}
+
+/**
+ * “Who are you?” — pick an existing name or enter a new one.
+ * Avoids duplicate people when the host misspelled a guest.
+ */
+function WhoAreYouPicker({
+  people,
+  groupLabel,
+  identity,
+  selectedName,
+  newName,
+  onPickExisting,
+  onChooseNew,
+  onNewNameChange,
+}: {
+  people: ListedPerson[];
+  groupLabel?: string;
+  identity: IdentityChoice;
+  selectedName: string;
+  newName: string;
+  onPickExisting: (name: string) => void;
+  onChooseNew: () => void;
+  onNewNameChange: (value: string) => void;
+}) {
+  const hasPeople = people.length > 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-primary inline-flex items-center gap-2">
+          <UserRound className="h-4 w-4 shrink-0" aria-hidden />
+          Who are you?
+        </p>
+        <p className="text-xs text-muted leading-relaxed">
+          {hasPeople
+            ? `Pick your name if the host already added you${groupLabel ? ` to ${groupLabel}` : ""}. Spelling can differ — choose the row that is you, or add yourself as someone new.`
+            : "Type how you want to appear on the people list. This is not a password."}
+        </p>
+      </div>
+
+      {hasPeople && (
+        <div
+          className="rounded-xl border border-border bg-bg overflow-hidden divide-y divide-border"
+          role="radiogroup"
+          aria-label="People already on this group"
+        >
+          {people.map((p) => {
+            const selected =
+              identity === "pick" &&
+              selectedName.toLowerCase() === p.name.toLowerCase();
+            return (
+              <button
+                key={p.id + p.name}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onPickExisting(p.name)}
+                className={[
+                  "flex w-full items-center gap-3 px-3 py-3.5 text-left touch-manipulation min-h-12 transition-colors",
+                  selected
+                    ? "bg-primary/10 text-primary"
+                    : "hover:bg-surface-muted/60 text-text",
+                ].join(" ")}
+              >
+                <span
+                  className={[
+                    "h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center",
+                    selected
+                      ? "border-primary bg-primary"
+                      : "border-border bg-surface",
+                  ].join(" ")}
+                  aria-hidden
+                >
+                  {selected ? (
+                    <span className="h-2 w-2 rounded-full bg-white" />
+                  ) : null}
+                </span>
+                <span className="text-base font-medium">{p.name}</span>
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            role="radio"
+            aria-checked={identity === "new"}
+            onClick={onChooseNew}
+            className={[
+              "flex w-full items-center gap-3 px-3 py-3.5 text-left touch-manipulation min-h-12 transition-colors",
+              identity === "new"
+                ? "bg-primary/10 text-primary"
+                : "hover:bg-surface-muted/60 text-text",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center",
+                identity === "new"
+                  ? "border-primary bg-primary"
+                  : "border-border bg-surface",
+              ].join(" ")}
+              aria-hidden
+            >
+              {identity === "new" ? (
+                <span className="h-2 w-2 rounded-full bg-white" />
+              ) : null}
+            </span>
+            <span className="text-base font-medium">Someone new…</span>
+          </button>
+        </div>
+      )}
+
+      {(identity === "new" || !hasPeople) && (
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">
+            {hasPeople ? "Your name (new)" : "Your name"}
+          </span>
+          <input
+            value={newName}
+            onChange={(e) => onNewNameChange(e.target.value)}
+            className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+            placeholder="How should the group see you?"
+            maxLength={60}
+            autoFocus
+            autoComplete="name"
+          />
+          {hasPeople && (
+            <p className="text-[11px] text-muted leading-relaxed">
+              Use this if you are not on the list — or if every name is wrong
+              and you want your correct spelling.
+            </p>
+          )}
+        </label>
+      )}
+    </div>
+  );
+}
+
 export function JoinSpaceModal({
   open,
   onClose,
@@ -50,8 +212,8 @@ export function JoinSpaceModal({
   const [step, setStep] = useState<Step>("input");
   const [raw, setRaw] = useState("");
   const [parsed, setParsed] = useState<ParsedPackage | null>(null);
-  const [joinerName, setJoinerName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [shortCodeJoin, setShortCodeJoin] = useState(false);
   const [resultSpaceId, setResultSpaceId] = useState<string | null>(null);
   const [alreadyHad, setAlreadyHad] = useState(false);
@@ -62,17 +224,45 @@ export function JoinSpaceModal({
     useState<MemberJoinPayload | null>(null);
   const [hostAddedName, setHostAddedName] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+
+  /** People already on the group (from preview or invite package). */
+  const [knownPeople, setKnownPeople] = useState<ListedPerson[]>([]);
+  const [previewGroupName, setPreviewGroupName] = useState<string | null>(null);
+  const [identity, setIdentity] = useState<IdentityChoice>("new");
+  const [selectedExistingName, setSelectedExistingName] = useState("");
+  const [newName, setNewName] = useState("");
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimer = useRef<number | null>(null);
+
+  function resolvedJoinerName(): string {
+    if (identity === "pick" && selectedExistingName.trim()) {
+      return selectedExistingName.trim();
+    }
+    return newName.trim();
+  }
+
+  function resetIdentity(people: ListedPerson[] = []) {
+    setKnownPeople(people);
+    if (people.length > 0) {
+      setIdentity("pick");
+      setSelectedExistingName(people[0]!.name);
+      setNewName("");
+    } else {
+      setIdentity("new");
+      setSelectedExistingName("");
+      setNewName("");
+    }
+  }
 
   function reset() {
     stopScan();
     setStep("input");
     setRaw("");
     setParsed(null);
-    setJoinerName("");
     setSaving(false);
+    setPreviewLoading(false);
     setShortCodeJoin(false);
     setResultSpaceId(null);
     setAlreadyHad(false);
@@ -81,6 +271,8 @@ export function JoinSpaceModal({
     setJoiner(null);
     setConfirmPayload(null);
     setHostAddedName(null);
+    setPreviewGroupName(null);
+    resetIdentity([]);
   }
 
   /** FAITH-7K2 style short codes (relay) — not a full offline package. */
@@ -138,68 +330,64 @@ export function JoinSpaceModal({
       });
       streamRef.current = stream;
       setScanning(true);
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        await video.play();
       }
-
       const detector = new Detector({ formats: ["qr_code"] });
       scanTimer.current = window.setInterval(() => {
-        void (async () => {
-          const video = videoRef.current;
-          if (!video || video.readyState < 2) return;
-          try {
-            const codes = await detector.detect(video);
-            const value = codes[0]?.rawValue;
-            if (value) {
-              stopScan();
-              setRaw(value);
-              tryParse(value);
-            }
-          } catch {
-            // keep scanning
+        const v = videoRef.current;
+        if (!v || v.readyState < 2) return;
+        void detector.detect(v).then((codes) => {
+          const value = codes[0]?.rawValue?.trim();
+          if (value) {
+            stopScan();
+            setRaw(value);
+            tryParse(value);
           }
-        })();
+        });
       }, 500);
     } catch {
-      stopScan();
       toast.error("Could not open camera. Paste the invite message instead.");
+      stopScan();
     }
   }
 
   function tryParse(text: string) {
+    const kind = detectJoinPackageKind(text);
     try {
-      const kind = detectJoinPackageKind(text);
-      if (kind === "member-join") {
+      if (kind === "member-join" || text.includes("DSM1.")) {
         const p = parseMemberJoinInput(text);
         setParsed({ kind: "member-join", payload: p });
+        setShortCodeJoin(false);
+        setPreviewGroupName(p.spaceName);
+        resetIdentity([]);
         setStep("confirm");
         return;
       }
-      if (kind === "export") {
+      if (kind === "export" || text.includes("DSX1.")) {
         const p = parseExportInput(text);
         setParsed({ kind: "export", payload: p });
+        setShortCodeJoin(false);
+        setPreviewGroupName(p.space.name);
+        resetIdentity(uniquePeople(p.space.members ?? []));
         setStep("confirm");
         return;
       }
-      // invite or unknown — try invite parser (better errors)
       const p = parseInviteInput(text);
       setParsed({ kind: "invite", payload: p });
+      setShortCodeJoin(false);
+      setPreviewGroupName(p.name);
+      resetIdentity(uniquePeople(p.members ?? []));
       setStep("confirm");
     } catch (err) {
-      // Last chance: export or member-join if detect failed
-      try {
-        const p = parseExportInput(text);
-        setParsed({ kind: "export", payload: p });
-        setStep("confirm");
-        return;
-      } catch {
-        // continue
-      }
       try {
         const p = parseMemberJoinInput(text);
         setParsed({ kind: "member-join", payload: p });
+        setShortCodeJoin(false);
+        setPreviewGroupName(p.spaceName);
+        resetIdentity([]);
         setStep("confirm");
         return;
       } catch {
@@ -209,13 +397,27 @@ export function JoinSpaceModal({
     }
   }
 
-  function handleContinue(e: FormEvent) {
+  async function handleContinue(e: FormEvent) {
     e.preventDefault();
     const text = raw.trim();
     if (looksLikeShortCode(text) && !/DS1\.|DSX1\.|DSM1\./i.test(text)) {
       setShortCodeJoin(true);
       setParsed(null);
-      setStep("confirm");
+      setPreviewLoading(true);
+      try {
+        const preview = await previewRoom({ shortCode: text });
+        setPreviewGroupName(preview.name);
+        resetIdentity(uniquePeople(preview.members));
+        setStep("confirm");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not find group");
+        // Still allow free-name join if preview fails (older relay)
+        setPreviewGroupName(null);
+        resetIdentity([]);
+        setStep("confirm");
+      } finally {
+        setPreviewLoading(false);
+      }
       return;
     }
     setShortCodeJoin(false);
@@ -226,15 +428,20 @@ export function JoinSpaceModal({
     e.preventDefault();
 
     if (shortCodeJoin) {
-      if (!joinerName.trim()) {
-        toast.error("Enter your name for the member list");
+      const name = resolvedJoinerName();
+      if (!name) {
+        toast.error(
+          identity === "pick"
+            ? "Choose your name on the list"
+            : "Enter your name for the member list",
+        );
         return;
       }
       setSaving(true);
       try {
         const { space, alreadyHad: had } = await joinSpaceViaRelay({
           shortCode: raw.trim(),
-          displayName: joinerName,
+          displayName: name,
         });
         setResultSpaceId(space.id);
         setAlreadyHad(had);
@@ -274,8 +481,13 @@ export function JoinSpaceModal({
       return;
     }
 
-    if (!joinerName.trim()) {
-      toast.error("Enter your name for the member list");
+    const joinerName = resolvedJoinerName();
+    if (!joinerName) {
+      toast.error(
+        identity === "pick"
+          ? "Choose your name on the list"
+          : "Enter your name for the member list",
+      );
       return;
     }
 
@@ -384,14 +596,24 @@ export function JoinSpaceModal({
         ? "Join with history"
         : "You are joining";
 
+  const needsWhoAreYou =
+    shortCodeJoin ||
+    parsed?.kind === "invite" ||
+    parsed?.kind === "export";
+
   return (
     <Modal open={open} title="Join a group" onClose={handleClose}>
       {step === "input" && (
-        <form onSubmit={handleContinue} className="space-y-4">
+        <form onSubmit={(e) => void handleContinue(e)} className="space-y-4">
           <p className="text-sm text-muted -mt-1">
             Enter the code your host shared, open their invite link, or scan
             their QR. Same website they use — usually disciple-spaces.pages.dev.
           </p>
+
+          <ConnectSafelyDisclosure
+            audience="guest"
+            label="How to join safely (won’t touch your other groups)"
+          />
 
           <label className="block space-y-1.5">
             <span className="text-sm font-medium">Code or invite</span>
@@ -434,27 +656,35 @@ export function JoinSpaceModal({
             <Button type="button" variant="secondary" fullWidth onClick={handleClose}>
               Cancel
             </Button>
-            <Button type="submit" fullWidth disabled={!raw.trim()}>
-              Continue
+            <Button
+              type="submit"
+              fullWidth
+              disabled={!raw.trim() || previewLoading}
+            >
+              {previewLoading ? "Looking up group…" : "Continue"}
             </Button>
           </div>
         </form>
       )}
 
       {step === "confirm" && (shortCodeJoin || parsed) && (
-        <form onSubmit={handleJoin} className="space-y-4">
+        <form onSubmit={(e) => void handleJoin(e)} className="space-y-4">
           <div className="rounded-xl border border-border bg-bg px-3 py-3 space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">
               {confirmTitle}
             </p>
             {shortCodeJoin ? (
               <>
-                <p className="text-lg font-semibold text-primary font-mono tracking-wide">
-                  {raw.trim().toUpperCase()}
+                <p className="text-lg font-semibold text-primary">
+                  {previewGroupName || "Connected group"}
+                </p>
+                <p className="text-sm font-mono tracking-wide text-muted">
+                  Code {raw.trim().toUpperCase()}
                 </p>
                 <p className="text-sm text-muted">
-                  Easy join via short code. Shared sessions load when the Space
-                  room is available. Private notes never come with a join.
+                  You’ll join this group only. Other Spaces on your phone stay
+                  as they are. Private notes never come with a join — and you
+                  should not tap Connect after this (your host already did).
                 </p>
               </>
             ) : parsed?.kind === "member-join" ? (
@@ -477,12 +707,6 @@ export function JoinSpaceModal({
                   <p className="text-sm text-muted">{parsed.payload.description}</p>
                 )}
                 <p className="text-xs text-muted">Code {parsed.payload.code}</p>
-                {parsed.payload.members.length > 0 && (
-                  <p className="text-sm text-muted pt-1">
-                    Members:{" "}
-                    {parsed.payload.members.map((m) => m.name).join(", ")}
-                  </p>
-                )}
               </>
             ) : parsed?.kind === "export" ? (
               <>
@@ -496,29 +720,27 @@ export function JoinSpaceModal({
                     ? ` · ${parsed.payload.prayerBoard!.length} prayer board entr${parsed.payload.prayerBoard!.length === 1 ? "y" : "ies"}`
                     : ""}
                 </p>
-                {(parsed.payload.space.members?.length ?? 0) > 0 && (
-                  <p className="text-sm text-muted pt-1">
-                    Members:{" "}
-                    {parsed.payload.space.members.map((m) => m.name).join(", ")}
-                  </p>
-                )}
               </>
             ) : null}
           </div>
 
-          {(shortCodeJoin || parsed?.kind !== "member-join") && (
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">Your name</span>
-              <input
-                value={joinerName}
-                onChange={(e) => setJoinerName(e.target.value)}
-                className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
-                placeholder="How should the group see you?"
-                maxLength={60}
-                required
-                autoFocus
-              />
-            </label>
+          {needsWhoAreYou && (
+            <WhoAreYouPicker
+              people={knownPeople}
+              groupLabel={previewGroupName || undefined}
+              identity={identity}
+              selectedName={selectedExistingName}
+              newName={newName}
+              onPickExisting={(name) => {
+                setIdentity("pick");
+                setSelectedExistingName(name);
+              }}
+              onChooseNew={() => {
+                setIdentity("new");
+                setSelectedExistingName("");
+              }}
+              onNewNameChange={setNewName}
+            />
           )}
 
           <div className="rounded-xl bg-surface-muted/60 border border-border px-3 py-3 text-sm text-muted space-y-2">
@@ -624,7 +846,7 @@ export function JoinSpaceModal({
                     }
                   }}
                 >
-                  <Copy className="h-4 w-4" aria-hidden />
+                  <Copy className="h-5 w-5" aria-hidden />
                   Copy confirmation
                 </Button>
               </div>
@@ -635,42 +857,45 @@ export function JoinSpaceModal({
             fullWidth
             onClick={() => {
               handleClose();
-              navigate(`/space/${resultSpaceId}`);
+              navigate(`/spaces/${resultSpaceId}`);
             }}
           >
-            Open space
+            Open group
           </Button>
-          <Button variant="ghost" fullWidth onClick={handleClose}>
-            Close
+          <Button variant="secondary" fullWidth onClick={handleClose}>
+            Done
           </Button>
         </div>
       )}
 
-      {step === "host-confirm-done" && resultSpaceId && (
+      {step === "host-confirm-done" && (
         <div className="space-y-4 text-center">
           <CheckCircle2
             className="h-12 w-12 mx-auto text-success"
             aria-hidden
           />
-          <div className="space-y-2">
-            <p className="font-medium text-primary text-lg">Member list updated</p>
-            <p className="text-sm text-muted">
-              {hostAddedName
-                ? `${hostAddedName} is on this Space on your device. Open the Space to see the new count.`
-                : "Your local member list is up to date."}
-            </p>
-          </div>
-          <Button
-            fullWidth
-            onClick={() => {
-              handleClose();
-              navigate(`/space/${resultSpaceId}`);
-            }}
-          >
-            Open space
-          </Button>
-          <Button variant="ghost" fullWidth onClick={handleClose}>
-            Close
+          <p className="font-medium text-primary text-lg">
+            {hostAddedName
+              ? `${hostAddedName} is on your list`
+              : "Member list updated"}
+          </p>
+          <p className="text-sm text-muted">
+            Headcount on this phone is up to date. Share meetings with Sync or a
+            group file when you want history on their device.
+          </p>
+          {resultSpaceId && (
+            <Button
+              fullWidth
+              onClick={() => {
+                handleClose();
+                navigate(`/spaces/${resultSpaceId}`);
+              }}
+            >
+              Open group
+            </Button>
+          )}
+          <Button variant="secondary" fullWidth onClick={handleClose}>
+            Done
           </Button>
         </div>
       )}

@@ -53,6 +53,16 @@ Or live stream while testing: `npx wrangler tail` (look for `pilot_feedback` log
 
 Never contains private notes (rejected if present).
 
+## Join codes
+
+Short codes look like `ABCD-EF`. Lookup is **hyphen-insensitive** (`ABCDEF` and `ABCD EF` work). New rooms bind under the normalized key; resolve also tries the legacy hyphenated key for rooms created before that fix.
+
+## Common “can’t sync” causes
+
+1. Guest typed offline **reference** invite code instead of Connect **join** code → invalid code.
+2. Host and guest each pressed **Connect** on their own copy → two different rooms (orphaned). Fix: only the host Connects; guests **Join a group** with the host’s code.
+3. Older app builds skipped updating existing sessions on pull (add-only import). Relay pull now uses replace-shared merge.
+
 ## CORS
 
 Worker reflects request `Origin` for browser calls from pages.dev / localhost / future custom domain.

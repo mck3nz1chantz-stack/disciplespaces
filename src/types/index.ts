@@ -82,6 +82,13 @@ export interface Session {
  */
 export type SpaceSyncMode = "local-only" | "connected";
 
+/**
+ * On this device only — never sent to the relay.
+ * host = created here (or restored as owner) → may Connect.
+ * guest = joined via code/invite → Sync only; never create a room.
+ */
+export type SpaceDeviceRole = "host" | "guest";
+
 /** Per-space sync metadata (shared layer only). Stored on the Space row. */
 export interface SpaceSyncState {
   /** local-only = this device; connected = opted into Space room relay. */
@@ -98,6 +105,11 @@ export interface SpaceSyncState {
   paused?: boolean;
   /** Last sync error message for confidence UI (cleared on success). */
   lastError?: string;
+  /**
+   * Who this phone is for this group. Missing → treat as host (older installs
+   * that created groups before roles existed keep Connect).
+   */
+  deviceRole?: SpaceDeviceRole;
 }
 
 export interface Space {
