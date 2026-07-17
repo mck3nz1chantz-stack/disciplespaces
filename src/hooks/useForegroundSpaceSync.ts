@@ -24,7 +24,7 @@ export function useForegroundSpaceSync(): void {
 
     async function syncConnected(reason: string) {
       if (!isOnlineModeEnabled()) return;
-      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      // Do not gate on navigator.onLine — false offline is common on phones.
       if (document.visibilityState === "hidden") return;
       if (running.current) return;
 

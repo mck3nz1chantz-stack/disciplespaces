@@ -46,7 +46,7 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const syncSpaceNow = useAppStore((s) => s.syncSpaceNow);
   const setSpaceSyncPaused = useAppStore((s) => s.setSpaceSyncPaused);
 
-  const { mode, networkOnline, canSync, setOnlineMode } = useOnlineMode();
+  const { mode, networkOnline, setOnlineMode } = useOnlineMode();
   const [busy, setBusy] = useState(false);
   const [justSynced, setJustSynced] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
@@ -63,15 +63,13 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
 
   async function handleSync() {
     if (!connected) return;
-    if (!networkOnline) {
-      toast.message("You’re offline", {
-        description: "Reconnect or turn Online on, then try Sync again.",
-      });
-      return;
-    }
+    // App Offline mode is intentional — block sync.
+    // Do NOT hard-block on navigator.onLine: iOS/Safari often lies while
+    // Wi‑Fi still works (shows “No network” then Sync never tries).
     if (mode === "offline") {
       toast.message("App is set to Offline", {
-        description: "Flip to Online to refresh this group with others.",
+        description:
+          "Tap Online on this card (or in the header), then Sync now.",
       });
       return;
     }
@@ -108,9 +106,9 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       setGuideOpen(true);
       return;
     }
-    if (!canSync) {
+    if (mode === "offline") {
       toast.message("Turn Online on first", {
-        description: "Connect needs a network and Online mode.",
+        description: "Connect needs Online mode (toggle on this card).",
       });
       return;
     }
@@ -149,8 +147,7 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
 
   const statusLine = (() => {
     if (justSynced) return "Just synced ✓";
-    if (!networkOnline) return "No network — working on this phone";
-    if (mode === "offline") return "Offline mode — sync paused";
+    if (mode === "offline") return "Offline mode — sync paused (tap Online)";
     if (!relayReady) return "Local group · Invite with QR";
     if (guest && !connected) {
       return "Joined copy · host Connects, you use their join code";
@@ -158,6 +155,9 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
     if (!connected) return "Not connected · host can Connect for easy invite";
     if (paused) return "Sync paused for this group";
     if (sync.lastError) return sync.lastError;
+    if (!networkOnline) {
+      return "Browser says offline — Sync may still work; tap Sync now";
+    }
     if (ago) return `Synced ${ago}`;
     return "Connected · not synced yet";
   })();
@@ -302,10 +302,12 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         </ConnectSafelyHelpButton>
       </div>
 
-      {!networkOnline && (
+      {mode === "online" && !networkOnline && (
         <p className="text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
           <CloudOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          No Wi‑Fi or cell data — meetings and notes still work here.
+          Phone may still have data — tap{" "}
+          <strong className="font-semibold">Sync now</strong> to try the group
+          room anyway.
         </p>
       )}
 

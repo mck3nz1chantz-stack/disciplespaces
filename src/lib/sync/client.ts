@@ -63,10 +63,11 @@ async function relayFetch(
     return await fetch(`${base}${path}`, {
       ...init,
       headers,
+      cache: "no-store",
     });
   } catch {
     throw new Error(
-      "Couldn’t reach the group connection (network). Check Wi‑Fi/cell, stay Online, and try Sync again.",
+      "Couldn’t reach the group room. Check Wi‑Fi/cell, set the group to Online (not Offline mode), then Sync again. If it keeps failing, the host may need to share a fresh join code.",
     );
   }
 }

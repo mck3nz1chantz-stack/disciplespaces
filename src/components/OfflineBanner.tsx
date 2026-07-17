@@ -4,15 +4,14 @@ import { OFFLINE_BANNER_HINT } from "../lib/legal";
 import { useOnlineMode } from "../hooks/useOnlineMode";
 
 /**
- * Banner when browser has no network OR user chose Offline mode.
+ * Banner when user chose Offline mode (intentional).
+ * Browser navigator.onLine is too unreliable to banner on — it blocked Sync.
  */
 export function OfflineBanner() {
-  const { mode, networkOnline, setOnlineMode } = useOnlineMode();
+  const { mode, setOnlineMode } = useOnlineMode();
 
-  const noNetwork = !networkOnline;
   const preferOffline = mode === "offline";
-
-  if (!noNetwork && !preferOffline) return null;
+  if (!preferOffline) return null;
 
   return (
     <div
@@ -23,31 +22,23 @@ export function OfflineBanner() {
       <div className="mx-auto max-w-lg safe-x py-2 flex items-start gap-2 text-sm">
         <WifiOff className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
         <p className="min-w-0 flex-1">
-          {noNetwork ? (
-            <>
-              <span className="font-medium">No network. </span>
-              {OFFLINE_BANNER_HINT}{" "}
-            </>
-          ) : (
-            <>
-              <span className="font-medium">Offline mode. </span>
-              Groups stay on this phone — no sync until you turn Online on.{" "}
-              <button
-                type="button"
-                className="font-medium underline underline-offset-2 touch-manipulation"
-                onClick={() => setOnlineMode("online")}
-              >
-                Go Online
-              </button>
-              {" · "}
-            </>
-          )}
+          <span className="font-medium">Offline mode. </span>
+          Groups stay on this phone — no sync until you turn Online on.{" "}
+          <button
+            type="button"
+            className="font-medium underline underline-offset-2 touch-manipulation"
+            onClick={() => setOnlineMode("online")}
+          >
+            Go Online
+          </button>
+          {" · "}
           <Link
             to="/bible"
             className="font-medium underline underline-offset-2"
           >
             Bible
           </Link>
+          <span className="text-xs opacity-80"> · {OFFLINE_BANNER_HINT}</span>
         </p>
       </div>
     </div>

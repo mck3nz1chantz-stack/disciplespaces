@@ -22,12 +22,10 @@ export function OfflineIndicator() {
     });
   }
 
-  const offlineLook = mode === "offline" || !networkOnline;
-  const label = !networkOnline
-    ? "No network"
-    : mode === "offline"
-      ? "Offline"
-      : "Online";
+  // Only treat app Offline mode as "offline look" for the toggle —
+  // browser onLine is unreliable and was scaring people off Sync.
+  const offlineLook = mode === "offline";
+  const label = mode === "offline" ? "Offline" : "Online";
 
   return (
     <button
@@ -42,13 +40,15 @@ export function OfflineIndicator() {
       ].join(" ")}
       title={
         offlineLook
-          ? "Offline mode or no network — tap to set Online"
-          : "Online — tap to work offline only"
+          ? "Offline mode — tap to set Online so groups can sync"
+          : networkOnline
+            ? "Online — tap to work offline only"
+            : "Online mode — Sync will try the network even if the browser is unsure"
       }
       aria-label={
         offlineLook
-          ? "Offline. Tap to switch to Online mode"
-          : "Online. Tap to switch to Offline mode"
+          ? "Offline mode. Tap to switch to Online mode"
+          : "Online mode. Tap to switch to Offline mode"
       }
     >
       {offlineLook ? (
