@@ -66,10 +66,14 @@ async function relayFetch(
       ...init,
       headers,
       cache: "no-store",
+      // Explicit CORS for cross-origin Workers relay
+      mode: "cors",
+      credentials: "omit",
     });
   } catch {
+    // Network/DNS/blocked — does NOT delete any local Space data
     throw new Error(
-      "Couldn’t reach the group room. Check Wi‑Fi/cell, set the group to Online (not Offline mode), then Sync again. If it keeps failing, the host may need to share a fresh join code.",
+      "Couldn’t reach the shared room right now (network). Your group is still saved on this phone — nothing was deleted. Stay Online, try Sync again, or save a group file from Settings. If it keeps failing, re-Join with the host’s current room key.",
     );
   }
 }

@@ -24,6 +24,11 @@ import {
   isSpaceRelayConfigured,
   normalizeSpaceSync,
 } from "../lib/sync";
+import {
+  downloadTextFile,
+  exportFilename,
+  formatExportShareText,
+} from "../lib/share";
 import type { Space } from "../types";
 
 interface SpaceConnectionBarProps {
@@ -50,6 +55,7 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const connectSpaceToRelay = useAppStore((s) => s.connectSpaceToRelay);
   const syncSpaceNow = useAppStore((s) => s.syncSpaceNow);
   const setSpaceSyncPaused = useAppStore((s) => s.setSpaceSyncPaused);
+  const buildSpaceExportPayload = useAppStore((s) => s.buildSpaceExportPayload);
 
   const { mode, networkOnline, setOnlineMode } = useOnlineMode();
   const [busy, setBusy] = useState(false);
@@ -65,6 +71,26 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const paused = sync.paused === true;
   const ago = lastSyncedLabel(sync.lastSyncedAt);
   const roomKey = sync.shortCode;
+
+  /** Local file backup — works with no network. Never loses the Space. */
+  async function saveGroupFile() {
+    try {
+      const payload = await buildSpaceExportPayload(space.id);
+      downloadTextFile(
+        exportFilename(payload.space.name),
+        formatExportShareText(payload),
+      );
+      toast.success("Group file saved on this phone", {
+        description:
+          "Your meetings are in that file (DSX1.). Private “Just for me” notes stay in the app only. Keep the file in Files / Drive / email.",
+        duration: 7000,
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not save group file",
+      );
+    }
+  }
 
   async function handleSync() {
     if (!connected) return;
@@ -87,7 +113,15 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Sync failed";
-      toast.error(msg, { duration: 8000 });
+      toast.error(msg, {
+        duration: 12000,
+        description:
+          "Your group is still on this phone. Nothing was deleted. Save a group file as a safety net.",
+        action: {
+          label: "Save group file",
+          onClick: () => void saveGroupFile(),
+        },
+      });
     } finally {
       setBusy(false);
     }
@@ -293,12 +327,24 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       )}
 
       {sync.lastError && (
-        <p
-          className="text-xs text-danger leading-relaxed rounded-lg border border-danger/30 bg-danger/5 px-2.5 py-2"
+        <div
+          className="text-xs leading-relaxed rounded-lg border border-danger/30 bg-danger/5 px-2.5 py-2 space-y-2"
           role="alert"
         >
-          {sync.lastError}
-        </p>
+          <p className="text-danger">{sync.lastError}</p>
+          <p className="text-muted">
+            <strong className="text-primary">Your Space is still here</strong> —
+            failed Sync never deletes meetings or notes. Save a group file so
+            you can’t lose it.
+          </p>
+          <Button
+            variant="secondary"
+            className="!py-2 w-full"
+            onClick={() => void saveGroupFile()}
+          >
+            Save group file now
+          </Button>
+        </div>
       )}
 
       <div className="flex gap-2">
@@ -356,7 +402,14 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         </p>
       )}
 
-      <div className="flex justify-center">
+      <div className="flex flex-col sm:flex-row gap-2 justify-center items-stretch sm:items-center">
+        <Button
+          variant="ghost"
+          className="!py-2 !text-xs"
+          onClick={() => void saveGroupFile()}
+        >
+          Save group file (backup)
+        </Button>
         <ConnectSafelyHelpButton onClick={() => setGuideOpen(true)}>
           {connected ? "How room keys & Sync work" : "How sharing works"}
         </ConnectSafelyHelpButton>
