@@ -37,8 +37,23 @@ import {
   normalizeSpaceSync,
   pullRoom as relayPullRoom,
   pushRoom as relayPushRoom,
+  rotateJoinCode as relayRotateJoinCode,
   SpaceRelayNotConfiguredError,
 } from "../lib/sync";
+import {
+  clearPendingGroupKeySecret,
+  createRotationProposal,
+  generateGroupKey,
+  getGroupKeyMeta,
+  getPendingGroupKeySecret,
+  getStoredGroupKey,
+  persistGroupKey,
+  setPendingGroupKeySecret,
+  allMembersApproved,
+  type GroupKeyMeta,
+  type GroupKeyRotationProposal,
+} from "../lib/keys/groupKey";
+import { sha256Hex } from "../lib/keys/crypto";
 import {
   buildInvitePayload,
   deriveInviteCode,
@@ -56,11 +71,14 @@ import {
   normalizeSpaceTemplate,
 } from "../lib/spaceTemplates";
 import { emptyResponses } from "../lib/sessionResponses";
+import { suggestTitleFromPassages } from "../lib/sessionTitle";
 
 interface SessionInput {
   spaceId: string;
   date?: string;
   templateId: string;
+  /** Optional meeting title (e.g. primary passage / lesson name). */
+  title?: string;
   attendees: string[];
   responses?: SessionResponses;
   passagesStudied?: Passage[];
@@ -131,6 +149,7 @@ interface AppState {
         Session,
         | "date"
         | "templateId"
+        | "title"
         | "attendees"
         | "responses"
         | "notes"
@@ -283,6 +302,52 @@ interface AppState {
     spaceId: string,
     sync: Partial<SpaceSyncState>,
   ) => Promise<Space>;
+
+  /**
+   * Ensure this Space has a Group Key on this device.
+   * Does not wipe data. Returns secret only when newly created.
+   */
+  ensureSpaceGroupKey: (
+    spaceId: string,
+  ) => Promise<{ meta: GroupKeyMeta; secret: string | null }>;
+
+  /**
+   * Any member may propose Group Key regenerate.
+   * Solo member completes immediately (unanimous of 1).
+   */
+  proposeGroupKeyRotation: (
+    spaceId: string,
+    actor: { memberId: string; memberName: string },
+  ) => Promise<{
+    completed: boolean;
+    newSecret?: string;
+    fingerprint?: string;
+    space: Space;
+  }>;
+
+  /** Record approval; completes when all members have approved. */
+  approveGroupKeyRotation: (
+    spaceId: string,
+    actor: { memberId: string; memberName: string; onBehalf?: boolean },
+  ) => Promise<{
+    completed: boolean;
+    newSecret?: string;
+    fingerprint?: string;
+    space: Space;
+  }>;
+
+  cancelGroupKeyRotation: (spaceId: string) => Promise<Space>;
+
+  /**
+   * When all members have approved, the proposing device (holds pending secret)
+   * finalizes: persists new Group Key + rotates join code if connected.
+   */
+  finalizeGroupKeyRotation: (spaceId: string) => Promise<{
+    completed: boolean;
+    newSecret?: string;
+    fingerprint?: string;
+    space: Space;
+  }>;
 }
 
 function sortSessions(sessions: Session[]): Session[] {
@@ -646,6 +711,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...row,
       members: row.members.filter((m) => m.id !== memberId),
     };
+    // Drop removed member from any pending unanimous rotation requirement
+    const sync = normalizeSpaceSync(nextRow.sync);
+    if (sync.groupKeyRotation?.status === "pending") {
+      const rot = sync.groupKeyRotation;
+      nextRow.sync = {
+        ...sync,
+        groupKeyRotation: {
+          ...rot,
+          requiredMemberIds: rot.requiredMemberIds.filter(
+            (id) => id !== memberId,
+          ),
+          approvals: rot.approvals.filter((a) => a.memberId !== memberId),
+        },
+      };
+    }
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
     set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
@@ -656,6 +736,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     spaceId,
     date,
     templateId,
+    title,
     attendees,
     responses,
     passagesStudied,
@@ -677,6 +758,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       spaceId,
       date: toIsoDate(date),
       templateId,
+      title: title?.trim() || undefined,
       attendees: validAttendees,
       passagesStudied: passagesStudied ?? [],
       responses: responses ?? {},
@@ -718,6 +800,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...patch,
       date,
       attendees,
+      title:
+        patch.title !== undefined
+          ? patch.title.trim() || undefined
+          : existing.title,
       responses:
         patch.responses !== undefined
           ? patch.responses
@@ -772,7 +858,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(existing.passagesStudied ?? []),
       passage,
     ];
-    return get().updateSession(sessionId, { passagesStudied });
+    // If the meeting has no custom title yet, seed from primary passage
+    // so Past meetings stays scannable after Bible logging.
+    const patch: {
+      passagesStudied: typeof passagesStudied;
+      title?: string;
+    } = { passagesStudied };
+    if (!existing.title?.trim()) {
+      const suggested = suggestTitleFromPassages(passagesStudied);
+      if (suggested) patch.title = suggested;
+    }
+    return get().updateSession(sessionId, patch);
   },
 
   setSessionPassages: async (sessionId, passages) => {
@@ -1152,10 +1248,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   patchSpaceSync: async (spaceId, syncPatch) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
-    const nextSync = normalizeSpaceSync({
+    const merged: SpaceSyncState = {
       ...normalizeSpaceSync(row.sync),
       ...syncPatch,
-    });
+    };
+    // Explicit clear for rotation complete/cancel (undefined alone may not wipe Dexie)
+    if (
+      Object.prototype.hasOwnProperty.call(syncPatch, "groupKeyRotation") &&
+      syncPatch.groupKeyRotation == null
+    ) {
+      delete merged.groupKeyRotation;
+    }
+    const nextSync = normalizeSpaceSync(merged);
+    if (
+      Object.prototype.hasOwnProperty.call(syncPatch, "groupKeyRotation") &&
+      syncPatch.groupKeyRotation == null
+    ) {
+      delete nextSync.groupKeyRotation;
+    }
     const nextRow: SpaceRow = { ...row, sync: nextSync };
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
@@ -1548,7 +1658,251 @@ export const useAppStore = create<AppState>((set, get) => ({
   deletePrayerBoardEntry: async (id) => {
     await db.prayerBoard.delete(id);
   },
+
+  ensureSpaceGroupKey: async (spaceId) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const existingMeta = getGroupKeyMeta(spaceId);
+    const existingSecret = getStoredGroupKey(spaceId);
+    if (existingMeta && existingSecret) {
+      const sync = normalizeSpaceSync(row.sync);
+      if (sync.groupKeyFingerprint !== existingMeta.fingerprint) {
+        await get().patchSpaceSync(spaceId, {
+          groupKeyFingerprint: existingMeta.fingerprint,
+          groupKeyId: existingMeta.keyId,
+        });
+      }
+      return { meta: existingMeta, secret: null };
+    }
+    const { secret, meta: gen } = await generateGroupKey();
+    const meta = await persistGroupKey(spaceId, secret, gen);
+    await get().patchSpaceSync(spaceId, {
+      groupKeyFingerprint: meta.fingerprint,
+      groupKeyId: meta.keyId,
+      groupKeyRotatedAt: meta.createdAt,
+    });
+    return { meta, secret };
+  },
+
+  proposeGroupKeyRotation: async (spaceId, actor) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    if (row.members.length === 0) {
+      throw new Error("Add members before rotating the Group Key");
+    }
+    const sync = normalizeSpaceSync(row.sync);
+    if (sync.groupKeyRotation?.status === "pending") {
+      throw new Error(
+        "A Group Key rotation is already waiting for approvals. Finish or cancel it first.",
+      );
+    }
+    if (!row.members.some((m) => m.id === actor.memberId)) {
+      throw new Error("Only current members may propose a Group Key change");
+    }
+
+    const { secret, meta: gen } = await generateGroupKey();
+    const proposedKeyHash = await sha256Hex(secret);
+    setPendingGroupKeySecret(spaceId, secret);
+
+    const proposal = createRotationProposal({
+      spaceId,
+      proposedKeyHash,
+      proposedFingerprint: gen.fingerprint,
+      proposedByMemberId: actor.memberId,
+      proposedByName: actor.memberName,
+      requiredMemberIds: row.members.map((m) => m.id),
+    });
+
+    // Solo member = unanimous of one → complete immediately
+    if (proposal.requiredMemberIds.length === 1) {
+      return completeGroupKeyRotationLocal(
+        get,
+        spaceId,
+        secret,
+        gen.fingerprint,
+        proposedKeyHash,
+      );
+    }
+
+    const space = await get().patchSpaceSync(spaceId, {
+      groupKeyRotation: {
+        id: proposal.id,
+        proposedKeyHash: proposal.proposedKeyHash,
+        proposedFingerprint: proposal.proposedFingerprint,
+        proposedByMemberId: proposal.proposedByMemberId,
+        proposedByName: proposal.proposedByName,
+        proposedAt: proposal.proposedAt,
+        requiredMemberIds: proposal.requiredMemberIds,
+        approvals: proposal.approvals,
+        status: "pending",
+      },
+    });
+    return { completed: false, space };
+  },
+
+  approveGroupKeyRotation: async (spaceId, actor) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const sync = normalizeSpaceSync(row.sync);
+    const rot = sync.groupKeyRotation;
+    if (!rot || rot.status !== "pending") {
+      throw new Error("No Group Key rotation is waiting for approval");
+    }
+    if (!rot.requiredMemberIds.includes(actor.memberId)) {
+      throw new Error("This person is not on the current member list");
+    }
+    if (rot.approvals.some((a) => a.memberId === actor.memberId)) {
+      // Already approved — maybe complete if everyone else done
+      if (allMembersApproved(rot as GroupKeyRotationProposal)) {
+        const secret = getPendingGroupKeySecret(spaceId);
+        if (!secret) {
+          throw new Error(
+            "New Group Key is not on this device. Ask the proposer to finish on their phone, or cancel and re-propose.",
+          );
+        }
+        return completeGroupKeyRotationLocal(
+          get,
+          spaceId,
+          secret,
+          rot.proposedFingerprint,
+          rot.proposedKeyHash,
+        );
+      }
+      return {
+        completed: false,
+        space: await hydrateSpace(row),
+      };
+    }
+
+    const nextRot = {
+      ...rot,
+      approvals: [
+        ...rot.approvals,
+        {
+          memberId: actor.memberId,
+          name: actor.memberName,
+          at: new Date().toISOString(),
+          onBehalf: actor.onBehalf === true,
+        },
+      ],
+    };
+
+    const spaceMid = await get().patchSpaceSync(spaceId, {
+      groupKeyRotation: nextRot,
+    });
+
+    if (!allMembersApproved(nextRot as GroupKeyRotationProposal)) {
+      return { completed: false, space: spaceMid };
+    }
+
+    const secret = getPendingGroupKeySecret(spaceId);
+    if (!secret) {
+      // Approvals complete; proposer device must finalize with pending secret
+      return {
+        completed: false,
+        space: spaceMid,
+      };
+    }
+    return completeGroupKeyRotationLocal(
+      get,
+      spaceId,
+      secret,
+      rot.proposedFingerprint,
+      rot.proposedKeyHash,
+    );
+  },
+
+  cancelGroupKeyRotation: async (spaceId) => {
+    clearPendingGroupKeySecret(spaceId);
+    return get().patchSpaceSync(spaceId, {
+      groupKeyRotation: undefined,
+    });
+  },
+
+  finalizeGroupKeyRotation: async (spaceId) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const sync = normalizeSpaceSync(row.sync);
+    const rot = sync.groupKeyRotation;
+    if (!rot || rot.status !== "pending") {
+      throw new Error("No Group Key rotation in progress");
+    }
+    if (!allMembersApproved(rot as GroupKeyRotationProposal)) {
+      throw new Error("Not all members have approved yet");
+    }
+    const secret = getPendingGroupKeySecret(spaceId);
+    if (!secret) {
+      throw new Error(
+        "This phone does not hold the new Group Key. Finish on the device that tapped Regenerate, then share the new key with members.",
+      );
+    }
+    return completeGroupKeyRotationLocal(
+      get,
+      spaceId,
+      secret,
+      rot.proposedFingerprint,
+      rot.proposedKeyHash,
+    );
+  },
 }));
+
+async function completeGroupKeyRotationLocal(
+  get: () => AppState,
+  spaceId: string,
+  secret: string,
+  fingerprint: string,
+  _proposedKeyHash: string,
+): Promise<{
+  completed: boolean;
+  newSecret: string;
+  fingerprint: string;
+  space: Space;
+}> {
+  const meta = await persistGroupKey(spaceId, secret, {
+    fingerprint,
+    createdAt: new Date().toISOString(),
+  });
+  clearPendingGroupKeySecret(spaceId);
+
+  const row = await db.spaces.get(spaceId);
+  const sync = normalizeSpaceSync(row?.sync);
+  let shortCode = sync.shortCode;
+  let remoteRev = sync.remoteRev;
+
+  if (
+    isSpaceRelayConfigured() &&
+    sync.mode === "connected" &&
+    sync.roomId
+  ) {
+    try {
+      const rotated = await relayRotateJoinCode({
+        roomId: sync.roomId,
+        groupKeyHash: meta.verifier,
+      });
+      shortCode = rotated.shortCode;
+      remoteRev = rotated.rev;
+    } catch {
+      // Local key still rotates; join code may stay until next Connect
+    }
+  }
+
+  const space = await get().patchSpaceSync(spaceId, {
+    groupKeyFingerprint: meta.fingerprint,
+    groupKeyId: meta.keyId,
+    groupKeyRotatedAt: new Date().toISOString(),
+    groupKeyRotation: undefined,
+    shortCode,
+    remoteRev,
+    lastError: undefined,
+  });
+
+  return {
+    completed: true,
+    newSecret: secret,
+    fingerprint: meta.fingerprint,
+    space,
+  };
+}
 
 function normalizePrayerStatus(
   value: unknown,

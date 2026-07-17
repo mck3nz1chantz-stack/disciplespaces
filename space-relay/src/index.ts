@@ -45,6 +45,8 @@ interface RoomState {
   members: RoomMember[];
   createdAt: string;
   updatedAt: string;
+  /** Optional Group Key hash (server never stores raw Group Key). */
+  groupKeyHash?: string;
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -183,6 +185,13 @@ export default {
       /** Peek at group name + members without joining (for “Who are you?”). */
       if (path === "/rooms/preview" && req.method === "POST") {
         return previewRoom(req, env);
+      }
+
+      // POST /rooms/:roomId/rotate-code — new short join code after Group Key rotate
+      const rotateMatch = path.match(/^\/rooms\/([^/]+)\/rotate-code$/);
+      if (rotateMatch && req.method === "POST") {
+        const roomKey = decodeURIComponent(rotateMatch[1]!);
+        return rotateRoomJoinCode(req, env, roomKey);
       }
 
       const roomMatch = path.match(/^\/rooms\/([^/]+)$/);
@@ -437,6 +446,72 @@ async function previewRoom(req: Request, env: Env): Promise<Response> {
   );
 }
 
+/**
+ * Issue a new short join code for an existing room (Group Key rotation).
+ * Binds new code; room keeps same roomId and snapshot.
+ */
+async function rotateRoomJoinCode(
+  req: Request,
+  env: Env,
+  roomKey: string,
+): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as {
+    deviceId?: string;
+    groupKeyHash?: string;
+  };
+  const roomStub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`room:${roomKey}`),
+  );
+  const newShortCode = makeShortCode();
+  const rotateRes = await roomStub.fetch(
+    new Request("https://room/rotate-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shortCode: newShortCode,
+        groupKeyHash: body.groupKeyHash,
+        deviceId: body.deviceId || deviceIdFrom(req),
+      }),
+    }),
+  );
+  if (!rotateRes.ok) {
+    const err = (await rotateRes.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    return error(err.error || "Could not rotate join code", rotateRes.status, req);
+  }
+  const state = (await rotateRes.json()) as RoomState;
+
+  // Bind new code index
+  const bindPayload = JSON.stringify({
+    roomId: state.roomId,
+    shortCode: state.shortCode,
+  });
+  const keys = new Set<string>([
+    normalizeShortCode(state.shortCode),
+    state.shortCode.trim().toUpperCase(),
+  ]);
+  for (const key of keys) {
+    if (!key) continue;
+    const codeStub = env.SPACE_ROOM.get(
+      env.SPACE_ROOM.idFromName(`code:${key}`),
+    );
+    await codeStub.fetch(
+      new Request("https://room/bind-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bindPayload,
+      }),
+    );
+  }
+
+  return json(
+    { shortCode: state.shortCode, rev: state.rev, roomId: state.roomId },
+    200,
+    req,
+  );
+}
+
 async function joinRoom(req: Request, env: Env): Promise<Response> {
   const body = (await req.json()) as {
     shortCode?: string;
@@ -623,6 +698,32 @@ export class SpaceRoom implements DurableObject {
     if (req.method === "DELETE") {
       await this.state.storage.deleteAll();
       return Response.json({ ok: true });
+    }
+
+    if (path === "/rotate-code" && req.method === "POST") {
+      const room = await this.state.storage.get<RoomState>("room");
+      if (!room) {
+        return Response.json({ error: "Room not found" }, { status: 404 });
+      }
+      const body = (await req.json()) as {
+        shortCode: string;
+        groupKeyHash?: string;
+        deviceId?: string;
+      };
+      if (!body.shortCode) {
+        return Response.json(
+          { error: "shortCode required" },
+          { status: 400 },
+        );
+      }
+      room.shortCode = body.shortCode;
+      if (body.groupKeyHash) {
+        room.groupKeyHash = body.groupKeyHash;
+      }
+      room.rev += 1;
+      room.updatedAt = new Date().toISOString();
+      await this.state.storage.put("room", room);
+      return Response.json(room);
     }
 
     return Response.json({ error: "Not found" }, { status: 404 });

@@ -53,6 +53,11 @@ import {
   validateRequiredResponses,
 } from "../lib/sessionResponses";
 import {
+  sessionDisplayTitle,
+  sessionTitleSubtitle,
+  suggestTitleFromPassages,
+} from "../lib/sessionTitle";
+import {
   SPACE_TEMPLATES,
   countSessionsByMode,
   getSpaceTemplateMeta,
@@ -418,6 +423,7 @@ export function SpaceDetail() {
         members: space.members,
         meetingDate: toDateInputValue(s.date),
         templateId: s.templateId,
+        title: s.title ?? "",
         attendees: s.attendees,
         responses: s.responses,
         passagesStudied: s.passagesStudied ?? [],
@@ -592,12 +598,19 @@ export function SpaceDetail() {
       return;
     }
 
+    // Prefer typed title; if blank, store passage suggestion so Past meetings stays clear
+    const titleToSave =
+      formValues.title.trim() ||
+      suggestTitleFromPassages(passagesStudied) ||
+      undefined;
+
     setSaving(true);
     try {
       if (activeSession) {
         const updated = await updateSession(activeSession.id, {
           date: formValues.meetingDate,
           templateId: formValues.templateId,
+          title: titleToSave ?? "",
           attendees: formValues.attendees,
           responses: formValues.responses,
           passagesStudied,
@@ -615,6 +628,7 @@ export function SpaceDetail() {
           spaceId: space.id,
           date: formValues.meetingDate,
           templateId: formValues.templateId,
+          title: titleToSave,
           attendees: formValues.attendees,
           responses: formValues.responses,
           passagesStudied,
@@ -716,11 +730,17 @@ export function SpaceDetail() {
       ? "Start new session"
       : sessionMode === "edit"
         ? isDraftSession
-          ? liveSessionTemplate?.name || "New session"
-          : "Edit session"
-        : sessionMode === "view"
-          ? viewTemplate?.name || "Session"
-          : "";
+          ? formValues?.title?.trim() ||
+            liveSessionTemplate?.name ||
+            "New session"
+          : formValues?.title?.trim()
+            ? `Edit · ${formValues.title.trim()}`
+            : "Edit session"
+        : sessionMode === "view" && activeSession
+          ? sessionDisplayTitle(activeSession, viewTemplate)
+          : sessionMode === "view"
+            ? "Session"
+            : "";
 
   const maxPeople = maxMembersForSpace(space.spaceKind);
   const peopleCount = space.members.length;
@@ -1593,6 +1613,8 @@ function SessionRow({
   const progress = template
     ? countFilledSteps(template, session.responses)
     : null;
+  const heading = sessionDisplayTitle(session, template);
+  const subtitle = sessionTitleSubtitle(session, template);
 
   return (
     <li>
@@ -1610,9 +1632,12 @@ function SessionRow({
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="font-medium text-primary truncate">
-                    {template?.name || "Session"}
+                    {heading}
                   </p>
-                  <p className="text-xs text-muted">{dateLabel}</p>
+                  <p className="text-xs text-muted">
+                    {dateLabel}
+                    {subtitle ? ` · ${subtitle}` : ""}
+                  </p>
                 </div>
                 <ChevronRight
                   className="h-5 w-5 shrink-0 text-muted mt-0.5"

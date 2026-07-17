@@ -10,7 +10,7 @@ Mobile-first PWA for small-group discipleship (1–5 people).
 - Vite + React 18 + TypeScript (strict)
 - Tailwind CSS 4
 - Dexie.js (IndexedDB)
-- vite-plugin-pwa
+- PWA (`public/manifest.webmanifest` + `public/sw.js`)
 - Zustand, React Router, date-fns, lucide-react, sonner
 
 ## Commands
@@ -58,10 +58,11 @@ Dexie schema notes: **[MIGRATIONS.md](./MIGRATIONS.md)**.
 | Data | Storage | Leaves device? |
 |------|---------|----------------|
 | Spaces, sessions, prayer board | IndexedDB | File backup (DSX1) and/or **opt-in** Space room when Connect is used |
-| Private notes | IndexedDB (`privateNotes`) | **Never** |
+| Private notes | IndexedDB (`privateNotes`) | **Never** by default; optional encrypted personal backup (`DSP1.`) with Account Key |
 | Bible (KJV) | Local / cached | Public domain text only |
+| Account Key / Group Key | localStorage (optional) | You hold the secret; server may store Group Key **hash** only after rotate |
 
-Default mode is **local-only**. Preview `pages.dev` is fine until a custom product domain. See **Your Spaces & data** in Settings and `space-relay/README.md`.
+Default mode is **local-only** — no keys required. See **Your Spaces & data**, **Account Key**, and `docs/final/keys-product-spec.md`.
 
 ## Launcher (read-only)
 

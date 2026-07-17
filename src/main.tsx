@@ -1,6 +1,5 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { registerSW } from "virtual:pwa-register";
 import App from "./App";
 import "./index.css";
 import { useAppStore } from "./stores/useAppStore";
@@ -17,20 +16,28 @@ applyTheme(getStoredThemePreference());
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
-  </StrictMode>
+  </StrictMode>,
 );
 
-// Register service worker for offline app shell (production builds).
-if ("serviceWorker" in navigator) {
-  registerSW({
-    immediate: true,
-    onRegisteredSW(_swUrl, registration) {
-      if (registration) {
+/** Register public/sw.js for offline shell + Bible cache (production / preview). */
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  // Skip noisy SW on pure Vite HMR unless explicitly testing PWA
+  if (import.meta.env.DEV) {
+    return;
+  }
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker
+      .register("/sw.js", { scope: "/" })
+      .then((registration) => {
         useAppStore.getState().setOfflineReady(true);
-      }
-    },
-    onOfflineReady() {
-      useAppStore.getState().setOfflineReady(true);
-    },
+        // Check for updates periodically
+        registration.update().catch(() => {});
+      })
+      .catch(() => {
+        // Offline shell not required for first paint
+      });
   });
 }
+
+registerServiceWorker();

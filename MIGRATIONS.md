@@ -25,6 +25,19 @@ Applied in `src/lib/db.ts` via `this.version(n).stores(...).upgrade(...)`.
 | 6 | Shared `prayerBoard` table (individual/group scopes; included in Space Update export) |
 | 7 | `space.sync` metadata (default `local-only`) + `syncQueue` table for opportunistic shared-layer push; **privateNotes never queued** |
 
+### Account Key / Group Key (no Dexie bump)
+
+Optional keys store secrets in **localStorage / sessionStorage** only. Optional
+fields on `space.sync` (`groupKeyFingerprint`, `groupKeyRotation`, …) are
+written when used; missing fields mean “no key yet.” **No table drops, no wipe
+of spaces/sessions/privateNotes.** Personal backup format `DSP1.` is separate
+from `DSX1.` Space Updates.
+
+### Session title (no Dexie bump)
+
+Optional `session.title` string on session rows. Older sessions without `title`
+keep working — UI falls back to primary passage ref, then template name.
+
 `CURRENT_SCHEMA_VERSION` should match the highest entry.
 
 ### v7 notes (Space relay readiness)

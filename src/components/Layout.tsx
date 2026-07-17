@@ -70,8 +70,8 @@ export function Layout() {
   }
 
   return (
-    <div className="min-h-dvh flex flex-col bg-bg text-text">
-      <header className="safe-top sticky top-0 z-20 border-b border-border bg-bg/95 backdrop-blur-sm">
+    <div className="relative z-[1] min-h-dvh flex flex-col bg-transparent text-text">
+      <header className="safe-top sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur-md">
         <div className="mx-auto max-w-lg safe-x py-2.5 flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-muted flex items-center gap-1.5 flex-wrap">
@@ -102,12 +102,12 @@ export function Layout() {
       <TestingPhaseRibbon />
       <OfflineBanner />
 
-      <main className="flex-1 mx-auto w-full max-w-lg safe-x py-4 pb-nav">
+      <main className="relative z-[1] flex-1 mx-auto w-full max-w-lg safe-x py-4 pb-nav">
         <Outlet />
       </main>
 
       <nav
-        className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/95 backdrop-blur-sm safe-bottom safe-x"
+        className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/92 backdrop-blur-md safe-bottom safe-x"
         aria-label="Main"
       >
         <ul className="mx-auto max-w-lg grid grid-cols-3">

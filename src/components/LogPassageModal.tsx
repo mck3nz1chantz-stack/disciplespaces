@@ -7,6 +7,7 @@ import {
   isValidPassage,
   passageFromSelection,
 } from "../lib/passages";
+import { sessionDisplayTitle } from "../lib/sessionTitle";
 import { useAppStore } from "../stores/useAppStore";
 import { useBibleStore } from "../stores/useBibleStore";
 import { Modal } from "./Modal";
@@ -466,7 +467,8 @@ function sessionLabel(session: Session, templates: Template[]): string {
   } catch {
     // keep
   }
-  const tpl = templates.find((t) => t.id === session.templateId)?.name;
+  const tpl = templates.find((t) => t.id === session.templateId);
+  const title = sessionDisplayTitle(session, tpl);
   const n = session.passagesStudied?.length ?? 0;
-  return `${date}${tpl ? ` · ${tpl}` : ""}${n ? ` · ${n} passage${n === 1 ? "" : "s"}` : ""}`;
+  return `${date} · ${title}${n ? ` · ${n} passage${n === 1 ? "" : "s"}` : ""}`;
 }

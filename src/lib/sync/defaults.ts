@@ -14,6 +14,13 @@ export function normalizeSpaceSync(
   // Missing role → host so pre-role installs keep Connect
   const deviceRole: SpaceDeviceRole =
     sync.deviceRole === "guest" ? "guest" : "host";
+  const groupFields = {
+    groupKeyFingerprint: sync.groupKeyFingerprint,
+    groupKeyId: sync.groupKeyId,
+    groupKeyRotatedAt: sync.groupKeyRotatedAt,
+    groupKeyRotation: sync.groupKeyRotation,
+  };
+
   if (sync.mode === "connected") {
     return {
       mode: "connected",
@@ -24,6 +31,7 @@ export function normalizeSpaceSync(
       paused: sync.paused === true,
       lastError: sync.lastError,
       deviceRole,
+      ...groupFields,
     };
   }
   return {
@@ -31,6 +39,7 @@ export function normalizeSpaceSync(
     lastSyncedAt: sync.lastSyncedAt,
     lastError: sync.lastError,
     deviceRole,
+    ...groupFields,
   };
 }
 

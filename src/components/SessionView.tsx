@@ -10,6 +10,10 @@ import type {
 } from "../types";
 import { PRIVATE_SECTION } from "../types";
 import { mergeResponses } from "../lib/sessionResponses";
+import {
+  sessionDisplayTitle,
+  sessionTitleSubtitle,
+} from "../lib/sessionTitle";
 import { PassageList } from "./PassageList";
 import { Button } from "./Button";
 import { PrayerBoard } from "./PrayerBoard";
@@ -58,14 +62,23 @@ export function SessionView({
   const notes =
     session.notes?.trim() || session.sharedNotes?.trim() || "";
 
+  const heading = sessionDisplayTitle(session, template);
+  const styleLine = sessionTitleSubtitle(session, template);
+
   return (
     <div className="space-y-5">
       <div className="space-y-1">
         <p className="text-sm text-muted">{dateLabel}</p>
-        <p className="font-medium text-primary">
-          {template?.name ?? "Session"}
+        <p className="font-medium text-primary text-lg leading-snug">
+          {heading}
         </p>
-        {template?.description && (
+        {styleLine && (
+          <p className="text-xs text-muted">
+            {styleLine}
+            {template?.description ? ` · ${template.description}` : ""}
+          </p>
+        )}
+        {!styleLine && template?.description && (
           <p className="text-xs text-muted">{template.description}</p>
         )}
       </div>

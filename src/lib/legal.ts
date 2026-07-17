@@ -78,7 +78,7 @@ export const BACKUP_HEADLINE = DATA_CONFIDENCE_HEADLINE;
 export const BACKUP_BODY = DATA_CONFIDENCE_BODY;
 
 export const PRIVATE_NOTES_PILL =
-  "Private notes: this device only · never synced";
+  "Private notes: this device only · never cloud-synced (optional encrypted personal backup with Account Key)";
 
 export const RELAY_COMING_NOTE =
   "Preview builds stay fully on-device until the Space room service is attached. Back up and offline invites (QR / package) work today. When easy join is live on this site, Connect will light up here — your existing Spaces stay put.";
@@ -88,7 +88,7 @@ export const RELAY_CONNECT_CONSENT = `Connect “{name}” for easy invite?
 Only the host should Connect (you created this group on this phone).
 Friends Join with your code — they cannot Connect.
 Shared sessions, members, and prayer board can sync when online.
-Private notes never leave this device.
+Private notes are never sent to the group room.
 You can Unlink anytime — data stays on this phone.
 
 Continue?`;

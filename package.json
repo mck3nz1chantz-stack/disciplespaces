@@ -3,10 +3,14 @@
   "private": true,
   "version": "0.10.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
+    "postinstall": "node scripts/patch-node26-deps.mjs",
     "dev": "vite",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "build": "tsc -p tsconfig.app.json --noEmit && vite build",
+    "build": "node scripts/patch-node26-deps.mjs && tsc -p tsconfig.app.json --noEmit && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces",
     "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces",
@@ -34,8 +38,6 @@
     "@vitejs/plugin-react": "^4.3.4",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.7.2",
-    "vite": "^6.0.7",
-    "vite-plugin-pwa": "^0.21.1",
-    "workbox-window": "^7.3.0"
+    "vite": "^6.0.7"
   }
 }

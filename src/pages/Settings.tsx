@@ -11,6 +11,7 @@ import { ShareUpdateModal } from "../components/ShareUpdateModal";
 import { InstallAppCard } from "../components/InstallAppCard";
 import { StorageUsageCard } from "../components/StorageUsageCard";
 import { YourDataBundle } from "../components/YourDataBundle";
+import { AccountKeyCard } from "../components/AccountKeyCard";
 import { TestingGuideCard } from "../components/TestingPhaseNotice";
 import { FeedbackModal } from "../components/FeedbackModal";
 import { ThemePreferencePicker } from "../components/ThemeToggle";
@@ -119,6 +120,8 @@ export function Settings() {
         onImport={() => openShare("import")}
       />
 
+      <AccountKeyCard />
+
       <StorageUsageCard />
 
       <Card className="space-y-3">
@@ -185,14 +188,18 @@ export function Settings() {
       <Card className="space-y-2">
         <h3 className="text-base font-semibold text-primary">Data boundaries</h3>
         <ul className="text-sm text-muted space-y-1.5 list-disc pl-5">
-          <li>Private notes never leave this device.</li>
           <li>
-            By default Spaces are local-only. Connect (when available) shares
-            only group-facing data for easy join and sync.
+            Private notes stay on this device by default. Optional personal
+            backups (DSP1.) can include them encrypted with your Account Key.
           </li>
           <li>
-            File backups (DSX1.) are still the best safety net for a new phone
-            or wiped browser.
+            By default Spaces are local-only. Connect (when available) shares
+            only group-facing data for easy join and sync — never private notes.
+          </li>
+          <li>
+            File backups (DSX1. group / DSP1. personal) are always available.
+            Account Key and Group Key are optional — never required to use the
+            app.
           </li>
           <li>
             Prefer one stable URL. Preview links are separate storage buckets —

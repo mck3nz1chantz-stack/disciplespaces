@@ -60,6 +60,12 @@ export interface Session {
   spaceId: string;
   date: string; // ISO string (calendar day or full ISO)
   templateId: string;
+  /**
+   * Optional human label for this meeting (e.g. "Romans 13 – Submission").
+   * Missing on older sessions — UI falls back to primary passage, then template name.
+   * Never required; empty/undefined is valid.
+   */
+  title?: string;
   attendees: string[]; // array of member ids
   passagesStudied: Passage[];
   /** Answers keyed by TemplateStep.id */
@@ -89,6 +95,28 @@ export type SpaceSyncMode = "local-only" | "connected";
  */
 export type SpaceDeviceRole = "host" | "guest";
 
+/**
+ * Pending unanimous Group Key rotation (local + optional relay).
+ * Full secret never stored here — only hashes / fingerprints / approvals.
+ */
+export interface GroupKeyRotationState {
+  id: string;
+  proposedKeyHash: string;
+  proposedFingerprint: string;
+  proposedByMemberId: string;
+  proposedByName: string;
+  proposedAt: string;
+  requiredMemberIds: string[];
+  approvals: Array<{
+    memberId: string;
+    name: string;
+    at: string;
+    onBehalf?: boolean;
+  }>;
+  status: "pending" | "completed" | "cancelled";
+  newShortCode?: string;
+}
+
 /** Per-space sync metadata (shared layer only). Stored on the Space row. */
 export interface SpaceSyncState {
   /** local-only = this device; connected = opted into Space room relay. */
@@ -110,6 +138,15 @@ export interface SpaceSyncState {
    * that created groups before roles existed keep Connect).
    */
   deviceRole?: SpaceDeviceRole;
+  /**
+   * Group Key fingerprint (public-ish). Secret lives in localStorage only.
+   * Missing → no Group Key yet (existing rooms keep working).
+   */
+  groupKeyFingerprint?: string;
+  groupKeyId?: string;
+  groupKeyRotatedAt?: string;
+  /** Unanimous regeneration in progress. */
+  groupKeyRotation?: GroupKeyRotationState;
 }
 
 export interface Space {

@@ -33,6 +33,7 @@ import {
   RELAY_CONNECT_CONSENT,
 } from "../lib/legal";
 import { useAppStore } from "../stores/useAppStore";
+import { GroupKeySection } from "./GroupKeySection";
 import type { Space } from "../types";
 
 interface YourDataBundleProps {
@@ -394,6 +395,8 @@ export function YourDataBundle({
                       </>
                     )}
                   </div>
+
+                  <GroupKeySection space={space} />
                 </li>
               );
             })}

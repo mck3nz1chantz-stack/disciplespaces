@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <!-- Solid shapes for CSS mask-image (color comes from background-color) -->
+  <g fill="#000">
+    <path d="M57 28h6v22h18v6H63v28h-6V56H39v-6h18V28z"/>
+    <path d="M18 72h3.5v10h8v3.5h-8v12H18v-12h-8V82h8V72z" opacity="0.55"/>
+    <path d="M96 18h3v9h7v3h-7v11h-3V30h-7v-3h7V18z" opacity="0.45"/>
+  </g>
+</svg>

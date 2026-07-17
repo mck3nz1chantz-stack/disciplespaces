@@ -15,6 +15,10 @@ import {
   emptyResponses,
   mergeResponses,
 } from "../lib/sessionResponses";
+import {
+  SESSION_TITLE_MAX,
+  suggestTitleFromPassages,
+} from "../lib/sessionTitle";
 import { Button } from "./Button";
 import { PassageList } from "./PassageList";
 import { PrayerBoard } from "./PrayerBoard";
@@ -23,6 +27,11 @@ import { PrivateNotesButton } from "./PrivateNotesModal";
 export interface SessionFormValues {
   meetingDate: string; // yyyy-MM-dd
   templateId: string;
+  /**
+   * Optional custom meeting title (e.g. "Romans 13").
+   * Empty string means “use smart fallback” (passage / template) in the list.
+   */
+  title: string;
   attendees: string[];
   responses: SessionResponses;
   passagesStudied: Passage[];
@@ -104,6 +113,16 @@ export function SessionForm({
     patch({ attendees: next });
   }
 
+  const suggestedTitle = suggestTitleFromPassages(values.passagesStudied);
+  const titleLooksSuggested =
+    values.title.trim() !== "" &&
+    values.title.trim() === suggestedTitle;
+
+  function applySuggestedTitle() {
+    if (!suggestedTitle) return;
+    patch({ title: suggestedTitle });
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-5">
       <p className="text-sm text-muted -mt-1">
@@ -114,7 +133,7 @@ export function SessionForm({
           : "Update this meeting’s notes. Template stays the same so answers stay aligned."}
       </p>
 
-      {/* Meta: date + template */}
+      {/* Meta: date + title + template */}
       <section className="space-y-4">
         <label className="block space-y-1.5">
           <span className="text-sm font-medium">Date</span>
@@ -127,6 +146,40 @@ export function SessionForm({
             disabled={saving}
           />
         </label>
+
+        <div className="space-y-1.5">
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium">Meeting title</span>
+            <input
+              type="text"
+              value={values.title}
+              onChange={(e) => patch({ title: e.target.value })}
+              maxLength={SESSION_TITLE_MAX}
+              placeholder={
+                suggestedTitle ||
+                template?.name ||
+                "e.g. Romans 13 – living under authority"
+              }
+              className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+              disabled={saving}
+              autoComplete="off"
+            />
+          </label>
+          <p className="text-xs text-muted leading-relaxed">
+            Shown in Past meetings so you can find this study later. Leave blank
+            to use the main passage (or template name) automatically.
+          </p>
+          {suggestedTitle && !titleLooksSuggested && (
+            <button
+              type="button"
+              onClick={applySuggestedTitle}
+              disabled={saving}
+              className="text-xs font-medium text-primary underline-offset-2 hover:underline touch-manipulation"
+            >
+              Use passage: {suggestedTitle}
+            </button>
+          )}
+        </div>
 
         <label className="block space-y-1.5">
           <span className="text-sm font-medium">Session template</span>
@@ -260,7 +313,19 @@ export function SessionForm({
         </p>
         <PassageList
           passages={values.passagesStudied}
-          onChange={(passagesStudied) => patch({ passagesStudied })}
+          onChange={(passagesStudied) => {
+            const nextSuggest = suggestTitleFromPassages(passagesStudied);
+            const prevSuggest = suggestTitleFromPassages(values.passagesStudied);
+            const current = values.title.trim();
+            // Auto-fill when empty, or keep title in sync if it still matches the
+            // previous passage suggestion (user has not customized it).
+            const shouldAuto =
+              !current || (prevSuggest !== "" && current === prevSuggest);
+            patch({
+              passagesStudied,
+              ...(shouldAuto && nextSuggest ? { title: nextSuggest } : {}),
+            });
+          }}
           disabled={saving}
           emphasizeManual={isFreeform}
         />
@@ -539,6 +604,7 @@ export function buildSessionFormValues(opts: {
   members: Member[];
   meetingDate: string;
   templateId?: string;
+  title?: string;
   attendees?: string[];
   responses?: SessionResponses;
   passagesStudied?: Passage[];
@@ -560,14 +626,22 @@ export function buildSessionFormValues(opts: {
     ? mergeResponses(template, opts.responses)
     : {};
 
+  const passages = opts.passagesStudied ?? [];
+  // Prefer stored title; for new meetings with passages, pre-fill suggestion
+  const title =
+    opts.title?.trim() ||
+    (opts.mode === "create" ? suggestTitleFromPassages(passages) : "") ||
+    "";
+
   return {
     meetingDate: opts.meetingDate,
     templateId,
+    title,
     attendees:
       opts.attendees ??
       (opts.mode === "create" ? opts.members.map((m) => m.id) : []),
     responses,
-    passagesStudied: opts.passagesStudied ?? [],
+    passagesStudied: passages,
     notes: opts.notes ?? "",
   };
 }

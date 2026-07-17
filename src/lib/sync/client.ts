@@ -209,3 +209,25 @@ export async function deleteRoom(roomId: string): Promise<void> {
     throw new Error(await readError(res));
   }
 }
+
+/**
+ * After Group Key rotation completes: issue a new short join code.
+ * Old code bindings stop resolving once rebound.
+ */
+export async function rotateJoinCode(input: {
+  roomId: string;
+  groupKeyHash?: string;
+}): Promise<{ shortCode: string; rev: number }> {
+  const res = await relayFetch(
+    `/rooms/${encodeURIComponent(input.roomId)}/rotate-code`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId: getDeviceId(),
+        groupKeyHash: input.groupKeyHash,
+      }),
+    },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json() as Promise<{ shortCode: string; rev: number }>;
+}

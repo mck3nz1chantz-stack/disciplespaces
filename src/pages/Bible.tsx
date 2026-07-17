@@ -49,6 +49,7 @@ import {
 } from "../lib/bible";
 import { useAppStore } from "../stores/useAppStore";
 import { useBibleStore } from "../stores/useBibleStore";
+import { sessionDisplayTitle } from "../lib/sessionTitle";
 import type { Session } from "../types";
 
 type Panel = "read" | "search";
@@ -126,9 +127,10 @@ export function Bible() {
         .flatMap((s) => s.sessions ?? [])
         .find((s) => s.id === logContext.sessionId);
     if (!session) return "pre-selected";
-    const tpl = templates.find((t) => t.id === session.templateId)?.name;
     const day = session.date.slice(0, 10);
-    return tpl ? `${day} · ${tpl}` : day;
+    const tpl = templates.find((t) => t.id === session.templateId);
+    const label = sessionDisplayTitle(session, tpl);
+    return `${day} · ${label}`;
   }, [logContext.sessionId, sessions, spaces, templates]);
 
   // Online status

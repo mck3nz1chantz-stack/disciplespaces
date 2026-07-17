@@ -1,113 +1,28 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { VitePWA } from "vite-plugin-pwa";
 
+/**
+ * PWA: manifest + service worker live in public/ (manifest.webmanifest, sw.js).
+ * We avoid vite-plugin-pwa / workbox-build generateSW here — those pull
+ * common-tags + graceful-fs paths that break under Node 25/26.
+ * Offline behavior is preserved via public/sw.js registered in main.tsx.
+ */
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss({ optimize: false }),
-    VitePWA({
-      registerType: "autoUpdate",
-      // Do NOT list data/bible/** here — hashing 4MB+ of KJV JSON during
-      // generateSW was hanging builds. Bible books use runtime CacheFirst.
-      includeAssets: ["favicon.svg", "icons/*.png"],
-      manifest: {
-        name: "DiscipleSpaces",
-        short_name: "Spaces",
-        description:
-          "Free small-group discipleship. Offline public-domain Bible (KJV + WEB). Notes stay on your device.",
-        theme_color: "#1e3a2f",
-        background_color: "#f7f5f0",
-        display: "standalone",
-        orientation: "portrait-primary",
-        start_url: "/",
-        scope: "/",
-        lang: "en",
-        categories: ["lifestyle", "education", "productivity"],
-        icons: [
-          {
-            src: "/icons/icon-192.png",
-            sizes: "192x192",
-            type: "image/png",
-            purpose: "any",
-          },
-          {
-            src: "/icons/icon-512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any",
-          },
-          {
-            src: "/icons/icon-512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "maskable",
-          },
-        ],
-      },
-      workbox: {
-        // App shell only — exclude bible JSON from precache (use runtime cache).
-        // Including **/*.json made workbox generateSW hang for many minutes.
-        globPatterns: [
-          "**/*.{js,css,html,ico,png,svg,woff2,webmanifest}",
-        ],
-        globIgnores: ["**/data/bible/**", "**/node_modules/**"],
-        // SPA navigation offline: serve index so React can route (incl. /help, /offline)
-        navigateFallback: "index.html",
-        navigateFallbackDenylist: [/^\/api\//, /^\/data\//],
-        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
-        runtimeCaching: [
-          {
-            // Public-domain KJV + WEB books: cache on first read (offline after visit).
-            urlPattern: /\/data\/bible\/.*\.json$/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "bible-data-pd",
-              expiration: {
-                maxEntries: 160,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-cache",
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-webfonts",
-              expiration: {
-                maxEntries: 20,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-        ],
-      },
-      devOptions: {
-        enabled: false,
-      },
-    }),
   ],
+  server: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: true,
+  },
+  preview: {
+    host: "127.0.0.1",
+    port: 4173,
+    strictPort: true,
+  },
   optimizeDeps: {
     exclude: ["lucide-react"],
     include: [
@@ -118,5 +33,8 @@ export default defineConfig({
       "date-fns",
       "react-router-dom",
     ],
+  },
+  resolve: {
+    dedupe: ["react", "react-dom"],
   },
 });

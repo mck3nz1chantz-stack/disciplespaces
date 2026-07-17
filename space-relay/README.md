@@ -57,6 +57,14 @@ Never contains private notes (rejected if present).
 
 Short codes look like `ABCD-EF`. Lookup is **hyphen-insensitive** (`ABCDEF` and `ABCD EF` work). New rooms bind under the normalized key; resolve also tries the legacy hyphenated key for rooms created before that fix.
 
+## Group Key rotation
+
+After unanimous member approval in the app, the client may call:
+
+`POST /rooms/:roomId/rotate-code` with optional `groupKeyHash` (hash only — never the raw Group Key).
+
+Issues a **new short join code** and bumps room rev. Old code bindings are not deleted from every index (new code is bound); prefer sharing only the new code after rotate.
+
 ## Common “can’t sync” causes
 
 1. Guest typed offline **reference** invite code instead of Connect **join** code → invalid code.

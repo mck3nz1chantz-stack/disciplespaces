@@ -18,6 +18,12 @@ import {
   parseExportInput,
   type SpaceExportPayload,
 } from "../lib/share";
+import {
+  decryptPersonalNotes,
+  parsePersonalBackupInput,
+} from "../lib/keys/personalBackup";
+import { getStoredAccountKey } from "../lib/keys/accountKey";
+import { db } from "../lib/db";
 
 interface ShareUpdateModalProps {
   open: boolean;
@@ -122,6 +128,55 @@ export function ShareUpdateModal({
     e.preventDefault();
     setImporting(true);
     try {
+      const text = importText.trim();
+
+      // Personal backup (DSP1.) — multi-space + optional encrypted notes
+      if (text.includes("DSP1.") || text.includes("ds-personal-backup")) {
+        const personal = parsePersonalBackupInput(text);
+        let sessionTotal = 0;
+        let lastSpaceId: string | null = null;
+        for (const pack of personal.spaces) {
+          const result = await importSpaceExport(pack);
+          sessionTotal += result.addedSessions;
+          lastSpaceId = result.space.id;
+        }
+        let notesRestored = 0;
+        if (personal.privateNotesIncluded && personal.privateNotesEnc) {
+          const key = getStoredAccountKey();
+          if (!key) {
+            toast.message("Spaces restored", {
+              description:
+                "Encrypted private notes need your Account Key on this device (Settings → Account Key → link key), then import again.",
+            });
+          } else {
+            const notes = await decryptPersonalNotes(personal, key);
+            for (const n of notes) {
+              const exists = await db.privateNotes.get(n.id);
+              if (!exists) {
+                await db.privateNotes.put(n);
+                notesRestored += 1;
+              }
+            }
+          }
+        }
+        toast.success(
+          `Restored ${personal.spaces.length} space${personal.spaces.length === 1 ? "" : "s"}`,
+          {
+            description: [
+              `${sessionTotal} new session${sessionTotal === 1 ? "" : "s"}`,
+              notesRestored > 0
+                ? `${notesRestored} private note${notesRestored === 1 ? "" : "s"}`
+                : personal.privateNotesIncluded
+                  ? "private notes encrypted in file"
+                  : "private notes not in this file",
+            ].join(" · "),
+          },
+        );
+        onClose();
+        if (lastSpaceId) navigate(`/space/${lastSpaceId}`);
+        return;
+      }
+
       const parsed = parseExportInput(importText);
       const result = await importSpaceExport(parsed);
       const prayerBits: string[] = [];
@@ -143,7 +198,7 @@ export function ShareUpdateModal({
               ? `${result.skippedSessions} sessions already on this device (skipped)`
               : null,
             prayerBits.length > 0 ? prayerBits.join(" · ") : null,
-            "Private notes are never imported.",
+            "Private notes are never in DSX1. group files.",
           ]
             .filter(Boolean)
             .join(". "),
@@ -292,10 +347,10 @@ export function ShareUpdateModal({
         ) : (
           <form onSubmit={handleImport} className="space-y-4">
             <p className="text-sm text-muted -mt-1">
-              Restore Spaces from a backup or another device. Paste a Space
-              Update package (starts with{" "}
-              <code className="text-xs">DSX1.</code>) or choose a downloaded
-              file. Private notes are never imported.
+              Restore from a group file (<code className="text-xs">DSX1.</code>)
+              or personal backup (<code className="text-xs">DSP1.</code>).
+              Private notes only restore from DSP1. when encrypted with your
+              Account Key — never from group files or the cloud room.
             </p>
 
             <label className="block space-y-1.5">
