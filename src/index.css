@@ -167,6 +167,15 @@ html:not(.dark) {
 }
 
 @layer utilities {
+  /**
+   * When any Modal is open, hide fixed bottom nav so sheets/buttons
+   * are never covered (data-modal-open set on <html> by Modal).
+   */
+  html[data-modal-open] nav[aria-label="Main"] {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   .safe-bottom {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }

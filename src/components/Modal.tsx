@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./Button";
 
@@ -26,6 +27,11 @@ interface ModalProps {
   containBody?: boolean;
 }
 
+/**
+ * Full-screen dialog. Always portaled to document.body so it stacks above the
+ * fixed bottom nav (Layout creates a lower stacking context that would trap
+ * in-tree fixed layers under the tab bar).
+ */
 export function Modal({
   open,
   title,
@@ -48,9 +54,12 @@ export function Modal({
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // Signal layout chrome (optional) that a dialog is up
+    document.documentElement.dataset.modalOpen = "1";
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
+      delete document.documentElement.dataset.modalOpen;
     };
   }, [open, dismissible, onClose]);
 
@@ -70,15 +79,15 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  const node = (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4"
       role="presentation"
     >
       <button
         type="button"
         aria-label={dismissible ? "Close dialog" : undefined}
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-black/45"
         onClick={dismissible ? onClose : undefined}
         tabIndex={dismissible ? 0 : -1}
       />
@@ -88,11 +97,13 @@ export function Modal({
         aria-modal="true"
         aria-labelledby="modal-title"
         className={[
-          "relative z-10 w-full max-w-md rounded-t-2xl sm:rounded-2xl bg-surface border border-border shadow-xl p-5 safe-bottom",
+          // pb uses safe-area only — tab bar is under the scrim, not beside the sheet
+          "relative z-10 w-full max-w-md rounded-t-2xl sm:rounded-2xl bg-surface border border-border shadow-xl p-5",
+          "pb-[max(1.25rem,env(safe-area-inset-bottom))]",
           containBody
-            ? // Real height so flex-1 body can scroll (never sm:h-auto with absolute children)
-              "flex flex-col h-[90dvh] max-h-[90dvh] overflow-hidden"
-            : "max-h-[90dvh] overflow-y-auto",
+            ? // Leave room above home indicator; full viewport on small phones
+              "flex flex-col h-[min(92dvh,100%)] max-h-[min(92dvh,100%)] overflow-hidden sm:h-[90dvh] sm:max-h-[90dvh]"
+            : "max-h-[min(92dvh,100%)] overflow-y-auto sm:max-h-[90dvh]",
         ].join(" ")}
       >
         <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
@@ -146,8 +157,6 @@ export function Modal({
         )}
 
         {containBody ? (
-          // Non-scrolling shell: children mount dual panes with their own
-          // overflow-y-auto so Session/Private keep independent scroll positions.
           <div
             ref={bodyRef}
             className="relative flex-1 min-h-0 overflow-hidden"
@@ -160,4 +169,10 @@ export function Modal({
       </div>
     </div>
   );
+
+  // Portal out of Layout stacking context so z-index beats the bottom nav
+  if (typeof document !== "undefined") {
+    return createPortal(node, document.body);
+  }
+  return node;
 }
