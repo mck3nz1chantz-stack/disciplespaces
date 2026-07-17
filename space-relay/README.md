@@ -65,10 +65,19 @@ After unanimous member approval in the app, the client may call:
 
 Issues a **new short join code** and bumps room rev. Old code bindings are not deleted from every index (new code is bound); prefer sharing only the new code after rotate.
 
+## One room per Space (anti double-room)
+
+`POST /rooms` **reuses** the existing room for `snapshot.spaceId` when present
+(`reused: true`). A Durable Object index `space:{spaceId}` stores the mapping.
+Pass `forceNew: true` only when the host explicitly starts a brand-new room
+(new join code; old code stops working for new joiners).
+
+Join and rotate-code also refresh the spaceId binding.
+
 ## Common “can’t sync” causes
 
 1. Guest typed offline **reference** invite code instead of Connect **join** code → invalid code.
-2. Host and guest each pressed **Connect** on their own copy → two different rooms (orphaned). Fix: only the host Connects; guests **Join a group** with the host’s code.
+2. **Legacy:** host and guest each pressed **Connect** → two rooms. Current relay reuses by spaceId; guests still must **Join**, not Connect.
 3. Older app builds skipped updating existing sessions on pull (add-only import). Relay pull now uses replace-shared merge.
 
 ## CORS

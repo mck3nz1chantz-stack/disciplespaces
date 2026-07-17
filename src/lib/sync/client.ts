@@ -29,6 +29,8 @@ export interface CreateRoomResult {
   shortCode: string;
   rev: number;
   joinUrl?: string;
+  /** True when server reused the existing room for this spaceId (no fork). */
+  reused?: boolean;
 }
 
 export interface JoinRoomResult {
@@ -91,10 +93,15 @@ async function readError(res: Response): Promise<string> {
   return `Group connection failed (${res.status}). Try Sync again.`;
 }
 
-/** Host: create a room from shared snapshot (opt-in Connect). */
+/**
+ * Host: open or create room for this Space (opt-in Connect).
+ * Default reuses the server’s room for this spaceId so friends aren’t orphaned.
+ * Pass forceNew only after an explicit “new room / new join code” confirmation.
+ */
 export async function createRoom(input: {
   snapshot: SharedSpaceSnapshot;
   displayName?: string;
+  forceNew?: boolean;
 }): Promise<CreateRoomResult> {
   assertNoPrivateNotes(input.snapshot);
   const res = await relayFetch("/rooms", {
@@ -103,6 +110,7 @@ export async function createRoom(input: {
       snapshot: input.snapshot,
       displayName: input.displayName,
       deviceId: getDeviceId(),
+      forceNew: input.forceNew === true,
     }),
   });
   if (!res.ok) throw new Error(await readError(res));
@@ -134,6 +142,29 @@ export async function previewRoom(input: {
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json() as Promise<PreviewRoomResult>;
+}
+
+/** Register spaceId → roomId (backfill after successful sync/join). */
+export async function registerSpaceRoom(input: {
+  spaceId: string;
+  roomId: string;
+}): Promise<void> {
+  try {
+    const res = await relayFetch("/rooms/register-space", {
+      method: "POST",
+      body: JSON.stringify({
+        spaceId: input.spaceId,
+        roomId: input.roomId,
+        deviceId: getDeviceId(),
+      }),
+    });
+    if (!res.ok) {
+      // Non-fatal — anti-fork is best-effort for legacy rooms
+      return;
+    }
+  } catch {
+    // ignore
+  }
 }
 
 /** Guest: join with short code + name → receive shared snapshot. */

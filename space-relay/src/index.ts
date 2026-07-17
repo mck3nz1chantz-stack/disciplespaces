@@ -178,6 +178,11 @@ export default {
         return createRoom(req, env);
       }
 
+      /** Register spaceId → roomId for rooms created before the anti-fork index. */
+      if (path === "/rooms/register-space" && req.method === "POST") {
+        return registerSpaceRoom(req, env);
+      }
+
       if (path === "/rooms/join" && req.method === "POST") {
         return joinRoom(req, env);
       }
@@ -313,20 +318,172 @@ async function listFeedback(req: Request, env: Env): Promise<Response> {
   return json(data, 200, req);
 }
 
+/** Backfill: map spaceId → existing roomId if the room is still alive. */
+async function registerSpaceRoom(
+  req: Request,
+  env: Env,
+): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as {
+    spaceId?: string;
+    roomId?: string;
+  };
+  const spaceId = String(body.spaceId || "").trim();
+  const roomId = String(body.roomId || "").trim();
+  if (!spaceId || !roomId) {
+    return error("spaceId and roomId required", 400, req);
+  }
+  const roomStub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`room:${roomId}`),
+  );
+  const full = await roomStub.fetch(
+    new Request("https://room/full", { method: "GET" }),
+  );
+  if (!full.ok) {
+    return error("Room not found", 404, req);
+  }
+  const st = (await full.json()) as RoomState;
+  const snapSpace = String(st.snapshot?.spaceId || "");
+  if (snapSpace && snapSpace !== spaceId) {
+    return error("Room belongs to a different Space", 409, req);
+  }
+  await bindSpaceIdToRoom(env, spaceId, roomId);
+  return json(
+    { ok: true, spaceId, roomId, shortCode: st.shortCode },
+    200,
+    req,
+  );
+}
+
+/**
+ * Resolve app spaceId → roomId (prevents double rooms for one group).
+ * Bound when a room is first created; join/open reuses it.
+ */
+async function resolveRoomIdFromSpaceId(
+  env: Env,
+  spaceId: string,
+): Promise<string | null> {
+  const id = String(spaceId || "").trim();
+  if (!id) return null;
+  const stub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`space:${id}`),
+  );
+  const res = await stub.fetch(
+    new Request("https://room/resolve-space", { method: "GET" }),
+  );
+  if (!res.ok) return null;
+  const data = (await res.json()) as { roomId?: string };
+  return data.roomId || null;
+}
+
+async function bindSpaceIdToRoom(
+  env: Env,
+  spaceId: string,
+  roomId: string,
+): Promise<void> {
+  const id = String(spaceId || "").trim();
+  if (!id || !roomId) return;
+  const stub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`space:${id}`),
+  );
+  await stub.fetch(
+    new Request("https://room/bind-space", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spaceId: id, roomId }),
+    }),
+  );
+}
+
+async function bindShortCodeToRoom(
+  env: Env,
+  shortCode: string,
+  roomId: string,
+): Promise<void> {
+  const bindPayload = JSON.stringify({ roomId, shortCode });
+  const keys = new Set<string>([
+    normalizeShortCode(shortCode),
+    shortCode.trim().toUpperCase(),
+  ]);
+  for (const key of keys) {
+    if (!key) continue;
+    const codeStub = env.SPACE_ROOM.get(
+      env.SPACE_ROOM.idFromName(`code:${key}`),
+    );
+    await codeStub.fetch(
+      new Request("https://room/bind-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bindPayload,
+      }),
+    );
+  }
+}
+
+/**
+ * Open or create a room for a Space.
+ * Default: reuse existing room for snapshot.spaceId (no double rooms).
+ * forceNew: true only after host explicitly starts a fresh room (orphans old code).
+ */
 async function createRoom(req: Request, env: Env): Promise<Response> {
   const body = (await req.json()) as {
     snapshot?: SharedSnapshot;
     displayName?: string;
     deviceId?: string;
+    /** Explicit new room — only when host confirms they want a new join code. */
+    forceNew?: boolean;
   };
   if (!body.snapshot?.spaceId || !body.snapshot?.name) {
     return error("snapshot.spaceId and snapshot.name required", 400, req);
   }
   assertNoPrivateNotes(body.snapshot);
 
+  const spaceId = String(body.snapshot.spaceId);
+  const hostDeviceId = body.deviceId || deviceIdFrom(req);
+  const displayName = body.displayName || "Host";
+
+  // ── Reuse existing room for this Space (anti double-room) ──
+  if (!body.forceNew) {
+    const existingRoomId = await resolveRoomIdFromSpaceId(env, spaceId);
+    if (existingRoomId) {
+      const roomStub = env.SPACE_ROOM.get(
+        env.SPACE_ROOM.idFromName(`room:${existingRoomId}`),
+      );
+      const fullRes = await roomStub.fetch(
+        new Request("https://room/full", { method: "GET" }),
+      );
+      if (fullRes.ok) {
+        // Ensure this device is listed as a member (host reclaim)
+        await roomStub.fetch(
+          new Request("https://room/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              deviceId: hostDeviceId,
+              displayName,
+            }),
+          }),
+        );
+        const again = await roomStub.fetch(
+          new Request("https://room/full", { method: "GET" }),
+        );
+        const st = (await again.json()) as RoomState;
+        return json(
+          {
+            roomId: st.roomId,
+            shortCode: st.shortCode,
+            rev: st.rev,
+            reused: true,
+          },
+          200,
+          req,
+        );
+      }
+      // Binding pointed at a dead room — fall through and create fresh
+    }
+  }
+
   const shortCode = makeShortCode();
   const roomId = crypto.randomUUID();
-  const hostDeviceId = body.deviceId || deviceIdFrom(req);
 
   // Primary DO keyed by room id
   const roomDoId = env.SPACE_ROOM.idFromName(`room:${roomId}`);
@@ -341,7 +498,7 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
         shortCode,
         hostDeviceId,
         snapshot: body.snapshot,
-        displayName: body.displayName || "Host",
+        displayName,
       }),
     }),
   );
@@ -350,34 +507,15 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
   }
   const state = (await initRes.json()) as RoomState;
 
-  // Code index: bind under normalized key (and legacy hyphen key for safety)
-  const bindPayload = JSON.stringify({ roomId, shortCode });
-  const keys = new Set<string>([
-    normalizeShortCode(shortCode),
-    shortCode.trim().toUpperCase(),
-  ]);
-  for (const key of keys) {
-    if (!key) continue;
-    const codeStub = env.SPACE_ROOM.get(
-      env.SPACE_ROOM.idFromName(`code:${key}`),
-    );
-    const bindRes = await codeStub.fetch(
-      new Request("https://room/bind-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: bindPayload,
-      }),
-    );
-    if (!bindRes.ok) {
-      return error("Could not publish join code", 500, req);
-    }
-  }
+  await bindShortCodeToRoom(env, state.shortCode, state.roomId);
+  await bindSpaceIdToRoom(env, spaceId, state.roomId);
 
   return json(
     {
       roomId: state.roomId,
       shortCode: state.shortCode,
       rev: state.rev,
+      reused: false,
     },
     201,
     req,
@@ -482,27 +620,13 @@ async function rotateRoomJoinCode(
   }
   const state = (await rotateRes.json()) as RoomState;
 
-  // Bind new code index
-  const bindPayload = JSON.stringify({
-    roomId: state.roomId,
-    shortCode: state.shortCode,
-  });
-  const keys = new Set<string>([
-    normalizeShortCode(state.shortCode),
-    state.shortCode.trim().toUpperCase(),
-  ]);
-  for (const key of keys) {
-    if (!key) continue;
-    const codeStub = env.SPACE_ROOM.get(
-      env.SPACE_ROOM.idFromName(`code:${key}`),
-    );
-    await codeStub.fetch(
-      new Request("https://room/bind-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: bindPayload,
-      }),
-    );
+  await bindShortCodeToRoom(env, state.shortCode, state.roomId);
+  // Keep spaceId mapping so Connect never forks a second room after code rotate
+  const spaceId = String(
+    (state.snapshot as SharedSnapshot | undefined)?.spaceId || "",
+  );
+  if (spaceId) {
+    await bindSpaceIdToRoom(env, spaceId, state.roomId);
   }
 
   return json(
@@ -550,7 +674,18 @@ async function joinRoom(req: Request, env: Env): Promise<Response> {
     const err = (await joinRes.json().catch(() => ({}))) as { error?: string };
     return error(err.error || "Could not join", joinRes.status, req);
   }
-  const data = await joinRes.json();
+  const data = (await joinRes.json()) as {
+    roomId: string;
+    shortCode: string;
+    rev: number;
+    snapshot: SharedSnapshot;
+    hostDeviceId: string;
+  };
+  // Keep spaceId → room map so later Connect reuses this room (no duplicates)
+  const spaceId = String(data.snapshot?.spaceId || "");
+  if (spaceId) {
+    await bindSpaceIdToRoom(env, spaceId, data.roomId);
+  }
   return json(data, 200, req);
 }
 
@@ -612,6 +747,34 @@ export class SpaceRoom implements DurableObject {
         return Response.json({ error: "Unknown code" }, { status: 404 });
       }
       return Response.json(binding);
+    }
+
+    /** One room per DiscipleSpaces spaceId (anti double-room registry). */
+    if (path === "/bind-space" && req.method === "POST") {
+      const body = (await req.json()) as { spaceId: string; roomId: string };
+      await this.state.storage.put("spaceBinding", {
+        spaceId: body.spaceId,
+        roomId: body.roomId,
+      });
+      return Response.json({ ok: true });
+    }
+
+    if (path === "/resolve-space" && req.method === "GET") {
+      const binding = await this.state.storage.get<{ roomId: string }>(
+        "spaceBinding",
+      );
+      if (!binding?.roomId) {
+        return Response.json({ error: "Unknown space" }, { status: 404 });
+      }
+      return Response.json(binding);
+    }
+
+    if (path === "/full" && req.method === "GET") {
+      const room = await this.state.storage.get<RoomState>("room");
+      if (!room) {
+        return Response.json({ error: "Room not found" }, { status: 404 });
+      }
+      return Response.json(room);
     }
 
     if (path === "/join" && req.method === "POST") {

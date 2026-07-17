@@ -59,9 +59,18 @@ export const CONNECT_SAFELY_STEPS: ConnectStep[] = [
 ];
 
 export const CONNECT_SAFELY_DONT = [
-  "Friends: use Join a group — Connect is only for the host (and is hidden for joiners).",
+  "Friends: use Join a group — Connect is only for the host (and is blocked for joiners).",
+  "Never press Connect on two phones for the same group — only the host Connects once; everyone else Joins with the code.",
   "Don’t use a different website address than your host (groups live per site).",
   "Don’t worry: joining one group does not delete or change your other Spaces.",
+] as const;
+
+/** Shown when explaining the “two rooms” failure mode. */
+export const DOUBLE_ROOM_FIX = [
+  "Symptom: you both “connected” but Sync fails or data doesn’t match.",
+  "Cause: each Connect used to open a separate cloud room.",
+  "Fix going forward: the server keeps one room per group id; Connect reuses it. Guests only Join.",
+  "If you’re stuck now: host opens the group, taps Connect (or Sync), shares the join code shown; friend Joins that code again.",
 ] as const;
 
 function StepList({

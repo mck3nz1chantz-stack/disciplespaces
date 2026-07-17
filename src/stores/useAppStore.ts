@@ -37,6 +37,7 @@ import {
   normalizeSpaceSync,
   pullRoom as relayPullRoom,
   pushRoom as relayPushRoom,
+  registerSpaceRoom as relayRegisterSpaceRoom,
   rotateJoinCode as relayRotateJoinCode,
   SpaceRelayNotConfiguredError,
 } from "../lib/sync";
@@ -278,8 +279,13 @@ interface AppState {
   /**
    * Opt-in: connect this Space to the light relay (shared data only).
    * Requires VITE_SPACE_RELAY_URL. Local data is never wiped.
+   * Default reuses the server room for this Space id (no double rooms).
+   * forceNew: only after host confirms starting a brand-new join code.
    */
-  connectSpaceToRelay: (spaceId: string) => Promise<Space>;
+  connectSpaceToRelay: (
+    spaceId: string,
+    opts?: { forceNew?: boolean },
+  ) => Promise<Space>;
   /** Pull + push shared snapshot for a connected Space. */
   syncSpaceNow: (spaceId: string) => Promise<Space>;
   /** Pause or resume automatic network sync (local edits still save). */
@@ -1273,13 +1279,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     return updated;
   },
 
-  connectSpaceToRelay: async (spaceId) => {
+  connectSpaceToRelay: async (spaceId, opts) => {
     if (!isSpaceRelayConfigured()) {
       throw new SpaceRelayNotConfiguredError();
     }
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
     const existingSync = normalizeSpaceSync(row.sync);
+    const forceNew = opts?.forceNew === true;
 
     // Guests never open a new room (avoids two rooms for one group)
     if (existingSync.deviceRole === "guest") {
@@ -1291,12 +1298,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       );
     }
 
-    // Already on a room — re-sync instead of creating a second room (orphans friends)
-    if (existingSync.mode === "connected" && existingSync.roomId) {
+    // Already connected — prefer Sync (same room). Do not mint a second room.
+    if (
+      !forceNew &&
+      existingSync.mode === "connected" &&
+      existingSync.roomId
+    ) {
       try {
         return await get().syncSpaceNow(spaceId);
       } catch (err) {
-        // Room gone (404) → fall through and create a fresh room
+        // Room missing → open-or-reuse by spaceId (server will reattach if registered)
         const msg = err instanceof Error ? err.message : "";
         if (!/404|not found/i.test(msg)) throw err;
       }
@@ -1309,9 +1320,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       .equals(spaceId)
       .toArray();
     const snapshot = buildSharedSnapshot(space, sessions, prayerBoard);
+    // Server reuses room for this spaceId unless forceNew — prevents orphan rooms
     const result = await relayCreateRoom({
       snapshot,
       displayName: space.members[0]?.name,
+      forceNew,
+    });
+    void relayRegisterSpaceRoom({
+      spaceId,
+      roomId: result.roomId,
     });
     return get().patchSpaceSync(spaceId, {
       mode: "connected",
@@ -1394,6 +1411,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         snapshot,
         baseRev: normalizeSpaceSync(fresh.sync).remoteRev,
       });
+
+      // Backfill spaceId → roomId so future Connect reuses this room
+      void relayRegisterSpaceRoom({ spaceId, roomId: sync.roomId });
 
       return get().patchSpaceSync(spaceId, {
         mode: "connected",
@@ -1505,6 +1525,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       paused: false,
       lastError: undefined,
       deviceRole,
+    });
+
+    void relayRegisterSpaceRoom({
+      spaceId: snap.spaceId,
+      roomId: result.roomId,
     });
 
     return { space, alreadyHad: had };

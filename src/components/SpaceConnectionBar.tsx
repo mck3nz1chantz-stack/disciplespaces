@@ -118,14 +118,19 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   async function confirmConnect() {
     setBusy(true);
     try {
-      await connectSpaceToRelay(space.id);
+      // Never forceNew here — reuses server room for this group if one exists
+      const updated = await connectSpaceToRelay(space.id);
       setJustSynced(true);
       setConnectConfirmOpen(false);
-      toast.success("Connected — share the join code", {
-        description:
-          "Open Invite and send the code. Friends Join — they should not Connect.",
-        duration: 5500,
-      });
+      const code = normalizeSpaceSync(updated.sync).shortCode;
+      toast.success(
+        code ? `Connected · code ${code}` : "Connected — share the join code",
+        {
+          description:
+            "Friends use Join a group with this code. Do not press Connect on their phones — that used to create a second room; the server now reuses the same room for this group.",
+          duration: 6500,
+        },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not connect");
     } finally {

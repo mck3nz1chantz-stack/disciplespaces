@@ -24,6 +24,7 @@ export {
   pushRoom,
   deleteRoom,
   rotateJoinCode,
+  registerSpaceRoom,
   normalizeShortCode,
   SpaceRelayNotConfiguredError,
   type CreateRoomResult,
