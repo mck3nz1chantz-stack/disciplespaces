@@ -2,6 +2,8 @@ import { useState } from "react";
 import {
   Cloud,
   CloudOff,
+  Copy,
+  KeyRound,
   Loader2,
   RefreshCw,
   Wifi,
@@ -38,8 +40,11 @@ function lastSyncedLabel(iso?: string): string | null {
 }
 
 /**
- * Obvious sync CTA + Online/Offline toggle for a Space.
- * Keeps worship layout clean while making connection status unmissable.
+ * Space connectivity — highest priority for multi-person groups.
+ * Online-first model:
+ * - Host: owns the room key (join code); opens room on create; share key only
+ * - Guest: Join once with the key; Sync after that; never “Connect”
+ * - Offline mode is a pause after you’re linked, not the default path
  */
 export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const connectSpaceToRelay = useAppStore((s) => s.connectSpaceToRelay);
@@ -50,22 +55,19 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const [busy, setBusy] = useState(false);
   const [justSynced, setJustSynced] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
-  /** Connect confirm uses the same guide modal with a primary action. */
-  const [connectConfirmOpen, setConnectConfirmOpen] = useState(false);
+  const [openRoomConfirm, setOpenRoomConfirm] = useState(false);
 
   const relayReady = isSpaceRelayConfigured();
   const sync = normalizeSpaceSync(space.sync);
   const connected = sync.mode === "connected" && Boolean(sync.roomId);
   const guest = isSpaceGuest(sync);
-  const mayConnect = canConnectSpaceToRelay(sync);
+  const mayOpenRoom = canConnectSpaceToRelay(sync); // host only
   const paused = sync.paused === true;
   const ago = lastSyncedLabel(sync.lastSyncedAt);
+  const roomKey = sync.shortCode;
 
   async function handleSync() {
     if (!connected) return;
-    // App Offline mode is intentional — block sync.
-    // Do NOT hard-block on navigator.onLine: iOS/Safari often lies while
-    // Wi‑Fi still works (shows “No network” then Sync never tries).
     if (mode === "offline") {
       toast.message("App is set to Offline", {
         description:
@@ -81,7 +83,7 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       window.setTimeout(() => setJustSynced(false), 4000);
       toast.success("Group updated", {
         description:
-          "Shared meetings and people are up to date. Private notes stay on this phone.",
+          "Shared meetings and people are up to date. Private notes stay on this phone (Account Key can encrypt personal backups).",
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sync failed");
@@ -90,17 +92,17 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
     }
   }
 
-  function openConnectFlow() {
+  function openRoomFlow() {
     if (!relayReady) {
-      toast.message("Easy join not on this build", {
-        description: "Use Invite (QR) or save a group file for now.",
+      toast.message("Shared rooms not on this build", {
+        description: "Use Invite (QR) or a group file for now.",
       });
       return;
     }
-    if (!mayConnect) {
-      toast.message("Only the host can Connect", {
+    if (!mayOpenRoom) {
+      toast.message("Only the host opens the room", {
         description:
-          "Ask them to Connect and share the join code. On this phone use Join a group — your other Spaces stay as they are.",
+          "Ask them for the room key (join code). On this phone use Join a group — never open a second room.",
         duration: 6000,
       });
       setGuideOpen(true);
@@ -108,31 +110,30 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
     }
     if (mode === "offline") {
       toast.message("Turn Online on first", {
-        description: "Connect needs Online mode (toggle on this card).",
+        description: "Opening a shared room needs Online mode.",
       });
       return;
     }
-    setConnectConfirmOpen(true);
+    setOpenRoomConfirm(true);
   }
 
-  async function confirmConnect() {
+  async function confirmOpenRoom() {
     setBusy(true);
     try {
-      // Never forceNew here — reuses server room for this group if one exists
       const updated = await connectSpaceToRelay(space.id);
       setJustSynced(true);
-      setConnectConfirmOpen(false);
+      setOpenRoomConfirm(false);
       const code = normalizeSpaceSync(updated.sync).shortCode;
       toast.success(
-        code ? `Connected · code ${code}` : "Connected — share the join code",
+        code ? `Room key ready · ${code}` : "Room ready — share the key",
         {
           description:
-            "Friends use Join a group with this code. Do not press Connect on their phones — that used to create a second room; the server now reuses the same room for this group.",
-          duration: 6500,
+            "Send this key to friends. They Join once — they never create a room. After that, Sync keeps everyone together.",
+          duration: 7000,
         },
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not connect");
+      toast.error(err instanceof Error ? err.message : "Could not open room");
     } finally {
       setBusy(false);
     }
@@ -144,33 +145,46 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
     toast.message(next === "online" ? "Online mode" : "Offline mode", {
       description:
         next === "online"
-          ? "This app may refresh connected groups when the network is available."
-          : "Staying on this phone only — no group sync until you turn Online on.",
+          ? "Shared groups may refresh when the network is available."
+          : "Sync paused — your group stays on this phone until you go Online again.",
       duration: 3500,
     });
+  }
+
+  function copyRoomKey() {
+    if (!roomKey) return;
+    void navigator.clipboard.writeText(roomKey).then(
+      () => toast.success("Room key copied"),
+      () => toast.error("Could not copy"),
+    );
   }
 
   const statusLine = (() => {
     if (justSynced) return "Just synced ✓";
     if (mode === "offline") return "Offline mode — sync paused (tap Online)";
-    if (!relayReady) return "Local group · Invite with QR";
+    if (!relayReady) return "Local only · Invite with QR / file";
     if (guest && !connected) {
-      return "Joined copy · host Connects, you use their join code";
+      return "Use Join a group with the host’s room key";
     }
-    if (!connected) return "Not connected · host can Connect for easy invite";
+    if (guest && connected) {
+      return ago ? `Linked · synced ${ago}` : "Linked · tap Sync to refresh";
+    }
+    if (!connected) {
+      return "Open the shared room to get a room key for friends";
+    }
     if (paused) return "Sync paused for this group";
     if (sync.lastError) return sync.lastError;
     if (!networkOnline) {
-      return "Browser says offline — Sync may still work; tap Sync now";
+      return "Browser unsure about network — Sync may still work";
     }
     if (ago) return `Synced ${ago}`;
-    return "Connected · not synced yet";
+    return "Room open · share the key, then Sync";
   })();
 
   return (
     <section
-      className="rounded-2xl border border-border bg-surface px-3 py-3 space-y-3"
-      aria-label="Connection and sync"
+      className="rounded-2xl border border-primary/25 bg-primary/5 px-3 py-3 space-y-3"
+      aria-label="Group room and sync"
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex items-start gap-2">
@@ -184,11 +198,13 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
           )}
           <div className="min-w-0">
             <p className="text-sm font-semibold text-primary leading-tight">
-              {connected
-                ? justSynced
-                  ? "Up to date"
-                  : "Group connection"
-                : "This phone"}
+              {guest
+                ? connected
+                  ? "You’re linked"
+                  : "Join with room key"
+                : connected
+                  ? "Your group room"
+                  : "Group room"}
             </p>
             <p
               className={[
@@ -197,17 +213,10 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
               ].join(" ")}
             >
               {statusLine}
-              {connected && sync.shortCode ? (
-                <span className="text-muted font-normal">
-                  {" "}
-                  · code {sync.shortCode}
-                </span>
-              ) : null}
             </p>
           </div>
         </div>
 
-        {/* Online / Offline toggle — 44px min hit area */}
         <div
           className="shrink-0 inline-flex rounded-full border border-border bg-bg p-0.5"
           role="group"
@@ -246,6 +255,40 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         </div>
       </div>
 
+      {/* Room key — primary artifact for hosts */}
+      {connected && roomKey && !guest && (
+        <div className="rounded-xl border border-border bg-bg px-3 py-3 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted flex items-center gap-1.5">
+            <KeyRound className="h-3.5 w-3.5" aria-hidden />
+            Room key · share this with guests
+          </p>
+          <div className="flex items-center gap-2">
+            <p className="flex-1 font-mono text-xl font-semibold tracking-wider text-primary text-center">
+              {roomKey}
+            </p>
+            <Button
+              variant="secondary"
+              className="!py-2.5 shrink-0"
+              onClick={copyRoomKey}
+            >
+              <Copy className="h-4 w-4" aria-hidden />
+              Copy
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted leading-relaxed text-center">
+            Friends: Join a group → paste this key. They never open a second room.
+          </p>
+        </div>
+      )}
+
+      {connected && roomKey && guest && (
+        <p className="text-xs text-muted text-center rounded-lg border border-border bg-bg/80 px-2 py-2">
+          Linked with room key{" "}
+          <span className="font-mono font-medium text-primary">{roomKey}</span>
+          . Tap Sync when Online to refresh.
+        </p>
+      )}
+
       <div className="flex gap-2">
         {connected ? (
           <Button
@@ -271,39 +314,39 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
             className="!py-3.5"
             onClick={() => setGuideOpen(true)}
           >
-            <Cloud className="h-4 w-4" aria-hidden />
-            Waiting on host to Connect
+            <KeyRound className="h-4 w-4" aria-hidden />
+            Need the host’s room key
           </Button>
         ) : (
           <Button
             fullWidth
-            variant="secondary"
+            variant="primary"
             className="!py-3.5"
             disabled={busy || !relayReady}
-            onClick={openConnectFlow}
+            onClick={openRoomFlow}
           >
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             ) : (
-              <Cloud className="h-4 w-4" aria-hidden />
+              <KeyRound className="h-4 w-4" aria-hidden />
             )}
-            {relayReady ? "Connect for easy invite" : "Local only"}
+            {relayReady ? "Open group room" : "Local only"}
           </Button>
         )}
       </div>
 
       {guest && !connected && (
         <p className="text-[11px] text-muted leading-relaxed text-center">
-          You joined this group on this phone. Only the host can Connect. When
-          they share a join code, use{" "}
-          <strong className="text-text">Join a group</strong> — your other
-          Spaces are not changed.
+          You don’t create rooms. Use{" "}
+          <strong className="text-text">Join a group</strong> with the host’s
+          room key once — then Sync keeps you linked. Other Spaces on this phone
+          stay put.
         </p>
       )}
 
       <div className="flex justify-center">
         <ConnectSafelyHelpButton onClick={() => setGuideOpen(true)}>
-          {connected ? "How sharing & Sync work" : "How to connect safely"}
+          {connected ? "How room keys & Sync work" : "How sharing works"}
         </ConnectSafelyHelpButton>
       </div>
 
@@ -311,27 +354,24 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         <p className="text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
           <CloudOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
           Phone may still have data — tap{" "}
-          <strong className="font-semibold">Sync now</strong> to try the group
-          room anyway.
+          <strong className="font-semibold">Sync now</strong> to try.
         </p>
       )}
 
-      {/* Read-only guide */}
       <ConnectSafelyModal
         open={guideOpen}
         onClose={() => setGuideOpen(false)}
-        audience="both"
-        title={connected ? "Sharing & Sync" : "Connect safely"}
+        audience={guest ? "guest" : "host"}
+        title={connected ? "Room keys & Sync" : "Share this group safely"}
       />
 
-      {/* Connect consent = same steps + primary action (replaces window.confirm) */}
       <ConnectSafelyModal
-        open={connectConfirmOpen}
-        onClose={() => !busy && setConnectConfirmOpen(false)}
+        open={openRoomConfirm}
+        onClose={() => !busy && setOpenRoomConfirm(false)}
         audience="host"
-        title={`Connect “${space.name}”?`}
-        primaryLabel="Connect this group"
-        onPrimary={confirmConnect}
+        title="Open group room"
+        primaryLabel={busy ? "Opening…" : "Open room & get key"}
+        onPrimary={() => void confirmOpenRoom()}
         primaryBusy={busy}
       />
     </section>

@@ -128,11 +128,20 @@ export function Dashboard() {
         spaceKind,
         createFirstSession: true,
       });
-      toast.success(isFirst ? "Your first group is ready" : "Group created", {
-        description:
-          "Tap Start today’s meeting when you gather. You can invite people anytime.",
-        duration: 5000,
-      });
+      const roomKey = space.sync?.shortCode;
+      toast.success(
+        roomKey
+          ? `Group ready · room key ${roomKey}`
+          : isFirst
+            ? "Your first group is ready"
+            : "Group created",
+        {
+          description: roomKey
+            ? "Share that key so friends can Join (they never open a second room). Open the group to Sync and meet."
+            : "Open the group → Open group room when Online to get a room key. Or join friends with their key.",
+          duration: 6500,
+        },
+      );
       if (isFirst && !readFlag(FIRST_SPACE_TIP_KEY)) {
         writeFlag(FIRST_SPACE_TIP_KEY, true);
       }
@@ -153,7 +162,8 @@ export function Dashboard() {
       <div>
         <h2 className="text-2xl">Your groups</h2>
         <p className="text-sm text-muted mt-1">
-          Tap a group to meet. Invite friends. Notes stay on this phone.
+          Create a group to get a room key, or Join with a friend’s key. Sync
+          keeps you together; private notes stay on this phone.
         </p>
       </div>
 
@@ -295,7 +305,9 @@ export function Dashboard() {
       <Modal open={open} title="New group" onClose={closeModal}>
         <form onSubmit={handleCreate} className="space-y-5">
           <p className="text-sm text-muted -mt-1">
-            Just a name is enough. Add people now or later.
+            Just a name is enough. When Online, you’ll get a{" "}
+            <strong className="text-text">room key</strong> to share — friends
+            only Join with that key.
           </p>
 
           <label className="block space-y-1.5">

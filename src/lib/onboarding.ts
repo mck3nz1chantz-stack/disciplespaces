@@ -31,7 +31,7 @@ export interface OnboardingSlide {
   body: string;
 }
 
-/** P2: three steps only — pilot, meet, backup/same site. */
+/** Online-first: room key, join-only guests, Account Key + backups. */
 export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   {
     id: "welcome",
@@ -40,13 +40,13 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   },
   {
     id: "meet",
-    title: "Groups, people, meetings",
-    body: "Start a group or join with a code. Add names for headcount. When you gather, tap Start today’s meeting. Bible (KJV or WEB) is free and public domain — open chapters once Online so they save for offline. Prayer and “Just for me” notes are on each group.",
+    title: "One room key per group",
+    body: "When you create a group, you get a room key to share. Friends only Join with that key — they never open a second room. After you’re linked, Sync keeps meetings together. You can go Offline for a gathering, then Online again to refresh.",
   },
   {
     id: "backup",
-    title: "Same site · back up often",
-    body: "Always open https://disciple-spaces.pages.dev. After meetings, back up from Settings or the testing guide. Online/Offline and Sync are on each group. Private notes never leave this phone.",
+    title: "Account Key · back up often",
+    body: "Always open https://disciple-spaces.pages.dev. Optional Account Key (Settings) links your phone and desktop without email/password and can encrypt personal backups. Group files (DSX1) remain the hard safety net. Private notes stay on-device unless you opt into encrypted backup.",
   },
 ];
 
@@ -55,7 +55,7 @@ export const QUICKSTART_ITEMS = [
   {
     id: "space",
     label: "Start or join a group",
-    hint: "Create one, or join with a code / QR",
+    hint: "Create (get a room key) or Join with a key",
   },
   {
     id: "session",
@@ -64,7 +64,7 @@ export const QUICKSTART_ITEMS = [
   },
   {
     id: "invite",
-    label: "Invite someone",
-    hint: "Share or show QR so they can join",
+    label: "Share the room key",
+    hint: "Copy the key on the group card so friends can Join",
   },
 ] as const;

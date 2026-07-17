@@ -571,7 +571,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
-    const hydrated: Space = { ...space, sessions };
+    let hydrated: Space = { ...space, sessions };
     set((state) => ({
       spaces: sortSpaces([hydrated, ...state.spaces]),
       sessions:
@@ -579,6 +579,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? sortSessions([...sessions, ...state.sessions])
           : state.sessions,
     }));
+
+    /**
+     * Online-first: open the shared room as soon as the host creates a group
+     * (when relay is configured and app Online mode is on). Guests never do this —
+     * they only Join with the room key. Failure leaves a local Space; host can open later.
+     */
+    if (isSpaceRelayConfigured()) {
+      try {
+        const { isOnlineModeEnabled } = await import("../lib/onlineMode");
+        if (isOnlineModeEnabled()) {
+          hydrated = await get().connectSpaceToRelay(id);
+        }
+      } catch {
+        // Local group still works; host can open the room from the group card
+      }
+    }
+
     return hydrated;
   },
 

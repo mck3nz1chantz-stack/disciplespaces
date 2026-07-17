@@ -26,51 +26,51 @@ export interface ConnectStep {
   who: "host" | "guest" | "both";
 }
 
-/** Canonical steps — keep short enough for a phone modal. */
+/** Canonical steps — online-first room key model. */
 export const CONNECT_SAFELY_STEPS: ConnectStep[] = [
   {
     n: 1,
-    title: "Only the host can Connect",
+    title: "Host opens the group room",
     detail:
-      "The person who created the group (on their phone) turns Online on, then taps “Connect for easy invite.” Friends who joined cannot Connect — the app blocks that so you don’t get two rooms.",
+      "Creating a group (or “Open group room”) gives you a room key (like ABCD-EF). You are the host. Only you open the room — friends never create one.",
     who: "host",
   },
   {
     n: 2,
-    title: "Share the join code (or QR)",
+    title: "Share the room key",
     detail:
-      "After Connect, use Invite → Share or show the short code (like ABCD-EF). Friends need that join code, not an old “reference” code from before Connect.",
+      "Copy or invite with that key. Guests need the room key from the host’s group card — not a second “Connect” on their phone.",
     who: "host",
   },
   {
     n: 3,
-    title: "Friend uses Join a group",
+    title: "Guests only Join",
     detail:
-      "They open the same website → Join a group → type the code (hyphen optional) and their name. They never need Connect. Their other groups on the phone stay as they are.",
+      "Same website → Join a group → room key + name. One join links their phone to your room. Their other groups stay as they are.",
     who: "guest",
   },
   {
     n: 4,
-    title: "Both Online → Sync now",
+    title: "Sync when Online",
     detail:
-      "On the group, tap Sync now when you have Wi‑Fi or cell. You’ll see “Group updated.” Shared meetings and people update; private notes never leave either phone.",
+      "After you’re linked, tap Sync now. You can use Offline mode later for a meeting; go Online again to refresh. Private notes stay on-device; Account Key can encrypt personal backups.",
     who: "both",
   },
 ];
 
 export const CONNECT_SAFELY_DONT = [
-  "Friends: use Join a group — Connect is only for the host (and is blocked for joiners).",
-  "Never press Connect on two phones for the same group — only the host Connects once; everyone else Joins with the code.",
-  "Don’t use a different website address than your host (groups live per site).",
-  "Don’t worry: joining one group does not delete or change your other Spaces.",
+  "Guests: only Join with the host’s room key — never open a second room.",
+  "One room per group. The server reuses the same room for the group id.",
+  "Always use https://disciple-spaces.pages.dev (same site as the host).",
+  "Joining one group does not delete or change your other Spaces.",
 ] as const;
 
 /** Shown when explaining the “two rooms” failure mode. */
 export const DOUBLE_ROOM_FIX = [
-  "Symptom: you both “connected” but Sync fails or data doesn’t match.",
-  "Cause: each Connect used to open a separate cloud room.",
-  "Fix going forward: the server keeps one room per group id; Connect reuses it. Guests only Join.",
-  "If you’re stuck now: host opens the group, taps Connect (or Sync), shares the join code shown; friend Joins that code again.",
+  "Symptom: you both “have the group” but Sync fails or data doesn’t match.",
+  "Cause: two cloud rooms were opened for one group (old Connect-on-both-phones path).",
+  "Now: one room key per group; host opens once; guests only Join; server reuses the room.",
+  "Stuck now: host Syncs or re-opens room, shares the room key; guest Joins that key again.",
 ] as const;
 
 function StepList({
@@ -195,11 +195,11 @@ export function ConnectSafelyModal({
         <div className="flex flex-wrap gap-2 text-[11px] font-medium">
           <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2.5 py-1 text-primary">
             <Users className="h-3 w-3" aria-hidden />
-            Host connects once
+            Host opens room once
           </span>
           <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2.5 py-1 text-primary">
             <UserPlus className="h-3 w-3" aria-hidden />
-            Friend joins with code
+            Friend joins with room key
           </span>
           <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2.5 py-1 text-primary">
             <Cloud className="h-3 w-3" aria-hidden />
