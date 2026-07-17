@@ -73,6 +73,7 @@ import {
 } from "../lib/spaceTemplates";
 import { emptyResponses } from "../lib/sessionResponses";
 import { suggestTitleFromPassages } from "../lib/sessionTitle";
+import { isOnlineModeEnabled } from "../lib/onlineMode";
 
 interface SessionInput {
   spaceId: string;
@@ -585,12 +586,9 @@ export const useAppStore = create<AppState>((set, get) => ({
      * (when relay is configured and app Online mode is on). Guests never do this —
      * they only Join with the room key. Failure leaves a local Space; host can open later.
      */
-    if (isSpaceRelayConfigured()) {
+    if (isSpaceRelayConfigured() && isOnlineModeEnabled()) {
       try {
-        const { isOnlineModeEnabled } = await import("../lib/onlineMode");
-        if (isOnlineModeEnabled()) {
-          hydrated = await get().connectSpaceToRelay(id);
-        }
+        hydrated = await get().connectSpaceToRelay(id);
       } catch {
         // Local group still works; host can open the room from the group card
       }
@@ -1365,20 +1363,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
-    const sync = normalizeSpaceSync(row.sync);
+    let sync = normalizeSpaceSync(row.sync);
     if (sync.mode !== "connected" || !sync.roomId) {
-      throw new Error("Connect this Space first to sync over the network.");
+      throw new Error(
+        "This group is not linked to a room yet. Host: Open group room. Guest: Join with the host’s room key.",
+      );
     }
 
-    try {
-      // Pull remote first; replace shared session/prayer fields when rev is newer
+    const runPullPush = async (roomId: string, shortCode?: string) => {
       const pulled = await relayPullRoom({
-        roomId: sync.roomId,
+        roomId,
         sinceRev: sync.remoteRev,
       });
       if (!("unchanged" in pulled)) {
         const snap = pulled.snapshot;
-        // Apply remote shared data (never touches privateNotes)
         await get().importSpaceExport(
           {
             v: 1,
@@ -1401,16 +1399,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           },
           { mergeStrategy: "replace-shared" },
         );
-        // Re-apply connected sync after import (import preserves existing sync)
         await get().patchSpaceSync(spaceId, {
           mode: "connected",
-          roomId: sync.roomId,
-          shortCode: sync.shortCode,
+          roomId,
+          shortCode: shortCode ?? sync.shortCode,
           remoteRev: pulled.rev,
         });
       }
 
-      // Push local shared snapshot
       const fresh = await db.spaces.get(spaceId);
       if (!fresh) throw new Error("Space not found");
       const hydrated = await hydrateSpace(fresh);
@@ -1423,28 +1419,90 @@ export const useAppStore = create<AppState>((set, get) => ({
         .equals(spaceId)
         .toArray();
       const snapshot = buildSharedSnapshot(hydrated, sessions, prayerBoard);
+      // Always push to the room we just pulled (heal may have changed roomId)
+      const liveRoomId =
+        normalizeSpaceSync(fresh.sync).roomId || roomId;
       const push = await relayPushRoom({
-        roomId: sync.roomId,
+        roomId: liveRoomId,
         snapshot,
         baseRev: normalizeSpaceSync(fresh.sync).remoteRev,
       });
 
-      // Backfill spaceId → roomId so future Connect reuses this room
-      void relayRegisterSpaceRoom({ spaceId, roomId: sync.roomId });
+      void relayRegisterSpaceRoom({ spaceId, roomId: liveRoomId });
 
       return get().patchSpaceSync(spaceId, {
         mode: "connected",
-        roomId: sync.roomId,
-        shortCode: sync.shortCode ?? normalizeSpaceSync(fresh.sync).shortCode,
+        roomId: liveRoomId,
+        shortCode:
+          shortCode ??
+          normalizeSpaceSync(fresh.sync).shortCode ??
+          sync.shortCode,
         remoteRev: push.rev,
         lastSyncedAt: new Date().toISOString(),
         lastError: undefined,
       });
+    };
+
+    /** Re-attach to the live room when local roomId is dead but we still have a key. */
+    const healStaleRoom = async (): Promise<boolean> => {
+      const role = sync.deviceRole === "guest" ? "guest" : "host";
+      const code = sync.shortCode?.trim();
+
+      if (code) {
+        const displayName =
+          row.members[0]?.name?.trim() ||
+          (role === "host" ? "Host" : "Member");
+        try {
+          const rejoined = await get().joinSpaceViaRelay({
+            shortCode: code,
+            displayName,
+          });
+          sync = normalizeSpaceSync(rejoined.space.sync);
+          return Boolean(sync.roomId);
+        } catch {
+          // fall through to host open-room
+        }
+      }
+
+      if (role === "host") {
+        try {
+          const reopened = await get().connectSpaceToRelay(spaceId);
+          sync = normalizeSpaceSync(reopened.sync);
+          return Boolean(sync.roomId);
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    };
+
+    try {
+      return await runPullPush(sync.roomId, sync.shortCode);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Sync failed";
-      await get().patchSpaceSync(spaceId, { lastError: message });
-      throw err;
+      const message = err instanceof Error ? err.message : "Sync failed";
+      const looksStale =
+        /404|not found|couldn.?t reach|network|failed/i.test(message);
+
+      if (looksStale) {
+        const healed = await healStaleRoom();
+        if (healed && sync.roomId) {
+          try {
+            return await runPullPush(sync.roomId, sync.shortCode);
+          } catch (err2) {
+            const message2 =
+              err2 instanceof Error ? err2.message : "Sync failed";
+            await get().patchSpaceSync(spaceId, { lastError: message2 });
+            throw err2;
+          }
+        }
+      }
+
+      const friendly =
+        /404|not found/i.test(message)
+          ? "Room link is out of date. Host: open the group and share the current room key. Guest: Join a group again with that key (you keep local notes)."
+          : message;
+      await get().patchSpaceSync(spaceId, { lastError: friendly });
+      throw new Error(friendly);
     }
   },
 

@@ -68,10 +68,16 @@ export function useForegroundSpaceSync(): void {
           }
         }
         if (failures > 0 && failures === list.length) {
-          toast.message("Couldn’t refresh groups", {
-            description:
-              "You’re online, but the connection failed. Tap Sync now on a group.",
-            duration: 5000,
+          // Prefer the real lastError from the first failed group
+          const failed = useAppStore
+            .getState()
+            .spaces.find((s) => normalizeSpaceSync(s.sync).lastError);
+          const detail =
+            normalizeSpaceSync(failed?.sync).lastError ||
+            "Tap Sync now on the group. If it still fails, re-Join with the host’s current room key.";
+          toast.message("Couldn’t sync yet", {
+            description: detail,
+            duration: 7000,
           });
         } else if (successes > 0) {
           const t = Date.now();

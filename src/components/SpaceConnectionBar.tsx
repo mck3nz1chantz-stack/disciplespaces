@@ -83,10 +83,11 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       window.setTimeout(() => setJustSynced(false), 4000);
       toast.success("Group updated", {
         description:
-          "Shared meetings and people are up to date. Private notes stay on this phone (Account Key can encrypt personal backups).",
+          "Shared meetings and people are up to date. Private notes stay on this phone.",
       });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Sync failed");
+      const msg = err instanceof Error ? err.message : "Sync failed";
+      toast.error(msg, { duration: 8000 });
     } finally {
       setBusy(false);
     }
@@ -285,7 +286,18 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         <p className="text-xs text-muted text-center rounded-lg border border-border bg-bg/80 px-2 py-2">
           Linked with room key{" "}
           <span className="font-mono font-medium text-primary">{roomKey}</span>
-          . Tap Sync when Online to refresh.
+          . Tap Sync when Online to refresh. If Sync fails, use{" "}
+          <strong className="text-text">Join a group</strong> again with the
+          host’s <em>current</em> key (same site).
+        </p>
+      )}
+
+      {sync.lastError && (
+        <p
+          className="text-xs text-danger leading-relaxed rounded-lg border border-danger/30 bg-danger/5 px-2.5 py-2"
+          role="alert"
+        >
+          {sync.lastError}
         </p>
       )}
 
