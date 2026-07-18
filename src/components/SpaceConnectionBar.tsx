@@ -113,10 +113,9 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Sync failed";
-      toast.error(msg, {
+      toast.error("Sync didn’t finish", {
         duration: 12000,
-        description:
-          "Your group is still on this phone. Nothing was deleted. Save a group file as a safety net.",
+        description: `${msg} Your group is still on this phone — nothing was deleted. The big code above is your room key (invite), not a fault code.`,
         action: {
           label: "Save group file",
           onClick: () => void saveGroupFile(),
@@ -159,12 +158,15 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       setJustSynced(true);
       setOpenRoomConfirm(false);
       const code = normalizeSpaceSync(updated.sync).shortCode;
+      const meetingCount = updated.sessions?.length ?? 0;
       toast.success(
         code ? `Room key ready · ${code}` : "Room ready — share the key",
         {
           description:
-            "Send this key to friends. They Join once — they never create a room. After that, Sync keeps everyone together.",
-          duration: 7000,
+            meetingCount > 0
+              ? `Shared history uploaded (${meetingCount} meeting${meetingCount === 1 ? "" : "s"}). Send the room key — guests Join once, then Sync. The key is not an error code.`
+              : "Send this room key to friends (it is an invite code, not an error). They Join once — then both of you Sync after new meetings.",
+          duration: 9000,
         },
       );
     } catch (err) {
@@ -295,10 +297,13 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         <div className="rounded-xl border border-border bg-bg px-3 py-3 space-y-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted flex items-center gap-1.5">
             <KeyRound className="h-3.5 w-3.5" aria-hidden />
-            Room key · share this with guests
+            Room key (invite code) · not an error
           </p>
           <div className="flex items-center gap-2">
-            <p className="flex-1 font-mono text-xl font-semibold tracking-wider text-primary text-center">
+            <p
+              className="flex-1 font-mono text-xl font-semibold tracking-wider text-primary text-center"
+              aria-label={`Room key ${roomKey}`}
+            >
               {roomKey}
             </p>
             <Button
@@ -311,7 +316,8 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
             </Button>
           </div>
           <p className="text-[11px] text-muted leading-relaxed text-center">
-            Friends: Join a group → paste this key. They never open a second room.
+            Friends: Join a group → paste this key. After they join, you both
+            tap Sync so past meetings transfer. They never open a second room.
           </p>
         </div>
       )}

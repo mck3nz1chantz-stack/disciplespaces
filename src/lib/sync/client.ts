@@ -81,20 +81,27 @@ async function relayFetch(
 async function readError(res: Response): Promise<string> {
   try {
     const data = (await res.json()) as { error?: string };
-    if (data.error) return data.error;
+    if (data.error) {
+      // Never surface bare short codes as "fault codes" — wrap clearly
+      const err = data.error.trim();
+      if (/^[A-Z0-9]{4}[-–—\s]?[A-Z0-9]{2,4}$/i.test(err)) {
+        return `Could not complete sync. If you see a room key like ${err.toUpperCase()}, that is an invite code — not an error. Ask the host to Sync, then try Sync now again.`;
+      }
+      return err;
+    }
   } catch {
     // ignore
   }
   if (res.status === 404) {
-    return "Group room not found (404). The host may need to Connect again and share a fresh join code.";
+    return "Group room not found. Ask the host to open the group room and share the current room key, then Join again.";
   }
   if (res.status === 400) {
-    return "Sync request was rejected (400). Try Sync again, or reconnect the group.";
+    return "Sync request was rejected. Try Sync again, or ask the host to open the room and share a fresh key.";
   }
   if (res.status >= 500) {
-    return `Group connection is having trouble (${res.status}). Try again in a moment.`;
+    return `Group connection is having trouble (${res.status}). Your data is still on this phone — try again in a moment.`;
   }
-  return `Group connection failed (${res.status}). Try Sync again.`;
+  return `Group connection failed (${res.status}). Your data is still on this phone — try Sync again.`;
 }
 
 /**
@@ -127,6 +134,9 @@ export interface PreviewRoomResult {
   spaceId: string;
   name: string;
   members: Array<{ id: string; name: string }>;
+  /** Shared meetings already in the room (host must Sync for history). */
+  sessionCount?: number;
+  prayerCount?: number;
 }
 
 /**

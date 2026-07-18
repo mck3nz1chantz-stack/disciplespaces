@@ -219,6 +219,8 @@ export function JoinSpaceModal({
   const [alreadyHad, setAlreadyHad] = useState(false);
   const [historyImported, setHistoryImported] = useState(false);
   const [sessionsAdded, setSessionsAdded] = useState(0);
+  /** Total shared meetings in the room snapshot after join. */
+  const [sessionCount, setSessionCount] = useState(0);
   const [joiner, setJoiner] = useState<Member | null>(null);
   const [confirmPayload, setConfirmPayload] =
     useState<MemberJoinPayload | null>(null);
@@ -228,6 +230,9 @@ export function JoinSpaceModal({
   /** People already on the group (from preview or invite package). */
   const [knownPeople, setKnownPeople] = useState<ListedPerson[]>([]);
   const [previewGroupName, setPreviewGroupName] = useState<string | null>(null);
+  const [previewSessionCount, setPreviewSessionCount] = useState<number | null>(
+    null,
+  );
   const [identity, setIdentity] = useState<IdentityChoice>("new");
   const [selectedExistingName, setSelectedExistingName] = useState("");
   const [newName, setNewName] = useState("");
@@ -407,12 +412,16 @@ export function JoinSpaceModal({
       try {
         const preview = await previewRoom({ shortCode: text });
         setPreviewGroupName(preview.name);
+        setPreviewSessionCount(
+          typeof preview.sessionCount === "number" ? preview.sessionCount : null,
+        );
         resetIdentity(uniquePeople(preview.members));
         setStep("confirm");
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not find group");
         // Still allow free-name join if preview fails (older relay)
         setPreviewGroupName(null);
+        setPreviewSessionCount(null);
         resetIdentity([]);
         setStep("confirm");
       } finally {
@@ -439,18 +448,36 @@ export function JoinSpaceModal({
       }
       setSaving(true);
       try {
-        const { space, alreadyHad: had } = await joinSpaceViaRelay({
+        const {
+          space,
+          alreadyHad: had,
+          sessionCount: roomSessions,
+          addedSessions,
+        } = await joinSpaceViaRelay({
           shortCode: raw.trim(),
           displayName: name,
         });
         setResultSpaceId(space.id);
         setAlreadyHad(had);
         setHistoryImported(true);
-        setSessionsAdded(space.sessions?.length ?? 0);
+        setSessionsAdded(addedSessions);
+        setSessionCount(roomSessions);
         setJoiner(null);
         setConfirmPayload(null);
         setStep("done");
-        toast.success(had ? "Space updated from cloud join" : "Joined space");
+        if (roomSessions === 0) {
+          toast.message(had ? "Linked — no shared meetings yet" : "Joined — no shared meetings yet", {
+            description:
+              "Ask the host to open this group and tap Sync now so past meetings upload. Then you tap Sync.",
+            duration: 10000,
+          });
+        } else {
+          toast.success(
+            had
+              ? `Space updated · ${roomSessions} meeting${roomSessions === 1 ? "" : "s"}`
+              : `Joined with ${roomSessions} meeting${roomSessions === 1 ? "" : "s"}`,
+          );
+        }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not join");
       } finally {
@@ -679,12 +706,19 @@ export function JoinSpaceModal({
                   {previewGroupName || "Connected group"}
                 </p>
                 <p className="text-sm font-mono tracking-wide text-muted">
-                  Code {raw.trim().toUpperCase()}
+                  Room key {raw.trim().toUpperCase()}
                 </p>
+                {previewSessionCount != null && (
+                  <p className="text-sm text-muted">
+                    {previewSessionCount > 0
+                      ? `${previewSessionCount} shared meeting${previewSessionCount === 1 ? "" : "s"} ready to download`
+                      : "No shared meetings on the room yet — host should Sync first"}
+                  </p>
+                )}
                 <p className="text-sm text-muted">
                   You’ll join this group only. Other Spaces on your phone stay
                   as they are. Private notes never come with a join — and you
-                  should not tap Connect after this (your host already did).
+                  should not open a group room after this (your host already did).
                 </p>
               </>
             ) : parsed?.kind === "member-join" ? (
@@ -746,8 +780,10 @@ export function JoinSpaceModal({
           <div className="rounded-xl bg-surface-muted/60 border border-border px-3 py-3 text-sm text-muted space-y-2">
             {shortCodeJoin ? (
               <p>
-                You’ll join when Online and the host has Connect turned on. If
-                that fails, ask them to show the QR instead.
+                Online join downloads shared meetings already on the host’s
+                room. If the count is zero, ask them to open the group and tap{" "}
+                <strong className="text-text">Sync now</strong>, then try again
+                (or Sync after you join). Never open a second room on this phone.
               </p>
             ) : parsed?.kind === "member-join" ? (
               <p>
@@ -802,15 +838,40 @@ export function JoinSpaceModal({
               {alreadyHad ? "Space already on this device" : "You're in"}
             </p>
             <p className="text-sm text-muted">
-              {historyImported
-                ? sessionsAdded > 0
-                  ? `Imported ${sessionsAdded} session${sessionsAdded === 1 ? "" : "s"}. You can take part going forward on this device.`
-                  : "History package applied. Sessions already on this device were kept."
-                : alreadyHad
-                  ? "We opened your existing local copy. Past sessions were not overwritten."
-                  : "You can take part in current and future sessions on this device."}
+              {shortCodeJoin
+                ? sessionCount > 0
+                  ? `This room has ${sessionCount} shared meeting${sessionCount === 1 ? "" : "s"}${sessionsAdded > 0 ? ` (${sessionsAdded} new on this phone)` : ""}. Tap Sync later to stay up to date.`
+                  : "You’re linked, but the room had no shared meetings yet."
+                : historyImported
+                  ? sessionsAdded > 0
+                    ? `Imported ${sessionsAdded} session${sessionsAdded === 1 ? "" : "s"}. You can take part going forward on this device.`
+                    : "History package applied. Sessions already on this device were kept."
+                  : alreadyHad
+                    ? "We opened your existing local copy. Past sessions were not overwritten."
+                    : "You can take part in current and future sessions on this device."}
             </p>
-            {!historyImported && (
+            {shortCodeJoin && sessionCount === 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-left text-sm text-muted space-y-1">
+                <p className="font-medium text-amber-900 dark:text-amber-100">
+                  How to get past meetings
+                </p>
+                <ol className="list-decimal pl-4 space-y-1 text-xs leading-relaxed">
+                  <li>
+                    Host: open this group → Online → <strong>Sync now</strong>{" "}
+                    (uploads history).
+                  </li>
+                  <li>
+                    You: open the group → <strong>Sync now</strong> (downloads
+                    them).
+                  </li>
+                  <li>
+                    Still empty? Host can send a group file (DSX1.) from Save
+                    group file.
+                  </li>
+                </ol>
+              </div>
+            )}
+            {!historyImported && !shortCodeJoin && (
               <p className="text-xs text-muted">
                 Past history can still be imported if someone shares a Space
                 Update (DSX1.) with you.

@@ -27,6 +27,10 @@ interface SharedSnapshot {
   kind: "ds-shared-snapshot";
   spaceId: string;
   name: string;
+  members?: unknown;
+  sessions?: unknown;
+  prayerBoard?: unknown;
+  exportedAt?: string;
   [key: string]: unknown;
 }
 
@@ -463,6 +467,28 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
             }),
           }),
         );
+        // Host re-open must refresh shared history — otherwise guests join a
+        // stale snapshot from the first Connect (empty past sessions).
+        const pushRes = await roomStub.fetch(
+          new Request("https://room/push", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              snapshot: body.snapshot,
+              mergeShared: true,
+            }),
+          }),
+        );
+        if (!pushRes.ok) {
+          // Fall back to full replace if merge endpoint unavailable
+          await roomStub.fetch(
+            new Request("https://room/", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ snapshot: body.snapshot }),
+            }),
+          );
+        }
         const again = await roomStub.fetch(
           new Request("https://room/full", { method: "GET" }),
         );
@@ -571,6 +597,15 @@ async function previewRoom(req: Request, env: Env): Promise<Response> {
     }))
     .filter((m) => m.name.length > 0);
 
+  const snapExtra = snap as SharedSnapshot & {
+    sessions?: unknown;
+    prayerBoard?: unknown;
+  };
+  const sessions = Array.isArray(snapExtra.sessions) ? snapExtra.sessions : [];
+  const prayerBoard = Array.isArray(snapExtra.prayerBoard)
+    ? snapExtra.prayerBoard
+    : [];
+
   return json(
     {
       roomId,
@@ -578,6 +613,8 @@ async function previewRoom(req: Request, env: Env): Promise<Response> {
       spaceId: String(snap.spaceId || ""),
       name: String(snap.name || "Group"),
       members,
+      sessionCount: sessions.length,
+      prayerCount: prayerBoard.length,
     },
     200,
     req,
@@ -687,6 +724,75 @@ async function joinRoom(req: Request, env: Env): Promise<Response> {
     await bindSpaceIdToRoom(env, spaceId, data.roomId);
   }
   return json(data, 200, req);
+}
+
+/**
+ * Union shared snapshots by entity id.
+ * Incoming host history fills gaps; existing remote rows keep their fields
+ * unless the incoming copy has the same id (incoming wins for that id).
+ */
+function mergeSharedSnapshots(
+  current: SharedSnapshot,
+  incoming: SharedSnapshot,
+): SharedSnapshot {
+  type Row = { id?: string; [key: string]: unknown };
+  const byId = (rows: unknown): Map<string, Row> => {
+    const map = new Map<string, Row>();
+    if (!Array.isArray(rows)) return map;
+    for (const raw of rows) {
+      if (!raw || typeof raw !== "object") continue;
+      const row = raw as Row;
+      const id = String(row.id || "").trim();
+      if (!id) continue;
+      map.set(id, row);
+    }
+    return map;
+  };
+
+  const sessions = byId(current.sessions);
+  for (const [id, row] of byId(incoming.sessions)) {
+    sessions.set(id, { ...(sessions.get(id) || {}), ...row, id });
+  }
+
+  const prayers = byId(current.prayerBoard);
+  for (const [id, row] of byId(incoming.prayerBoard)) {
+    prayers.set(id, { ...(prayers.get(id) || {}), ...row, id });
+  }
+
+  type Member = { id?: string; name?: string; joinedAt?: string };
+  const memberMap = new Map<string, Member>();
+  const addMembers = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const raw of list) {
+      if (!raw || typeof raw !== "object") continue;
+      const m = raw as Member;
+      const name = String(m.name || "").trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!memberMap.has(key)) {
+        memberMap.set(key, {
+          id: String(m.id || crypto.randomUUID()),
+          name,
+          joinedAt: m.joinedAt || new Date().toISOString(),
+        });
+      }
+    }
+  };
+  addMembers(current.members);
+  addMembers(incoming.members);
+
+  return {
+    ...current,
+    ...incoming,
+    kind: "ds-shared-snapshot",
+    v: 1,
+    spaceId: String(incoming.spaceId || current.spaceId),
+    name: String(incoming.name || current.name),
+    members: Array.from(memberMap.values()),
+    sessions: Array.from(sessions.values()),
+    prayerBoard: Array.from(prayers.values()),
+    exportedAt: new Date().toISOString(),
+  };
 }
 
 export class SpaceRoom implements DurableObject {
@@ -846,12 +952,18 @@ export class SpaceRoom implements DurableObject {
       const body = (await req.json()) as {
         snapshot?: SharedSnapshot;
         baseRev?: number;
+        /** Union sessions/prayers by id so host re-open never drops guest rows. */
+        mergeShared?: boolean;
       };
       if (!body.snapshot) {
         return Response.json({ error: "snapshot required" }, { status: 400 });
       }
       assertNoPrivateNotes(body.snapshot);
-      room.snapshot = body.snapshot;
+      if (body.mergeShared) {
+        room.snapshot = mergeSharedSnapshots(room.snapshot, body.snapshot);
+      } else {
+        room.snapshot = body.snapshot;
+      }
       room.rev += 1;
       room.updatedAt = new Date().toISOString();
       await this.state.storage.put("room", room);

@@ -15,12 +15,12 @@
 | Hard download/import | **Always available** |
 | Key dismiss gate | User-initiated download + acknowledgements before Done |
 
-## Modes
+## Modes (online-first Spaces)
 
-1. **Use without keys** — default; full local app.
-2. **Account Key (optional)** — same person, multiple devices; encrypts personal backup (optional private notes).
-3. **Group Key (optional)** — space-level secret; regenerate with all-member sign-off; new join code on rotate.
-4. **DSX1 / Restore** — always; shared-layer safety net.
+1. **Group room key (primary)** — host creates/opens a group online → short room key (join code). One room per Space id. Guests **only Join**.
+2. **Host** — Space creator; opens the room; can regenerate after group vote (Group Key + new join code).
+3. **Account Key (promoted)** — same person, phone + desktop, no email/password; encrypts personal backups. Not required for guests to Join.
+4. **Offline + hard backup** — Offline mode pauses sync after you’re linked; DSX1/DSP1 remain the safety net.
 
 ## Account Key
 

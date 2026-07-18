@@ -303,7 +303,14 @@ interface AppState {
   joinSpaceViaRelay: (input: {
     shortCode: string;
     displayName: string;
-  }) => Promise<{ space: Space; alreadyHad: boolean }>;
+  }) => Promise<{
+    space: Space;
+    alreadyHad: boolean;
+    /** Shared sessions present after join (from room snapshot). */
+    sessionCount: number;
+    /** Newly added sessions this join imported. */
+    addedSessions: number;
+  }>;
   /** Low-level patch of sync metadata (local only). */
   patchSpaceSync: (
     spaceId: string,
@@ -1335,7 +1342,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       .equals(spaceId)
       .toArray();
     const snapshot = buildSharedSnapshot(space, sessions, prayerBoard);
-    // Server reuses room for this spaceId unless forceNew — prevents orphan rooms
+    // Server reuses room for this spaceId unless forceNew — prevents orphan rooms.
+    // Reuse path also merges this snapshot so past sessions land for guests.
     const result = await relayCreateRoom({
       snapshot,
       displayName: space.members[0]?.name,
@@ -1345,7 +1353,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       spaceId,
       roomId: result.roomId,
     });
-    return get().patchSpaceSync(spaceId, {
+    await get().patchSpaceSync(spaceId, {
       mode: "connected",
       roomId: result.roomId,
       shortCode: result.shortCode,
@@ -1355,6 +1363,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       lastError: undefined,
       deviceRole: "host",
     });
+    // Always pull+push once so host local history is on the room before invites.
+    // Critical when Open room was tapped after meetings were added offline.
+    try {
+      return await get().syncSpaceNow(spaceId);
+    } catch {
+      // Linked with the snapshot from create/reuse; Sync can retry later
+      const rowAfter = await db.spaces.get(spaceId);
+      if (!rowAfter) throw new Error("Space not found");
+      return hydrateSpace(rowAfter);
+    }
   },
 
   syncSpaceNow: async (spaceId) => {
@@ -1552,7 +1570,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       : undefined;
     const deviceRole = priorRole === "host" ? "host" : "guest";
 
-    await get().importSpaceExport(
+    const imported = await get().importSpaceExport(
       {
         v: 1,
         kind: "ds-export",
@@ -1607,7 +1625,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       roomId: result.roomId,
     });
 
-    return { space, alreadyHad: had };
+    const sessionCount = Array.isArray(snap.sessions) ? snap.sessions.length : 0;
+    return {
+      space,
+      alreadyHad: had,
+      sessionCount,
+      addedSessions: imported.addedSessions,
+    };
   },
 
   addPrivateNote: async ({ spaceId, sessionId, sectionKey, content }) => {
