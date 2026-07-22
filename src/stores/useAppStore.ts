@@ -203,10 +203,12 @@ interface AppState {
 
   /**
    * Join / seed from a Space Update (history). Optionally add joiner to members.
+   * asHost: restore own backup with host controls (default false → guest when named).
    */
   joinFromExport: (input: {
     payload: SpaceExportPayload;
     joinerName?: string;
+    asHost?: boolean;
   }) => Promise<{
     space: Space;
     alreadyHad: boolean;
@@ -347,6 +349,13 @@ interface AppState {
     spaceId: string,
     opts?: { rotateGroupKey?: boolean },
   ) => Promise<{ space: Space; shortCode: string; groupKeySecret?: string }>;
+
+  /**
+   * Local recovery: treat this phone as host for a group that was marked guest
+   * (e.g. restored a DSX1 file via Join with a name). Does not invent a room —
+   * host can Open group room after. Never deletes data.
+   */
+  claimSpaceHostRole: (spaceId: string) => Promise<Space>;
   /** Low-level patch of sync metadata (local only). */
   patchSpaceSync: (
     spaceId: string,
@@ -522,6 +531,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadTemplates: async () => {
     try {
+      // Re-seed starter templates if missing (e.g. wiped DB / partial restore)
+      await ensureSeedData();
       const templates = await db.templates.orderBy("name").toArray();
       set({ templates });
     } catch (err) {
@@ -1068,15 +1079,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     return { space, alreadyHad: false, joiner };
   },
 
-  joinFromExport: async ({ payload, joinerName }) => {
+  joinFromExport: async ({
+    payload,
+    joinerName,
+    asHost = false,
+  }: {
+    payload: SpaceExportPayload;
+    joinerName?: string;
+    /** When true, keep host role (own backup restore). Default guest if named. */
+    asHost?: boolean;
+  }) => {
     const had = Boolean(await db.spaces.get(payload.space.id));
     const result = await get().importSpaceExport(payload);
 
     let joiner: Member | null = null;
     const name = joinerName?.trim();
-    // Joining with a name = guest path. Bare file restore (no name) stays host
-    // so a host can restore their own backup and Connect again.
-    if (name && !had) {
+    // Joining with a name = guest path unless asHost (own backup restore).
+    // Bare file restore (no name) stays host so Connect works again.
+    if (name && !had && !asHost) {
       await get().patchSpaceSync(payload.space.id, { deviceRole: "guest" });
     }
     if (name) {
@@ -1093,9 +1113,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           const nextRow: SpaceRow = {
             ...row,
             members: [...row.members, joiner],
-            sync: name && !had
-              ? { ...normalizeSpaceSync(row.sync), deviceRole: "guest" }
-              : row.sync,
+            sync:
+              name && !had && !asHost
+                ? { ...normalizeSpaceSync(row.sync), deviceRole: "guest" }
+                : row.sync,
           };
           await db.spaces.put(nextRow);
           const updated = await hydrateSpace(nextRow);
@@ -2070,6 +2091,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       shortCode: rotated.shortCode,
       groupKeySecret,
     };
+  },
+
+  claimSpaceHostRole: async (spaceId) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const sync = normalizeSpaceSync(row.sync);
+    if (sync.deviceRole !== "guest") {
+      return hydrateSpace(row);
+    }
+    // Keep room link if present; host can Open/Sync/reissue after reclaim.
+    return get().patchSpaceSync(spaceId, {
+      deviceRole: "host",
+      lastError: undefined,
+    });
   },
 
   addPrivateNote: async ({ spaceId, sessionId, sectionKey, content }) => {

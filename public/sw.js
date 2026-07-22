@@ -1,10 +1,15 @@
 /**
  * DiscipleSpaces service worker — app shell + Bible JSON (runtime cache).
  * Vanilla SW (no workbox generateSW) so production builds work on Node 25/26.
+ *
+ * Brick-prevention:
+ * - Bump SHELL_CACHE when install strategy changes.
+ * - Hashed /assets/* are network-first (avoid stale JS/CSS vs new index.html).
+ * - skipWaiting + clients.claim; clients should reload on controllerchange.
  */
 /* eslint-disable no-restricted-globals */
-/** Bump when shell assets (favicon, icons, index) must force-refresh for all clients. */
-const SHELL_CACHE = "ds-shell-v3";
+/** Bump when shell caching strategy or pre-cache list must force-refresh. */
+const SHELL_CACHE = "ds-shell-v4";
 const BIBLE_CACHE = "bible-data-pd-v1";
 
 const SHELL_URLS = [
@@ -43,7 +48,14 @@ self.addEventListener("activate", (event) => {
             .map((k) => caches.delete(k)),
         ),
       )
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      .then(() =>
+        self.clients.matchAll({ type: "window" }).then((clients) => {
+          for (const client of clients) {
+            client.postMessage({ type: "DS_SW_ACTIVATED" });
+          }
+        }),
+      ),
   );
 });
 
@@ -74,8 +86,10 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          void caches.open(SHELL_CACHE).then((c) => c.put("/index.html", copy));
+          if (res.ok) {
+            const copy = res.clone();
+            void caches.open(SHELL_CACHE).then((c) => c.put("/index.html", copy));
+          }
           return res;
         })
         .catch(() =>
@@ -85,11 +99,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets — stale-while-revalidate style
-  if (
-    /\.(?:js|css|png|svg|ico|woff2|webmanifest)$/i.test(url.pathname) ||
-    url.pathname.startsWith("/assets/")
-  ) {
+  // Hashed Vite bundles — network first (stale-while-revalidate caused
+  // old JS + new HTML mismatches that look like a white-screen brick).
+  if (url.pathname.startsWith("/assets/")) {
+    event.respondWith(networkFirst(req, SHELL_CACHE));
+    return;
+  }
+
+  // Other static shell assets — stale-while-revalidate
+  if (/\.(?:js|css|png|svg|ico|woff2|webmanifest)$/i.test(url.pathname)) {
     event.respondWith(staleWhileRevalidate(req, SHELL_CACHE));
   }
 });

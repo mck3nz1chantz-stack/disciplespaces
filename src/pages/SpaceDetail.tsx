@@ -122,6 +122,7 @@ export function SpaceDetail() {
   const createSession = useAppStore((s) => s.createSession);
   const updateSession = useAppStore((s) => s.updateSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
+  const claimSpaceHostRole = useAppStore((s) => s.claimSpaceHostRole);
   const { mode: onlineMode } = useOnlineMode();
 
   const space = liveSpace ?? null;
@@ -185,6 +186,7 @@ export function SpaceDetail() {
   const [quickName, setQuickName] = useState("");
   const [quickAdding, setQuickAdding] = useState(false);
   const [guestSyncing, setGuestSyncing] = useState(false);
+  const [claimingHost, setClaimingHost] = useState(false);
   const sessionScrollRef = useRef<HTMLDivElement>(null);
 
   const onLockedSectionChange = useCallback((key: string) => {
@@ -397,44 +399,66 @@ export function SpaceDetail() {
       viewMode === "all"
         ? normalizeSpaceTemplate(space.spaceTemplate)
         : viewMode;
+
+    // Ensure starter templates exist (can be empty briefly after restore)
+    let templateList = templates;
+    if (templateList.length === 0) {
+      await loadTemplates();
+      templateList = useAppStore.getState().templates;
+    }
+
     const preferredTemplateId =
       getSpaceTemplateMeta(mode).firstSessionTemplateId ||
       space.defaultSessionTemplateId ||
-      templates[0]?.id;
-    if (!preferredTemplateId) {
+      templateList[0]?.id;
+    const templateId =
+      (preferredTemplateId &&
+      templateList.some((t) => t.id === preferredTemplateId)
+        ? preferredTemplateId
+        : undefined) ||
+      preferredTemplateId ||
+      templateList[0]?.id;
+    if (!templateId) {
       toast.error("No session templates available yet");
       return;
     }
 
+    // Open the sheet immediately so the bottom CTA never feels “stuck”
     setSessionPanelTab("session");
     setLockedSectionKey(PRIVATE_SECTION.notes);
+    setActiveSession(null);
+    setFormValues(null);
+    setIsDraftSession(true);
+    setSessionMode("edit");
     setSaving(true);
     try {
       const draftValues = buildSessionFormValues({
         mode: "create",
-        templates,
+        templates: templateList,
         members: space.members,
         meetingDate: format(new Date(), "yyyy-MM-dd"),
-        preferredTemplateId,
+        preferredTemplateId: templateId,
+        templateId,
       });
-      // Prefer first template step for lock when guided templates exist
-      const tpl = templates.find((t) => t.id === draftValues.templateId);
+      const createTemplateId = draftValues.templateId || templateId;
+      const tpl = templateList.find((t) => t.id === createTemplateId);
       if (tpl?.steps[0]?.id) {
         setLockedSectionKey(tpl.steps[0].id);
       }
       const created = await createSession({
         spaceId: space.id,
         date: draftValues.meetingDate,
-        templateId: draftValues.templateId,
+        templateId: createTemplateId,
         attendees: draftValues.attendees,
         responses: draftValues.responses,
         passagesStudied: draftValues.passagesStudied,
         notes: draftValues.notes,
       });
       setActiveSession(created);
-      setFormValues(draftValues);
-      setIsDraftSession(true);
-      setSessionMode("edit");
+      setFormValues({
+        ...draftValues,
+        templateId: createTemplateId,
+      });
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Could not start session",
@@ -927,10 +951,42 @@ export function SpaceDetail() {
               {guestSyncing ? "Syncing…" : "Sync"}
             </Button>
           ) : (
-            <p className="text-xs text-muted text-center rounded-lg border border-border bg-bg/80 px-2 py-2">
-              Use <strong className="text-text">Join a group</strong> with the
-              host’s room key first — then this Sync button unlocks.
-            </p>
+            <div className="space-y-2">
+              <p className="text-xs text-muted text-center rounded-lg border border-border bg-bg/80 px-2 py-2">
+                Use <strong className="text-text">Join a group</strong> with the
+                host’s room key first — then this Sync button unlocks.
+              </p>
+              <Button
+                fullWidth
+                variant="secondary"
+                className="!py-2.5 text-sm"
+                disabled={claimingHost}
+                onClick={() => {
+                  if (!space) return;
+                  setClaimingHost(true);
+                  void claimSpaceHostRole(space.id)
+                    .then(() => {
+                      toast.success("Host controls restored on this phone", {
+                        description:
+                          "You can edit the list, invite, and Open group room. Only do this if you created the group or restored your backup.",
+                        duration: 8000,
+                      });
+                    })
+                    .catch((err) =>
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Could not restore host role",
+                      ),
+                    )
+                    .finally(() => setClaimingHost(false));
+                }}
+              >
+                {claimingHost
+                  ? "Restoring…"
+                  : "I created this group — restore host"}
+              </Button>
+            </div>
           )}
         </section>
       )}
@@ -1522,98 +1578,100 @@ export function SpaceDetail() {
       >
         {/*
           Keep both panes mounted so scroll position is preserved when flipping
-          Session ↔ Private. Parent has a real height; each pane scrolls itself.
+          Session ↔ Private. Wrapper must have a real height — absolute panes
+          contribute 0 to parent flow height (see Modal containBody).
         */}
-        <div
-          ref={sessionScrollRef}
-          className={[
-            "absolute inset-0 overflow-y-auto overscroll-contain pb-1 pr-0.5",
-            sessionPanelTab === "session"
-              ? "z-[1]"
-              : "invisible pointer-events-none z-0",
-          ].join(" ")}
-          aria-hidden={sessionPanelTab !== "session"}
-          // Keep mounted so scroll position + section lock survive tab flips
-        >
-          {sessionMode === "edit" && formValues && activeSession && (
-            <SessionForm
-              mode={isDraftSession ? "create" : "edit"}
-              members={space.members}
-              templates={templates}
-              values={formValues}
-              onChange={setFormValues}
-              onSubmit={handleSaveSession}
-              onCancel={
-                isDraftSession
-                  ? () => void closeSessionModal()
-                  : () => {
-                      setFormValues(null);
-                      setSessionMode("view");
-                      setSessionPanelTab("session");
-                    }
-              }
-              saving={saving}
-              lockTemplate={!isDraftSession}
-              onManageMembers={() => {
-                void closeSessionModal();
-                openMembers();
-              }}
+        <div className="relative min-h-[min(68dvh,34rem)] h-full w-full">
+          <div
+            ref={sessionScrollRef}
+            className={[
+              "absolute inset-0 overflow-y-auto overscroll-contain pb-1 pr-0.5",
+              sessionPanelTab === "session"
+                ? "z-[1]"
+                : "invisible pointer-events-none z-0",
+            ].join(" ")}
+            aria-hidden={sessionPanelTab !== "session"}
+          >
+            {sessionMode === "edit" && formValues && activeSession && (
+              <SessionForm
+                mode={isDraftSession ? "create" : "edit"}
+                members={space.members}
+                templates={templates}
+                values={formValues}
+                onChange={setFormValues}
+                onSubmit={handleSaveSession}
+                onCancel={
+                  isDraftSession
+                    ? () => void closeSessionModal()
+                    : () => {
+                        setFormValues(null);
+                        setSessionMode("view");
+                        setSessionPanelTab("session");
+                      }
+                }
+                saving={saving}
+                lockTemplate={!isDraftSession}
+                onManageMembers={() => {
+                  void closeSessionModal();
+                  openMembers();
+                }}
+                spaceId={space.id}
+                sessionId={activeSession.id}
+                onOpenPrivateNotes={(sectionKey) =>
+                  openSessionPrivateDrawer(sectionKey)
+                }
+                privateNoteCount={sessionPrivateCount}
+              />
+            )}
+
+            {sessionMode === "view" && activeSession && (
+              <SessionView
+                session={activeSession}
+                template={viewTemplate}
+                members={space.members}
+                spaceId={space.id}
+                onEdit={() => openEditSession(activeSession)}
+                onDelete={() => setDeleteSessionOpen(true)}
+                onClose={() => void closeSessionModal()}
+                onOpenBible={() => openBibleForSpace(activeSession.id)}
+                onOpenPrivateNotes={(sectionKey) =>
+                  openSessionPrivateDrawer(sectionKey)
+                }
+                privateNoteCount={sessionPrivateCount}
+              />
+            )}
+
+            {sessionMode === "edit" && (!formValues || !activeSession) && (
+              <p className="text-sm text-muted py-8 text-center">
+                {saving ? "Starting session…" : "Loading session…"}
+              </p>
+            )}
+            {sessionMode === "view" && !activeSession && (
+              <p className="text-sm text-muted py-8 text-center">
+                Session not found.
+              </p>
+            )}
+          </div>
+
+          <div
+            className={[
+              "absolute inset-0 overflow-y-auto overscroll-contain pb-1 pr-0.5",
+              sessionPanelTab === "private"
+                ? "z-[1]"
+                : "invisible pointer-events-none z-0",
+            ].join(" ")}
+            aria-hidden={sessionPanelTab !== "private"}
+          >
+            <SessionPrivateDrawer
+              open={sessionMode !== null}
+              onClose={closeSessionPrivateDrawer}
               spaceId={space.id}
-              sessionId={activeSession.id}
-              onOpenPrivateNotes={(sectionKey) =>
-                openSessionPrivateDrawer(sectionKey)
-              }
-              privateNoteCount={sessionPrivateCount}
+              sessionId={activeSession?.id}
+              template={liveSessionTemplate}
+              lockedSectionKey={lockedSectionKey || SECTION_GENERAL}
+              needsSave={!activeSession}
             />
-          )}
-
-          {sessionMode === "view" && activeSession && (
-            <SessionView
-              session={activeSession}
-              template={viewTemplate}
-              members={space.members}
-              spaceId={space.id}
-              onEdit={() => openEditSession(activeSession)}
-              onDelete={() => setDeleteSessionOpen(true)}
-              onClose={() => void closeSessionModal()}
-              onOpenBible={() => openBibleForSpace(activeSession.id)}
-              onOpenPrivateNotes={(sectionKey) =>
-                openSessionPrivateDrawer(sectionKey)
-              }
-              privateNoteCount={sessionPrivateCount}
-            />
-          )}
-
-          {sessionMode === "edit" && (!formValues || !activeSession) && (
-            <p className="text-sm text-muted py-6 text-center">
-              {saving ? "Starting session…" : "Loading session…"}
-            </p>
-          )}
-          {sessionMode === "view" && !activeSession && (
-            <p className="text-sm text-muted py-6 text-center">
-              Session not found.
-            </p>
-          )}
-        </div>
-
-        <div
-          className={[
-            "absolute inset-0 overflow-y-auto overscroll-contain pb-1 pr-0.5",
-            sessionPanelTab === "private"
-              ? "z-[1]"
-              : "invisible pointer-events-none z-0",
-          ].join(" ")}
-          aria-hidden={sessionPanelTab !== "private"}
-        >
-          <SessionPrivateDrawer
-            open={sessionMode !== null}
-            onClose={closeSessionPrivateDrawer}
-            spaceId={space.id}
-            sessionId={activeSession?.id}
-            template={liveSessionTemplate}
-            lockedSectionKey={lockedSectionKey || SECTION_GENERAL}
-            needsSave={!activeSession}
-          />
+          </div>
         </div>
       </Modal>
 

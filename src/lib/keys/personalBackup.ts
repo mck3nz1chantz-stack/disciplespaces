@@ -70,7 +70,7 @@ export function parsePersonalBackupInput(raw: string): PersonalBackupPayload {
   const pack = match ? match[0] : text;
   if (!pack.startsWith(PERSONAL_BACKUP_PREFIX) && !pack.startsWith("{")) {
     throw new Error(
-      "Could not read personal backup. Expected a DSP1. package or JSON.",
+      "Could not read personal backup. Expected a DSP1. package, JSON, or a Zip that contains one.",
     );
   }
   if (pack.startsWith("{")) {

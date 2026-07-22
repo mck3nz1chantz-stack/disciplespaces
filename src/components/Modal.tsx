@@ -101,8 +101,10 @@ export function Modal({
           "relative z-10 w-full max-w-md rounded-t-2xl sm:rounded-2xl bg-surface border border-border shadow-xl p-5",
           "pb-[max(1.25rem,env(safe-area-inset-bottom))]",
           containBody
-            ? // Bounded height so body flex-1 + overflow-y-auto can scroll on phones
-              "flex flex-col max-h-[92dvh] overflow-hidden min-h-0 sm:max-h-[90dvh]"
+            ? // Definite height required: Session dual-panes are position:absolute
+              // and contribute 0 flow height. max-h alone collapses body to ~0
+              // (regression: only max-h → empty sheet / “stuck” on phones).
+              "flex flex-col h-[min(92dvh,100%)] max-h-[92dvh] overflow-hidden min-h-0 sm:h-[min(90dvh,100%)] sm:max-h-[90dvh]"
             : "max-h-[92dvh] overflow-y-auto overscroll-contain sm:max-h-[90dvh] [-webkit-overflow-scrolling:touch]",
         ].join(" ")}
       >
@@ -159,8 +161,8 @@ export function Modal({
         {containBody ? (
           <div
             ref={bodyRef}
-            // Scrollable by default so long forms (Fix link, etc.) work.
-            // Session panes still use absolute + their own overflow-y-auto.
+            // flex-1 fills the definite panel height. overflow-y-auto for
+            // normal-flow content (keys); Session panes scroll themselves.
             className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
           >
             {children}

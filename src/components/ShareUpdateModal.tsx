@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Copy,
@@ -24,6 +24,10 @@ import {
 } from "../lib/keys/personalBackup";
 import { getStoredAccountKey } from "../lib/keys/accountKey";
 import { db } from "../lib/db";
+import {
+  IMPORT_FILE_ACCEPT,
+  readBackupImportFile,
+} from "../lib/importFile";
 
 interface ShareUpdateModalProps {
   open: boolean;
@@ -50,13 +54,21 @@ export function ShareUpdateModal({
   const [payload, setPayload] = useState<SpaceExportPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [importText, setImportText] = useState("");
+  const [importSourceLabel, setImportSourceLabel] = useState<string | null>(
+    null,
+  );
   const [importing, setImporting] = useState(false);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) {
       setPayload(null);
       setImportText("");
+      setImportSourceLabel(null);
+      setDragOver(false);
+      setLoadingFile(false);
       setMode(defaultMode);
       return;
     }
@@ -213,16 +225,59 @@ export function ShareUpdateModal({
     }
   }
 
-  function onFile(file: File | null) {
+  async function onFile(file: File | null) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result ?? "");
-      setImportText(text);
-      toast.message("File loaded — review and import");
-    };
-    reader.onerror = () => toast.error("Could not read file");
-    reader.readAsText(file);
+    setLoadingFile(true);
+    try {
+      const result = await readBackupImportFile(file);
+      setImportText(result.text);
+      setImportSourceLabel(result.sourceLabel);
+      toast.message(
+        result.fromZip
+          ? "Zip opened — backup package loaded"
+          : "File loaded — review and import",
+        {
+          description: result.fromZip
+            ? result.sourceLabel
+            : "Tap Import when ready",
+        },
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not read file", {
+        duration: 10000,
+      });
+    } finally {
+      setLoadingFile(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  function onDragEnter(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }
+
+  function onDragOver(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }
+
+  function onDragLeave(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setDragOver(false);
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0] ?? null;
+    void onFile(file);
   }
 
   return (
@@ -347,37 +402,87 @@ export function ShareUpdateModal({
         ) : (
           <form onSubmit={handleImport} className="space-y-4">
             <p className="text-sm text-muted -mt-1">
-              Restore from a group file (<code className="text-xs">DSX1.</code>)
-              or personal backup (<code className="text-xs">DSP1.</code>).
-              Private notes only restore from DSP1. when encrypted with your
-              Account Key — never from group files or the cloud room.
+              Restore from a group file (<code className="text-xs">DSX1.</code>
+              ), personal backup (<code className="text-xs">DSP1.</code>), or a{" "}
+              <strong className="text-text font-medium">Zip</strong> that wraps
+              one of those. Private notes only restore from DSP1. when encrypted
+              with your Account Key — never from group files or the cloud room.
             </p>
+
+            <div
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileRef.current?.click();
+                }
+              }}
+              onDragEnter={onDragEnter}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              onClick={() => fileRef.current?.click()}
+              className={[
+                "rounded-xl border-2 border-dashed px-3 py-5 text-center touch-manipulation cursor-pointer transition-colors",
+                dragOver
+                  ? "border-primary bg-primary/10"
+                  : "border-border bg-bg/80 hover:border-primary/40",
+              ].join(" ")}
+            >
+              <FileUp
+                className={[
+                  "h-6 w-6 mx-auto mb-2",
+                  dragOver ? "text-primary" : "text-muted",
+                ].join(" ")}
+                aria-hidden
+              />
+              <p className="text-sm font-medium text-primary">
+                {loadingFile
+                  ? "Reading file…"
+                  : dragOver
+                    ? "Drop to load"
+                    : "Drag & drop backup here"}
+              </p>
+              <p className="text-xs text-muted mt-1">
+                .txt · .zip · .json — or tap to choose
+              </p>
+              {importSourceLabel && (
+                <p className="text-xs text-primary mt-2 font-medium truncate px-2">
+                  Loaded: {importSourceLabel}
+                </p>
+              )}
+            </div>
 
             <label className="block space-y-1.5">
               <span className="text-sm font-medium">Update package</span>
               <textarea
                 value={importText}
-                onChange={(e) => setImportText(e.target.value)}
+                onChange={(e) => {
+                  setImportText(e.target.value);
+                  if (importSourceLabel) setImportSourceLabel(null);
+                }}
                 className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-sm min-h-[120px] resize-y font-mono"
-                placeholder="Paste DSX1.… package here"
+                placeholder="Paste DSX1.… or DSP1.… package here"
               />
             </label>
 
             <input
               ref={fileRef}
               type="file"
-              accept=".txt,text/plain"
+              accept={IMPORT_FILE_ACCEPT}
               className="hidden"
-              onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
             />
             <Button
               type="button"
               variant="secondary"
               fullWidth
+              disabled={loadingFile}
               onClick={() => fileRef.current?.click()}
             >
               <FileUp className="h-5 w-5" aria-hidden />
-              Choose file
+              {loadingFile ? "Reading…" : "Choose file"}
             </Button>
 
             <div className="rounded-xl bg-surface-muted/60 border border-border px-3 py-3 text-xs text-muted space-y-1">
@@ -385,7 +490,8 @@ export function ShareUpdateModal({
               <p>
                 If this space already exists locally, matching session IDs are
                 skipped so your device keeps its own notes. New sessions are
-                added.
+                added. Zip is only a wrapper — Spaces still import into the
+                current app structure (local-only until you Connect).
               </p>
             </div>
 
@@ -396,7 +502,7 @@ export function ShareUpdateModal({
               <Button
                 type="submit"
                 fullWidth
-                disabled={importing || !importText.trim()}
+                disabled={importing || loadingFile || !importText.trim()}
               >
                 <Upload className="h-4 w-4" aria-hidden />
                 {importing ? "Importing…" : "Import"}

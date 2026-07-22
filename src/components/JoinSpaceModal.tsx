@@ -236,6 +236,8 @@ export function JoinSpaceModal({
   const [identity, setIdentity] = useState<IdentityChoice>("new");
   const [selectedExistingName, setSelectedExistingName] = useState("");
   const [newName, setNewName] = useState("");
+  /** File restore of own group — keep host controls (not guest lock). */
+  const [restoreAsHost, setRestoreAsHost] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -276,6 +278,7 @@ export function JoinSpaceModal({
     setJoiner(null);
     setConfirmPayload(null);
     setHostAddedName(null);
+    setRestoreAsHost(false);
     setPreviewGroupName(null);
     resetIdentity([]);
   }
@@ -567,13 +570,14 @@ export function JoinSpaceModal({
         const result = await joinFromExport({
           payload: parsed.payload,
           joinerName,
+          asHost: restoreAsHost,
         });
         setResultSpaceId(result.space.id);
         setAlreadyHad(result.alreadyHad);
         setHistoryImported(true);
         setSessionsAdded(result.addedSessions);
         setJoiner(result.joiner);
-        if (result.joiner) {
+        if (result.joiner && !restoreAsHost) {
           setConfirmPayload(
             buildMemberJoinPayload({
               spaceId: result.space.id,
@@ -588,11 +592,15 @@ export function JoinSpaceModal({
         }
         setStep("done");
         toast.success(
-          result.addedSessions > 0
-            ? `Joined with ${result.addedSessions} session${result.addedSessions === 1 ? "" : "s"} imported`
-            : result.alreadyHad
-              ? "Space updated"
-              : "Joined space",
+          restoreAsHost
+            ? result.addedSessions > 0
+              ? `Restored as host · ${result.addedSessions} meeting${result.addedSessions === 1 ? "" : "s"}`
+              : "Restored as host"
+            : result.addedSessions > 0
+              ? `Joined with ${result.addedSessions} session${result.addedSessions === 1 ? "" : "s"} imported`
+              : result.alreadyHad
+                ? "Space updated"
+                : "Joined space",
         );
       }
     } catch (err) {
@@ -816,6 +824,27 @@ export function JoinSpaceModal({
             <p className="text-xs">{INVITE_PRIVACY_NOTE}</p>
           </div>
 
+          {parsed?.kind === "export" && (
+            <label className="flex items-start gap-2.5 rounded-xl border border-border bg-bg px-3 py-3 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+                checked={restoreAsHost}
+                onChange={(e) => setRestoreAsHost(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-primary">
+                  This is my group — restore as host
+                </span>
+                <span className="block text-xs text-muted mt-0.5 leading-relaxed">
+                  Check this if you created the group (or have a backup file).
+                  Leaves host controls on so you can Open room and invite.
+                  Leave unchecked if someone else invited you.
+                </span>
+              </span>
+            </label>
+          )}
+
           <div className="flex gap-2">
             <Button
               type="button"
@@ -834,7 +863,9 @@ export function JoinSpaceModal({
                   : parsed?.kind === "member-join"
                     ? "Add to my list"
                     : parsed?.kind === "export"
-                      ? "Join & import meetings"
+                      ? restoreAsHost
+                        ? "Restore as host"
+                        : "Join & import meetings"
                       : "Join group"}
             </Button>
           </div>

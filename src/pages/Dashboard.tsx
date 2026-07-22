@@ -237,8 +237,26 @@ export function Dashboard() {
       )}
 
       {error && (
-        <Card className="border-danger/30 bg-danger/10 text-danger text-sm">
-          {error}
+        <Card className="border-danger/30 bg-danger/10 text-danger text-sm space-y-3">
+          <p>{error}</p>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="secondary"
+              fullWidth
+              className="!py-2.5"
+              onClick={() => {
+                useAppStore.getState().clearError();
+                void initialize();
+              }}
+            >
+              Try again
+            </Button>
+            <p className="text-xs text-muted leading-relaxed">
+              If this keeps failing after an app update, try Settings → Restore
+              with a backup file, or fully refresh the site (clear site cache
+              only if you have a backup).
+            </p>
+          </div>
         </Card>
       )}
 

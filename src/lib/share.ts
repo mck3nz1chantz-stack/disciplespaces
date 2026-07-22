@@ -143,7 +143,7 @@ export function parseExportInput(raw: string): SpaceExportPayload {
   }
 
   throw new Error(
-    "Could not read this file. Paste a full Space Update package (starts with DSX1.).",
+    "Could not read this as a group backup. Need a full Space Update package (starts with DSX1.), optional export JSON, or a Zip that contains one. Personal multi-space files use DSP1.",
   );
 }
 

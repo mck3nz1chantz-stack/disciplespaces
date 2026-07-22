@@ -1,9 +1,9 @@
 {
   "project": "DiscipleSpaces",
-  "phase": "5 \u2013 Sharing, Invites & Polish",
+  "phase": "5 – Sharing, Invites & Polish",
   "status": "completed",
   "created": "2026-07-08T19:23:18.941Z",
-  "updated": "2026-07-16T01:01:16Z",
+  "updated": "2026-07-22T20:30:00.000Z",
   "launcher": "/Users/kenzi/Desktop/ChantzMediaLauncher",
   "version": "0.10.0",
   "stack": [
@@ -62,7 +62,7 @@
     "Cloudflare deploy requires wrangler login on the machine that deploys",
     "Invite is fully offline: join requires full DS1 package or QR",
     "New members do not receive past sessions by default",
-    "iOS install is manual via Safari Share \u2192 Add to Home Screen",
+    "iOS install is manual via Safari Share → Add to Home Screen",
     "GrokLaw pre-build still pending"
   ],
   "complianceNotes": [
@@ -71,7 +71,7 @@
     "Optional opt-in Space room relay for shared data only (VITE_SPACE_RELAY_URL)",
     "Manual DSX1 export/import remains backup path",
     "Bible text limited to public domain KJV",
-    "No user accounts \u2014 device keys + room codes for MVP relay"
+    "No user accounts — device keys + room codes for MVP relay"
   ],
   "inviteBehavior": {
     "newMembersGetPastSessions": false,
@@ -127,11 +127,11 @@
     "deployCommand": "npm run deploy",
     "status": "deployed",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://38864a1a.disciple-spaces.pages.dev",
-    "deployedAt": "2026-07-21T18:00:00Z",
-    "releaseNotes": "Fix link modal scrollable + modal body overflow fix"
+    "latestDeploymentUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
+    "deployedAt": "2026-07-22T20:30:00.000Z",
+    "releaseNotes": "Session sheet height fix (Start meeting modal no longer stuck empty); zip restore; SW v4; host reclaim"
   },
-  "grokBuildStatus": "deployed-fix-link-scroll",
+  "grokBuildStatus": "deployed-session-sheet-fix",
   "grokDocsStatus": "pending",
   "grokLawStatus": "pending-prebuild",
   "nextPhase": "Deploy space-relay Worker + set VITE_SPACE_RELAY_URL; opportunistic auto-sync; custom domain when product-ready; GrokDocs / GrokLaw",
@@ -207,5 +207,26 @@
     "projectSlug": "disciple-spaces",
     "addedAt": "2026-07-08T21:16:27.034Z",
     "deployCommand": "npm run build && npx wrangler pages deploy dist --project-name=disciple-spaces"
+  },
+  "debugPass": {
+    "mode": "fix",
+    "matched": [
+      "vite-react",
+      "react-runtime",
+      "js-ts",
+      "css-web"
+    ],
+    "status": "fixed",
+    "p0Count": 2,
+    "notesPath": "docs/drafts/debug-report.md",
+    "updatedAt": "2026-07-22T19:08:48.133Z",
+    "summary": "PWA brick prevention + guest host reclaim + zip restore (prior)"
+  },
+  "lastDeploy": {
+    "at": "2026-07-22T20:30:00.000Z",
+    "project": "disciple-spaces",
+    "deploymentUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
+    "productionUrl": "https://disciple-spaces.pages.dev",
+    "notes": "Session modal height fix for Start today's meeting; prior restore/SW/host fixes included"
   }
 }
