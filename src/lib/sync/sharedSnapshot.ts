@@ -11,6 +11,11 @@ import type {
   SpaceKind,
   SpaceTemplateId,
 } from "../../types";
+import {
+  applyTombstonesToEntities,
+  listTombstonesForSpace,
+  type SharedTombstonesPayload,
+} from "./tombstones";
 
 export interface SharedSpaceSnapshot {
   v: 1;
@@ -27,6 +32,8 @@ export interface SharedSpaceSnapshot {
   inviteCode?: string;
   sessions: Session[];
   prayerBoard: PrayerBoardEntry[];
+  /** Deleted shared entities (propagate deletes across devices). */
+  tombstones?: SharedTombstonesPayload;
   exportedAt: string;
 }
 
@@ -35,7 +42,50 @@ export function buildSharedSnapshot(
   space: Space,
   sessions: Session[],
   prayerBoard: PrayerBoardEntry[],
+  tombstones?: SharedTombstonesPayload,
 ): SharedSpaceSnapshot {
+  const sessionMapped = sessions
+    .filter((s) => s.spaceId === space.id)
+    .map((s) => ({
+      id: s.id,
+      spaceId: s.spaceId,
+      date: s.date,
+      templateId: s.templateId,
+      title: s.title,
+      attendees: s.attendees ?? [],
+      passagesStudied: s.passagesStudied ?? [],
+      responses: s.responses,
+      notes: s.notes,
+      sharedNotes: s.sharedNotes,
+      keyTakeaways: s.keyTakeaways,
+      actionItems: s.actionItems,
+      updatedAt: s.updatedAt,
+    }));
+
+  const prayerMapped = prayerBoard
+    .filter((e) => e.spaceId === space.id)
+    .map((e) => ({
+      id: e.id,
+      spaceId: e.spaceId,
+      sessionId: e.sessionId,
+      scope: e.scope,
+      kind: e.kind,
+      authorMemberId: e.authorMemberId,
+      authorName: e.authorName,
+      subject: e.subject,
+      content: e.content,
+      status: e.status,
+      createdAt: e.createdAt,
+      updatedAt: e.updatedAt,
+    }));
+
+  const tombs = tombstones ?? { sessions: [], prayerBoard: [] };
+  const sessionsClean = applyTombstonesToEntities(sessionMapped, tombs.sessions);
+  const prayersClean = applyTombstonesToEntities(
+    prayerMapped,
+    tombs.prayerBoard,
+  );
+
   return {
     v: 1,
     kind: "ds-shared-snapshot",
@@ -53,39 +103,24 @@ export function buildSharedSnapshot(
     spaceKind: space.spaceKind,
     defaultSessionTemplateId: space.defaultSessionTemplateId,
     inviteCode: space.inviteCode,
-    sessions: sessions
-      .filter((s) => s.spaceId === space.id)
-      .map((s) => ({
-        id: s.id,
-        spaceId: s.spaceId,
-        date: s.date,
-        templateId: s.templateId,
-        attendees: s.attendees ?? [],
-        passagesStudied: s.passagesStudied ?? [],
-        responses: s.responses,
-        notes: s.notes,
-        sharedNotes: s.sharedNotes,
-        keyTakeaways: s.keyTakeaways,
-        actionItems: s.actionItems,
-      })),
-    prayerBoard: prayerBoard
-      .filter((e) => e.spaceId === space.id)
-      .map((e) => ({
-        id: e.id,
-        spaceId: e.spaceId,
-        sessionId: e.sessionId,
-        scope: e.scope,
-        kind: e.kind,
-        authorMemberId: e.authorMemberId,
-        authorName: e.authorName,
-        subject: e.subject,
-        content: e.content,
-        status: e.status,
-        createdAt: e.createdAt,
-        updatedAt: e.updatedAt,
-      })),
+    sessions: sessionsClean.entities,
+    prayerBoard: prayersClean.entities,
+    tombstones: {
+      sessions: sessionsClean.tombstones,
+      prayerBoard: prayersClean.tombstones,
+    },
     exportedAt: new Date().toISOString(),
   };
+}
+
+/** Load tombstones then build snapshot (preferred for push/pull paths). */
+export async function buildSharedSnapshotWithTombstones(
+  space: Space,
+  sessions: Session[],
+  prayerBoard: PrayerBoardEntry[],
+): Promise<SharedSpaceSnapshot> {
+  const tombstones = await listTombstonesForSpace(space.id);
+  return buildSharedSnapshot(space, sessions, prayerBoard, tombstones);
 }
 
 /** Reject payloads that accidentally include private note keys. */

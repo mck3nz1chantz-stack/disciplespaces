@@ -41,12 +41,12 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   {
     id: "meet",
     title: "One room key per group",
-    body: "When you create a group, you get a room key to share. Friends only Join with that key — they never open a second room. After you’re linked, Sync keeps meetings together. You can go Offline for a gathering, then Online again to refresh.",
+    body: "When you create a group, open the room and share the room key. Friends only Join with that key — they never open a second room. Only you (host) edit the title and people list; guests tap Sync to stay current. You can go Offline for a gathering, then Online again to refresh.",
   },
   {
     id: "backup",
     title: "Account Key · back up often",
-    body: "Always open https://disciple-spaces.pages.dev. Optional Account Key (Settings) links your phone and desktop without email/password and can encrypt personal backups. Group files (DSX1) remain the hard safety net. Private notes stay on-device unless you opt into encrypted backup.",
+    body: "Always open https://disciple-spaces.pages.dev. Optional Account Key (Settings): Upload my Spaces on one device, then paste the same key on the other to restore. Group files (DSX1) remain the hard safety net. Private notes stay on-device unless you opt into encrypted backup.",
   },
 ];
 
@@ -55,7 +55,7 @@ export const QUICKSTART_ITEMS = [
   {
     id: "space",
     label: "Start or join a group",
-    hint: "Create (get a room key) or Join with a key",
+    hint: "Create (host) or Join with a room key (guest)",
   },
   {
     id: "session",
@@ -65,6 +65,6 @@ export const QUICKSTART_ITEMS = [
   {
     id: "invite",
     label: "Share the room key",
-    hint: "Copy the key on the group card so friends can Join",
+    hint: "Host copies the key; guests Join then Sync",
   },
 ] as const;

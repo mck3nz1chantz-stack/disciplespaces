@@ -8,16 +8,21 @@
   --color-border: #ddd6c8;
   --color-primary: #1e3a2f;
   --color-primary-soft: #2d5646;
+  --color-on-primary: #ffffff;
   --color-accent: #c4a35a;
   --color-text: #1a1a18;
   --color-muted: #6b6560;
   --color-danger: #9b3b3b;
   --color-success: #2d6a4f;
+  /* Warm parchment for the Bible reader surface */
+  --color-reader: #fbf8f1;
+  --color-reader-ink: #1f1c18;
 
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
 
   --shadow-card: 0 1px 3px rgb(0 0 0 / 0.06), 0 4px 16px rgb(0 0 0 / 0.04);
+  --shadow-reader: 0 2px 8px rgb(30 58 47 / 0.06), 0 12px 40px rgb(30 58 47 / 0.06);
   --radius-card: 1rem;
 }
 
@@ -29,13 +34,17 @@ html.dark {
   --color-border: #2a3832;
   --color-primary: #a8c9b8;
   --color-primary-soft: #7fad96;
+  --color-on-primary: #0c1210;
   --color-accent: #d4b56a;
   --color-text: #e8ebe8;
   --color-muted: #9aa69f;
   --color-danger: #e08a8a;
   --color-success: #6fbf95;
+  --color-reader: #121a17;
+  --color-reader-ink: #e6ebe7;
 
   --shadow-card: 0 1px 3px rgb(0 0 0 / 0.35), 0 4px 16px rgb(0 0 0 / 0.25);
+  --shadow-reader: 0 2px 12px rgb(0 0 0 / 0.35), 0 16px 48px rgb(0 0 0 / 0.28);
   color-scheme: dark;
 }
 
@@ -57,6 +66,7 @@ html:not(.dark) {
   body {
     margin: 0;
     min-height: 100dvh;
+    /* Fallback while image loads / if image fails */
     background-color: var(--color-bg);
     color: var(--color-text);
     font-family: var(--font-sans);
@@ -64,14 +74,33 @@ html:not(.dark) {
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* Soft gold wash at top — quiet “sanctuary light” */
-    background-image: radial-gradient(
-      ellipse 90% 70% at 50% -10%,
-      color-mix(in srgb, var(--color-accent) 14%, transparent),
-      transparent 55%
-    );
-    background-repeat: no-repeat;
-    background-attachment: fixed;
+    /*
+     * Sanctuary cross art (public/discipleappcross{light,dark}.jpg).
+     * Layer order: solid fill → photo → soft scrim so cards stay readable.
+     */
+    background-image:
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--color-bg) 42%, transparent),
+        color-mix(in srgb, var(--color-bg) 58%, transparent) 55%,
+        color-mix(in srgb, var(--color-bg) 72%, transparent)
+      ),
+      url("/discipleappcrosslight.jpg");
+    background-size: cover, cover;
+    background-position: center, center 42%;
+    background-repeat: no-repeat, no-repeat;
+    background-attachment: fixed, fixed;
+  }
+
+  html.dark body {
+    background-image:
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--color-bg) 48%, transparent),
+        color-mix(in srgb, var(--color-bg) 62%, transparent) 55%,
+        color-mix(in srgb, var(--color-bg) 78%, transparent)
+      ),
+      url("/discipleappcrossdark.jpg");
   }
 
   #root {
@@ -79,49 +108,9 @@ html:not(.dark) {
     position: relative;
   }
 
-  /* Cross pattern field (masked so it follows light/dark primary) */
-  body::before {
-    content: "";
-    pointer-events: none;
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    opacity: 1;
-    background-color: color-mix(in srgb, var(--color-primary) 7.5%, transparent);
-    -webkit-mask-image: url("/cross-pattern.svg");
-    mask-image: url("/cross-pattern.svg");
-    -webkit-mask-size: 132px 132px;
-    mask-size: 132px 132px;
-    -webkit-mask-repeat: repeat;
-    mask-repeat: repeat;
-  }
-
-  html.dark body::before {
-    background-color: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  }
-
-  /* Large quiet watermark cross behind the phone column */
-  #root::before {
-    content: "";
-    pointer-events: none;
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    opacity: 0.05;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%231e3a2f' d='M27 8h10a3 3 0 0 1 3 3v14h14a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H40v17a3 3 0 0 1-3 3H27a3 3 0 0 1-3-3V41H10a3 3 0 0 1-3-3V28a3 3 0 0 1 3-3h14V11a3 3 0 0 1 3-3z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: 50% 42%;
-    background-size: min(72vw, 28rem);
-  }
-
-  html.dark #root::before {
-    opacity: 0.07;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23a8c9b8' d='M27 8h10a3 3 0 0 1 3 3v14h14a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H40v17a3 3 0 0 1-3 3H27a3 3 0 0 1-3-3V41H10a3 3 0 0 1-3-3V28a3 3 0 0 1 3-3h14V11a3 3 0 0 1 3-3z'/%3E%3C/svg%3E");
-  }
-
   @media (prefers-reduced-motion: reduce) {
     body {
-      background-attachment: scroll;
+      background-attachment: scroll, scroll;
     }
   }
 
@@ -210,4 +199,292 @@ html:not(.dark) {
     bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px));
     z-index: 10;
   }
+
+  /**
+   * Bible sanctuary reader — book-like surface over the cross background.
+   */
+  .bible-reader {
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-reader) 96%, var(--color-accent)) 0%,
+        var(--color-reader) 18%,
+        var(--color-reader) 100%
+      );
+    color: var(--color-reader-ink);
+    box-shadow: var(--shadow-reader);
+    border: 1px solid color-mix(in srgb, var(--color-border) 80%, var(--color-accent));
+  }
+
+  .bible-reader-prose {
+    font-family: var(--font-serif);
+    /* Scale via --reader-font-scale (set from reader prefs) */
+    font-size: calc(1.125rem * var(--reader-font-scale, 1));
+    line-height: 1.9;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    font-optical-sizing: auto;
+  }
+
+  @media (min-width: 400px) {
+    .bible-reader-prose {
+      font-size: calc(1.1875rem * var(--reader-font-scale, 1));
+      line-height: 1.95;
+    }
+  }
+
+  .bible-reader-verse {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border-radius: 0.65rem;
+    padding: 0.35rem 0.55rem;
+    margin-inline: -0.35rem;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+    scroll-margin-top: 8.5rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .bible-reader-verse:hover {
+    background-color: color-mix(in srgb, var(--color-primary) 6%, transparent);
+  }
+
+  .bible-reader-verse[data-selected="true"] {
+    background-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 28%, transparent);
+  }
+
+  .bible-reader-verse[data-active="true"]:not([data-selected="true"]) {
+    background-color: color-mix(in srgb, var(--color-accent) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+
+  /* Soft mark for verses already logged to tonight’s session */
+  .bible-reader-verse[data-logged="true"]:not([data-selected="true"]) {
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--color-accent) 70%, transparent);
+  }
+
+  .bible-reader-verse[data-logged="true"] .bible-reader-vnum {
+    color: color-mix(in srgb, var(--color-accent) 85%, var(--color-muted));
+  }
+
+  .bible-reader-vnum {
+    font-family: var(--font-sans);
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--color-muted);
+    margin-right: 0.4rem;
+    vertical-align: super;
+    line-height: 1;
+    user-select: none;
+    letter-spacing: 0;
+  }
+
+  /* Sticky chrome that floats over the reader while scrolling */
+  .bible-sticky-chrome {
+    position: sticky;
+    top: calc(3.25rem + env(safe-area-inset-top, 0px));
+    z-index: 15;
+  }
+
+  /* Log actions above bottom nav while a verse range is selected */
+  .bible-sticky-log {
+    position: sticky;
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    z-index: 15;
+  }
+
+  /**
+   * Focus mode — dim app chrome so the chapter surface owns attention.
+   * Set via documentElement.dataset.readerFocus from the Bible page.
+   */
+  html[data-reader-focus] header.safe-top {
+    opacity: 0.28;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+
+  html[data-reader-focus] nav[aria-label="Main"] {
+    opacity: 0.4;
+    transition: opacity 0.2s ease;
+  }
+
+  html[data-reader-focus] nav[aria-label="Main"]:hover,
+  html[data-reader-focus] nav[aria-label="Main"]:focus-within {
+    opacity: 0.92;
+  }
+
+  /* Testing ribbon quieted in focus so it doesn’t compete with the text */
+  html[data-reader-focus] [data-testing-ribbon] {
+    opacity: 0.35;
+    max-height: 0;
+    overflow: hidden;
+    padding-top: 0;
+    padding-bottom: 0;
+    border: none;
+    margin: 0;
+    transition: opacity 0.2s ease, max-height 0.2s ease;
+  }
+
+  /* Slightly taller sticky offset when focus hides ribbon */
+  html[data-reader-focus] .bible-sticky-chrome {
+    top: calc(0.5rem + env(safe-area-inset-top, 0px));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html[data-reader-focus] header.safe-top,
+    html[data-reader-focus] nav[aria-label="Main"],
+    html[data-reader-focus] [data-testing-ribbon] {
+      transition: none;
+    }
+  }
+
+  /**
+   * Soft chapter handoff — brief label, then prose fades in.
+   */
+  .bible-chapter-gate {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    border-radius: inherit;
+    background: color-mix(in srgb, var(--color-reader) 88%, transparent);
+  }
+
+  .bible-chapter-gate__label {
+    font-family: var(--font-serif);
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    letter-spacing: -0.01em;
+    text-align: center;
+    padding: 1rem;
+    animation: bible-chapter-label 0.55s ease-out both;
+  }
+
+  .bible-chapter-gate__label span {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    font-family: var(--font-sans);
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  @keyframes bible-chapter-label {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .bible-reader-prose {
+    transition: opacity 0.35s ease, transform 0.35s ease;
+  }
+
+  .bible-reader-prose[data-reveal="false"] {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  .bible-reader-prose[data-reveal="true"] {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* One soft pulse when landing from search / jump */
+  .bible-reader-verse[data-pulse="true"] {
+    animation: bible-verse-pulse 1.1s ease-out 1;
+  }
+
+  @keyframes bible-verse-pulse {
+    0% {
+      background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent);
+    }
+    100% {
+      background-color: transparent;
+      box-shadow: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bible-chapter-gate__label,
+    .bible-reader-prose,
+    .bible-reader-verse[data-pulse="true"] {
+      animation: none !important;
+      transition: none !important;
+    }
+
+    .bible-reader-prose[data-reveal="false"] {
+      opacity: 1;
+      transform: none;
+    }
+  }
 }
+
+/* Sonner toasts — readable on narrow phones / notched devices */
+[data-sonner-toaster][data-y-position="top"] {
+  top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
+}
+
+[data-sonner-toaster] {
+  --width: min(22rem, calc(100vw - 1.5rem)) !important;
+  width: min(22rem, calc(100vw - 1.5rem)) !important;
+  max-width: calc(100vw - 1.5rem) !important;
+  box-sizing: border-box;
+  padding-inline: max(0.5rem, env(safe-area-inset-left, 0px))
+    max(0.5rem, env(safe-area-inset-right, 0px));
+}
+
+[data-sonner-toast] {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal !important;
+  /* Room for close control on the right */
+  padding: 0.75rem 2.5rem 0.75rem 0.875rem !important;
+  font-size: 0.875rem !important;
+  line-height: 1.4 !important;
+}
+
+[data-sonner-toast] [data-content] {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+[data-sonner-toast] [data-title],
+[data-sonner-toast] [data-description] {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+  max-width: 100%;
+}
+
+[data-sonner-toast][data-styled="true"] [data-close-button] {
+  /* Keep X inside the toast so it doesn’t clip off-screen on mobile */
+  left: unset !important;
+  right: 0.25rem !important;
+  top: 0.25rem !important;
+  transform: none !important;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+@media (min-width: 640px) {
+  [data-sonner-toast] {
+    font-size: 0.9375rem !important;
+  }
+}
+

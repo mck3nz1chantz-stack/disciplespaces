@@ -46,10 +46,12 @@ export function Help() {
       <Card padding="sm" className="bg-primary/5 border-primary/15">
         <p className="text-sm text-muted">
           <span className="font-medium text-primary">Tip: </span>
-          One Space holds Group or Family, every Mode, and all sessions. In a
-          meeting, use Session for shared answers and Private for device-only
-          notes that stay locked to the step you’re on. Prayer board is shared;
-          header icon sets light/dark.
+          Host renames the group and manages who’s here. Shared meetings sync
+          when Online (auto + Sync). Private / Just for me stays on this phone.
+          Your Spaces live under your{" "}
+          <strong className="text-primary">Account Key</strong> (Settings) —
+          encrypted personal home. A room key only invites people to the group
+          share.
         </p>
       </Card>
 
@@ -159,8 +161,9 @@ export function Help() {
       <Card className="space-y-2 text-sm text-muted">
         <p className="font-medium text-primary">Still stuck?</p>
         <p>
-          Check Settings for sharing tools and the full privacy disclaimer.
-          Your data stays on this device unless you export it yourself.
+          Host: Open group room, share the room key, Sync after changes. Guest:
+          Join with that key, then Sync. Settings has Account Key, backups, and
+          the full privacy disclaimer.
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
           <Link

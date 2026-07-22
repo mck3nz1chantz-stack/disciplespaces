@@ -19,6 +19,21 @@ export class SpaceRelayNotConfiguredError extends Error {
   }
 }
 
+/** Server rejected push because another device advanced the room rev. */
+export class SpaceRelayConflictError extends Error {
+  rev: number;
+  snapshot?: SharedSpaceSnapshot;
+
+  constructor(rev: number, snapshot?: SharedSpaceSnapshot) {
+    super(
+      "Someone else updated this group while you were syncing. Pulling the latest and trying again.",
+    );
+    this.name = "SpaceRelayConflictError";
+    this.rev = rev;
+    this.snapshot = snapshot;
+  }
+}
+
 /** Alphanumeric-only short code (matches Worker lookup). */
 export function normalizeShortCode(code: string): string {
   return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -93,7 +108,10 @@ async function readError(res: Response): Promise<string> {
     // ignore
   }
   if (res.status === 404) {
-    return "Group room not found. Ask the host to open the group room and share the current room key, then Join again.";
+    return "Couldn’t join that room. Use the host’s short room key (like ABCD-EF) from their group card — not Group Key (DS-GRP-…) unless they registered one, and not Account Key. Host: Online → open the group → share the room key, then you Join again.";
+  }
+  if (res.status === 409) {
+    return "Group changed on another device. Sync again to merge the latest shared meetings.";
   }
   if (res.status === 400) {
     return "Sync request was rejected. Try Sync again, or ask the host to open the room and share a fresh key.";
@@ -144,18 +162,50 @@ export interface PreviewRoomResult {
  * Used so guests can pick “I’m already on the list” vs a new name.
  */
 export async function previewRoom(input: {
-  shortCode: string;
+  shortCode?: string;
+  groupKeyHash?: string;
 }): Promise<PreviewRoomResult> {
-  const code = normalizeShortCode(input.shortCode);
-  if (code.length < 4) {
-    throw new Error("Enter the full join code from your host.");
+  const code = input.shortCode ? normalizeShortCode(input.shortCode) : "";
+  const gkh = (input.groupKeyHash || "").trim().toLowerCase();
+  if (code.length < 4 && gkh.length < 32) {
+    throw new Error("Enter the full room key from your host (like ABCD-EF).");
   }
   const res = await relayFetch("/rooms/preview", {
     method: "POST",
-    body: JSON.stringify({ shortCode: code }),
+    body: JSON.stringify({
+      shortCode: code || undefined,
+      groupKeyHash: gkh || undefined,
+    }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json() as Promise<PreviewRoomResult>;
+}
+
+/** Host: register Group Key hash → room so guests can re-link with DS-GRP-… */
+export async function bindGroupKeyHash(input: {
+  roomId: string;
+  groupKeyHash: string;
+}): Promise<void> {
+  const hash = input.groupKeyHash.trim().toLowerCase();
+  if (hash.length < 32 || !input.roomId) return;
+  try {
+    const res = await relayFetch(
+      `/rooms/${encodeURIComponent(input.roomId)}/bind-group-key`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          groupKeyHash: hash,
+          deviceId: getDeviceId(),
+        }),
+      },
+    );
+    if (!res.ok) {
+      // Non-fatal for older relays
+      return;
+    }
+  } catch {
+    // ignore
+  }
 }
 
 /** Register spaceId → roomId (backfill after successful sync/join). */
@@ -181,20 +231,28 @@ export async function registerSpaceRoom(input: {
   }
 }
 
-/** Guest: join with short code + name → receive shared snapshot. */
+/**
+ * Guest: join with short room key (ABCD-EF) and/or Group Key hash (trusted re-link).
+ * Prefer shortCode for invites; groupKeyHash when host shared DS-GRP-… instead.
+ */
 export async function joinRoom(input: {
-  shortCode: string;
+  shortCode?: string;
+  /** SHA-256 hex of normalized Group Key (server never sees raw secret). */
+  groupKeyHash?: string;
   displayName: string;
 }): Promise<JoinRoomResult> {
-  const code = normalizeShortCode(input.shortCode);
-  if (code.length < 4) {
-    throw new Error("Enter the full join code from your host.");
+  const code = input.shortCode ? normalizeShortCode(input.shortCode) : "";
+  const gkh = (input.groupKeyHash || "").trim().toLowerCase();
+  if (code.length < 4 && gkh.length < 32) {
+    throw new Error(
+      "Enter the host’s room key (like ABCD-EF). That is not the same as a Group Key (DS-GRP-…) or Account Key.",
+    );
   }
   const res = await relayFetch("/rooms/join", {
     method: "POST",
     body: JSON.stringify({
-      // Server accepts with or without hyphens; send compact form
-      shortCode: code,
+      shortCode: code || undefined,
+      groupKeyHash: gkh || undefined,
       displayName: input.displayName.trim(),
       deviceId: getDeviceId(),
     }),
@@ -227,21 +285,44 @@ export async function pullRoom(input: {
   return { rev: data.rev, snapshot: data.snapshot };
 }
 
-/** Push full shared snapshot (MVP last-write / full replace). */
+/**
+ * Push shared snapshot.
+ * Default mergeShared=true so host/guest never wipe each other's members or sessions.
+ */
 export async function pushRoom(input: {
   roomId: string;
   snapshot: SharedSpaceSnapshot;
   baseRev?: number;
+  /** When true (default), union members/sessions by id on the relay. */
+  mergeShared?: boolean;
 }): Promise<{ rev: number }> {
   assertNoPrivateNotes(input.snapshot);
+  const mergeShared = input.mergeShared !== false;
   const res = await relayFetch(`/rooms/${encodeURIComponent(input.roomId)}`, {
     method: "POST",
     body: JSON.stringify({
       snapshot: input.snapshot,
       baseRev: input.baseRev,
       deviceId: getDeviceId(),
+      mergeShared,
     }),
   });
+  if (res.status === 409) {
+    let rev = input.baseRev ?? 0;
+    let snapshot: SharedSpaceSnapshot | undefined;
+    try {
+      const data = (await res.json()) as {
+        rev?: number;
+        snapshot?: SharedSpaceSnapshot;
+        error?: string;
+      };
+      if (typeof data.rev === "number") rev = data.rev;
+      if (data.snapshot) snapshot = data.snapshot;
+    } catch {
+      // ignore parse errors
+    }
+    throw new SpaceRelayConflictError(rev, snapshot);
+  }
   if (!res.ok) throw new Error(await readError(res));
   return res.json() as Promise<{ rev: number }>;
 }

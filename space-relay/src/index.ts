@@ -22,6 +22,11 @@ interface FeedbackRecord {
   deviceId?: string;
 }
 
+interface SnapshotTombstone {
+  id: string;
+  deletedAt: string;
+}
+
 interface SharedSnapshot {
   v: 1;
   kind: "ds-shared-snapshot";
@@ -30,6 +35,10 @@ interface SharedSnapshot {
   members?: unknown;
   sessions?: unknown;
   prayerBoard?: unknown;
+  tombstones?: {
+    sessions?: SnapshotTombstone[];
+    prayerBoard?: SnapshotTombstone[];
+  };
   exportedAt?: string;
   [key: string]: unknown;
 }
@@ -67,7 +76,7 @@ function corsHeaders(req: Request): HeadersInit {
   const origin = req.headers.get("Origin") || "*";
   return {
     "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers":
       "Content-Type, Authorization, X-Device-Id",
     "Access-Control-Max-Age": "86400",
@@ -164,7 +173,7 @@ export default {
           {
             ok: true,
             service: "disciple-spaces-relay",
-            features: ["rooms", "feedback"],
+            features: ["rooms", "feedback", "account-vault"],
           },
           200,
           req,
@@ -175,6 +184,25 @@ export default {
       if (path === "/feedback" || path.endsWith("/feedback")) {
         if (req.method === "POST") return acceptFeedback(req, env);
         if (req.method === "GET") return listFeedback(req, env);
+        return error("Method not allowed", 405, req);
+      }
+
+      /**
+       * Account Key vault — encrypted personal backup only.
+       * Path vault id is a client-side hash of the Account Key; server never sees the raw key.
+       */
+      const vaultMatch = path.match(/^\/vault\/([a-f0-9]{32,128})$/i);
+      if (vaultMatch) {
+        const vaultId = vaultMatch[1]!.toLowerCase();
+        if (req.method === "GET") {
+          return getAccountVault(req, env, vaultId, url.searchParams.has("meta"));
+        }
+        if (req.method === "PUT") {
+          return putAccountVault(req, env, vaultId);
+        }
+        if (req.method === "DELETE") {
+          return deleteAccountVault(req, env, vaultId);
+        }
         return error("Method not allowed", 405, req);
       }
 
@@ -203,6 +231,25 @@ export default {
         return rotateRoomJoinCode(req, env, roomKey);
       }
 
+      // POST /rooms/:roomId/bind-group-key — register hash for trusted re-link
+      const bindGkhMatch = path.match(/^\/rooms\/([^/]+)\/bind-group-key$/);
+      if (bindGkhMatch && req.method === "POST") {
+        const roomKey = decodeURIComponent(bindGkhMatch[1]!);
+        return bindGroupKeyOnRoom(req, env, roomKey);
+      }
+
+      // WebSocket live channel: /rooms/:roomId/live
+      const liveMatch = path.match(/^\/rooms\/([^/]+)\/live$/);
+      if (liveMatch) {
+        const roomKey = decodeURIComponent(liveMatch[1]!);
+        const id = env.SPACE_ROOM.idFromName(`room:${roomKey}`);
+        const stub = env.SPACE_ROOM.get(id);
+        // Preserve Upgrade headers for WebSocketPair on the DO
+        return stub.fetch(
+          new Request("https://room/live", req),
+        );
+      }
+
       const roomMatch = path.match(/^\/rooms\/([^/]+)$/);
       if (roomMatch) {
         const roomKey = decodeURIComponent(roomMatch[1]!);
@@ -218,6 +265,128 @@ export default {
     }
   },
 };
+
+/**
+ * Account vault record — ciphertext only. vaultId is opaque client hash.
+ */
+interface AccountVaultRecord {
+  vaultId: string;
+  updatedAt: string;
+  spaceCount: number;
+  fingerprint?: string;
+  /** AES-GCM blob encrypted client-side with Account Key */
+  blob: {
+    v: 1;
+    alg: string;
+    iv: string;
+    ciphertext: string;
+  };
+  deviceId?: string;
+}
+
+async function getAccountVault(
+  req: Request,
+  env: Env,
+  vaultId: string,
+  metaOnly: boolean,
+): Promise<Response> {
+  const stub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`vault:${vaultId}`),
+  );
+  const res = await stub.fetch(
+    new Request(`https://vault/get?meta=${metaOnly ? "1" : "0"}`, {
+      method: "GET",
+    }),
+  );
+  if (res.status === 404) {
+    return error("No cloud backup for this Account Key yet", 404, req);
+  }
+  if (!res.ok) {
+    return error("Could not read cloud backup", 500, req);
+  }
+  const data = await res.json();
+  return json(data, 200, req);
+}
+
+async function putAccountVault(
+  req: Request,
+  env: Env,
+  vaultId: string,
+): Promise<Response> {
+  let body: {
+    v?: number;
+    kind?: string;
+    updatedAt?: string;
+    spaceCount?: number;
+    fingerprint?: string;
+    blob?: AccountVaultRecord["blob"];
+  };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return error("Invalid JSON", 400, req);
+  }
+  if (!body.blob?.iv || !body.blob?.ciphertext) {
+    return error("Encrypted backup blob required", 400, req);
+  }
+  // Never accept plain private notes keys on vault body
+  assertNoPrivateNotes({
+    spaceCount: body.spaceCount,
+    fingerprint: body.fingerprint,
+  });
+
+  const record: AccountVaultRecord = {
+    vaultId,
+    updatedAt: body.updatedAt || new Date().toISOString(),
+    spaceCount: Math.max(0, Number(body.spaceCount) || 0),
+    fingerprint: body.fingerprint
+      ? String(body.fingerprint).slice(0, 16)
+      : undefined,
+    blob: {
+      v: 1,
+      alg: String(body.blob.alg || "AES-GCM"),
+      iv: String(body.blob.iv),
+      ciphertext: String(body.blob.ciphertext),
+    },
+    deviceId: deviceIdFrom(req).slice(0, 80),
+  };
+
+  const stub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`vault:${vaultId}`),
+  );
+  const res = await stub.fetch(
+    new Request("https://vault/put", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(record),
+    }),
+  );
+  if (!res.ok) {
+    return error("Could not store cloud backup", 500, req);
+  }
+  return json(
+    {
+      ok: true,
+      updatedAt: record.updatedAt,
+      spaceCount: record.spaceCount,
+      fingerprint: record.fingerprint,
+    },
+    200,
+    req,
+  );
+}
+
+async function deleteAccountVault(
+  req: Request,
+  env: Env,
+  vaultId: string,
+): Promise<Response> {
+  const stub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`vault:${vaultId}`),
+  );
+  await stub.fetch(new Request("https://vault/delete", { method: "DELETE" }));
+  return json({ ok: true }, 200, req);
+}
 
 async function acceptFeedback(req: Request, env: Env): Promise<Response> {
   let body: {
@@ -423,6 +592,53 @@ async function bindShortCodeToRoom(
   }
 }
 
+function normalizeGroupKeyHash(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-f0-9]/g, "");
+}
+
+/** Index Group Key hash → roomId for trusted re-link (raw key never stored). */
+async function bindGroupKeyHashToRoom(
+  env: Env,
+  groupKeyHash: string,
+  roomId: string,
+): Promise<void> {
+  const h = normalizeGroupKeyHash(groupKeyHash);
+  if (h.length < 32 || !roomId) return;
+  const stub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`gkh:${h}`),
+  );
+  await stub.fetch(
+    new Request("https://room/bind-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, shortCode: `gkh:${h.slice(0, 12)}` }),
+    }),
+  );
+}
+
+async function resolveRoomIdFromGroupKeyHash(
+  env: Env,
+  groupKeyHash: string,
+): Promise<string | null> {
+  const h = normalizeGroupKeyHash(groupKeyHash);
+  if (h.length < 32) return null;
+  const stub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`gkh:${h}`),
+  );
+  const res = await stub.fetch(
+    new Request("https://room/resolve-code", { method: "GET" }),
+  );
+  if (!res.ok) return null;
+  const data = (await res.json()) as { roomId?: string };
+  return data.roomId || null;
+}
+
+const INVALID_JOIN_HELP =
+  "Couldn’t join that shared room. Use the host’s short room key (like ABCD-EF) from their group card. Group Key (DS-GRP-…) only works after the host creates one while the room is open. Account Key is for personal backup only — not group join. Host: Online → open group → share the room key.";
+
 /**
  * Open or create a room for a Space.
  * Default: reuse existing room for snapshot.spaceId (no double rooms).
@@ -553,19 +769,25 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
  * Does not add the guest (used for “Who are you?” before join).
  */
 async function previewRoom(req: Request, env: Env): Promise<Response> {
-  const body = (await req.json()) as { shortCode?: string };
+  const body = (await req.json()) as {
+    shortCode?: string;
+    groupKeyHash?: string;
+  };
   const shortCodeRaw = body.shortCode || "";
-  if (!normalizeShortCode(shortCodeRaw)) {
-    return error("shortCode required", 400, req);
+  const gkh = normalizeGroupKeyHash(body.groupKeyHash || "");
+  if (!normalizeShortCode(shortCodeRaw) && gkh.length < 32) {
+    return error("Room key or Group Key hash required", 400, req);
   }
 
-  const roomId = await resolveRoomIdFromShortCode(env, shortCodeRaw);
+  let roomId: string | null = null;
+  if (normalizeShortCode(shortCodeRaw)) {
+    roomId = await resolveRoomIdFromShortCode(env, shortCodeRaw);
+  }
+  if (!roomId && gkh.length >= 32) {
+    roomId = await resolveRoomIdFromGroupKeyHash(env, gkh);
+  }
   if (!roomId) {
-    return error(
-      "Invalid or expired join code. Check the code (hyphens optional) and that the host Connected this group.",
-      404,
-      req,
-    );
+    return error(INVALID_JOIN_HELP, 404, req);
   }
 
   const roomStub = env.SPACE_ROOM.get(
@@ -658,6 +880,9 @@ async function rotateRoomJoinCode(
   const state = (await rotateRes.json()) as RoomState;
 
   await bindShortCodeToRoom(env, state.shortCode, state.roomId);
+  if (body.groupKeyHash) {
+    await bindGroupKeyHashToRoom(env, body.groupKeyHash, state.roomId);
+  }
   // Keep spaceId mapping so Connect never forks a second room after code rotate
   const spaceId = String(
     (state.snapshot as SharedSnapshot | undefined)?.spaceId || "",
@@ -673,25 +898,74 @@ async function rotateRoomJoinCode(
   );
 }
 
+/** Register Group Key hash on an existing room (no short-code change). */
+async function bindGroupKeyOnRoom(
+  req: Request,
+  env: Env,
+  roomKey: string,
+): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as {
+    groupKeyHash?: string;
+  };
+  const h = normalizeGroupKeyHash(body.groupKeyHash || "");
+  if (h.length < 32) {
+    return error("groupKeyHash required", 400, req);
+  }
+  const roomStub = env.SPACE_ROOM.get(
+    env.SPACE_ROOM.idFromName(`room:${roomKey}`),
+  );
+  const full = await roomStub.fetch(
+    new Request("https://room/full", { method: "GET" }),
+  );
+  if (!full.ok) {
+    return error("Room not found", 404, req);
+  }
+  const st = (await full.json()) as RoomState;
+  // Persist hash on room record
+  await roomStub.fetch(
+    new Request("https://room/rotate-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shortCode: st.shortCode,
+        groupKeyHash: h,
+      }),
+    }),
+  );
+  await bindGroupKeyHashToRoom(env, h, st.roomId);
+  return json({ ok: true, roomId: st.roomId }, 200, req);
+}
+
 async function joinRoom(req: Request, env: Env): Promise<Response> {
   const body = (await req.json()) as {
     shortCode?: string;
+    groupKeyHash?: string;
     displayName?: string;
     deviceId?: string;
   };
   const shortCodeRaw = body.shortCode || "";
+  const gkh = normalizeGroupKeyHash(body.groupKeyHash || "");
   const displayName = (body.displayName || "").trim();
-  if (!normalizeShortCode(shortCodeRaw) || !displayName) {
-    return error("shortCode and displayName required", 400, req);
-  }
-
-  const roomId = await resolveRoomIdFromShortCode(env, shortCodeRaw);
-  if (!roomId) {
+  if (
+    (!normalizeShortCode(shortCodeRaw) && gkh.length < 32) ||
+    !displayName
+  ) {
     return error(
-      "Invalid or expired join code. Check the code (hyphens optional) and that the host Connected this group.",
-      404,
+      "Room key (or Group Key) and display name required",
+      400,
       req,
     );
+  }
+
+  let roomId: string | null = null;
+  if (normalizeShortCode(shortCodeRaw)) {
+    roomId = await resolveRoomIdFromShortCode(env, shortCodeRaw);
+  }
+  if (!roomId && gkh.length >= 32) {
+    roomId = await resolveRoomIdFromGroupKeyHash(env, gkh);
+  }
+  if (!roomId) {
+    return error(INVALID_JOIN_HELP, 404, req);
   }
 
   const roomStub = env.SPACE_ROOM.get(
@@ -726,16 +1000,91 @@ async function joinRoom(req: Request, env: Env): Promise<Response> {
   return json(data, 200, req);
 }
 
+/** Parse entity updatedAt ISO; missing/invalid → 0 (loses LWW). */
+function entityUpdatedAtMs(row: { updatedAt?: unknown } | null | undefined): number {
+  const raw = row?.updatedAt;
+  if (typeof raw !== "string" || !raw) return 0;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : 0;
+}
+
 /**
- * Union shared snapshots by entity id.
- * Incoming host history fills gaps; existing remote rows keep their fields
- * unless the incoming copy has the same id (incoming wins for that id).
+ * Whole-entity last-write-wins by updatedAt.
+ * On equal stamps (or both missing), prefer incoming.
+ */
+function pickLwwRow(
+  existing: { id?: string; updatedAt?: unknown; [key: string]: unknown } | undefined,
+  incoming: { id?: string; updatedAt?: unknown; [key: string]: unknown },
+  id: string,
+): { id: string; [key: string]: unknown } {
+  if (!existing) return { ...incoming, id };
+  const a = entityUpdatedAtMs(existing);
+  const b = entityUpdatedAtMs(incoming);
+  if (b >= a) return { ...existing, ...incoming, id };
+  return { ...existing, id };
+}
+
+function mergeTombstoneLists(
+  a: SnapshotTombstone[] | undefined,
+  b: SnapshotTombstone[] | undefined,
+): SnapshotTombstone[] {
+  const map = new Map<string, SnapshotTombstone>();
+  for (const list of [a ?? [], b ?? []]) {
+    for (const raw of list) {
+      if (!raw || typeof raw !== "object") continue;
+      const id = String(raw.id || "").trim();
+      if (!id) continue;
+      const deletedAt = String(raw.deletedAt || new Date().toISOString());
+      const prev = map.get(id);
+      if (
+        !prev ||
+        entityUpdatedAtMs({ updatedAt: deletedAt }) >=
+          entityUpdatedAtMs({ updatedAt: prev.deletedAt })
+      ) {
+        map.set(id, { id, deletedAt });
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Drop live rows covered by a newer-or-equal tombstone; resurrect if live is newer.
+ */
+function applyTombstonesToRows(
+  rows: Map<string, { id: string; updatedAt?: unknown; [key: string]: unknown }>,
+  tombs: SnapshotTombstone[],
+): SnapshotTombstone[] {
+  const remaining: SnapshotTombstone[] = [];
+  for (const t of tombs) {
+    const id = String(t.id || "").trim();
+    if (!id) continue;
+    const live = rows.get(id);
+    if (!live) {
+      remaining.push({ id, deletedAt: t.deletedAt });
+      continue;
+    }
+    const liveMs = entityUpdatedAtMs(live);
+    const delMs = entityUpdatedAtMs({ updatedAt: t.deletedAt });
+    if (liveMs > delMs) {
+      // resurrect — keep live, drop tombstone
+      continue;
+    }
+    rows.delete(id);
+    remaining.push({ id, deletedAt: t.deletedAt });
+  }
+  return remaining;
+}
+
+/**
+ * Union shared snapshots by entity id with updatedAt LWW + tombstones.
+ * Members still union by name (first wins) so renames do not fork people.
  */
 function mergeSharedSnapshots(
   current: SharedSnapshot,
   incoming: SharedSnapshot,
 ): SharedSnapshot {
-  type Row = { id?: string; [key: string]: unknown };
+  type Row = { id?: string; updatedAt?: unknown; [key: string]: unknown };
   const byId = (rows: unknown): Map<string, Row> => {
     const map = new Map<string, Row>();
     if (!Array.isArray(rows)) return map;
@@ -751,13 +1100,31 @@ function mergeSharedSnapshots(
 
   const sessions = byId(current.sessions);
   for (const [id, row] of byId(incoming.sessions)) {
-    sessions.set(id, { ...(sessions.get(id) || {}), ...row, id });
+    sessions.set(id, pickLwwRow(sessions.get(id), row, id));
   }
 
   const prayers = byId(current.prayerBoard);
   for (const [id, row] of byId(incoming.prayerBoard)) {
-    prayers.set(id, { ...(prayers.get(id) || {}), ...row, id });
+    prayers.set(id, pickLwwRow(prayers.get(id), row, id));
   }
+
+  const sessionTombs = mergeTombstoneLists(
+    current.tombstones?.sessions,
+    incoming.tombstones?.sessions,
+  );
+  const prayerTombs = mergeTombstoneLists(
+    current.tombstones?.prayerBoard,
+    incoming.tombstones?.prayerBoard,
+  );
+
+  const keptSessionTombs = applyTombstonesToRows(
+    sessions as Map<string, { id: string; updatedAt?: unknown; [key: string]: unknown }>,
+    sessionTombs,
+  );
+  const keptPrayerTombs = applyTombstonesToRows(
+    prayers as Map<string, { id: string; updatedAt?: unknown; [key: string]: unknown }>,
+    prayerTombs,
+  );
 
   type Member = { id?: string; name?: string; joinedAt?: string };
   const memberMap = new Map<string, Member>();
@@ -791,8 +1158,23 @@ function mergeSharedSnapshots(
     members: Array.from(memberMap.values()),
     sessions: Array.from(sessions.values()),
     prayerBoard: Array.from(prayers.values()),
+    tombstones: {
+      sessions: keptSessionTombs,
+      prayerBoard: keptPrayerTombs,
+    },
     exportedAt: new Date().toISOString(),
   };
+}
+
+function broadcastRoomRev(state: DurableObjectState, rev: number): void {
+  const payload = JSON.stringify({ type: "room-updated", rev });
+  for (const ws of state.getWebSockets()) {
+    try {
+      ws.send(payload);
+    } catch {
+      // drop broken sockets
+    }
+  }
 }
 
 export class SpaceRoom implements DurableObject {
@@ -805,6 +1187,60 @@ export class SpaceRoom implements DurableObject {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
+
+    // Live WebSocket — rev notifications only (no private data)
+    if (path === "/live") {
+      const upgrade = req.headers.get("Upgrade") || "";
+      if (upgrade.toLowerCase() !== "websocket") {
+        return Response.json(
+          { error: "Expected WebSocket upgrade" },
+          { status: 426 },
+        );
+      }
+      const pair = new WebSocketPair();
+      const client = pair[0];
+      const server = pair[1];
+      this.state.acceptWebSocket(server);
+      const room = await this.state.storage.get<RoomState>("room");
+      try {
+        server.send(
+          JSON.stringify({
+            type: "hello",
+            rev: room?.rev ?? 0,
+            roomId: room?.roomId,
+          }),
+        );
+      } catch {
+        // ignore
+      }
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    // ── Account vault slots (same DO class, vault: idFromName) ──
+    if (path === "/get" && req.method === "GET") {
+      const record = await this.state.storage.get<AccountVaultRecord>("vault");
+      if (!record) {
+        return Response.json({ error: "Not found" }, { status: 404 });
+      }
+      const metaOnly = url.searchParams.get("meta") === "1";
+      if (metaOnly) {
+        return Response.json({
+          updatedAt: record.updatedAt,
+          spaceCount: record.spaceCount,
+          fingerprint: record.fingerprint,
+        });
+      }
+      return Response.json(record);
+    }
+    if (path === "/put" && req.method === "POST") {
+      const record = (await req.json()) as AccountVaultRecord;
+      await this.state.storage.put("vault", record);
+      return Response.json({ ok: true });
+    }
+    if (path === "/delete" && req.method === "DELETE") {
+      await this.state.storage.delete("vault");
+      return Response.json({ ok: true });
+    }
 
     if (path === "/init" && req.method === "POST") {
       const body = (await req.json()) as {
@@ -959,6 +1395,23 @@ export class SpaceRoom implements DurableObject {
         return Response.json({ error: "snapshot required" }, { status: 400 });
       }
       assertNoPrivateNotes(body.snapshot);
+      // Optimistic concurrency: client must push from the rev it last pulled.
+      // Missing baseRev (legacy clients) skips the check so pilots keep working.
+      if (
+        body.baseRev != null &&
+        Number.isFinite(Number(body.baseRev)) &&
+        Number(body.baseRev) !== room.rev
+      ) {
+        return Response.json(
+          {
+            error: "Revision conflict",
+            code: "REV_CONFLICT",
+            rev: room.rev,
+            snapshot: room.snapshot,
+          },
+          { status: 409 },
+        );
+      }
       if (body.mergeShared) {
         room.snapshot = mergeSharedSnapshots(room.snapshot, body.snapshot);
       } else {
@@ -967,6 +1420,7 @@ export class SpaceRoom implements DurableObject {
       room.rev += 1;
       room.updatedAt = new Date().toISOString();
       await this.state.storage.put("room", room);
+      broadcastRoomRev(this.state, room.rev);
       return Response.json({ rev: room.rev });
     }
 
@@ -998,10 +1452,43 @@ export class SpaceRoom implements DurableObject {
       room.rev += 1;
       room.updatedAt = new Date().toISOString();
       await this.state.storage.put("room", room);
+      broadcastRoomRev(this.state, room.rev);
       return Response.json(room);
     }
 
     return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    // Clients may ping; reply with current rev
+    try {
+      const text =
+        typeof message === "string"
+          ? message
+          : new TextDecoder().decode(message);
+      const data = JSON.parse(text) as { type?: string };
+      if (data.type === "ping") {
+        const room = await this.state.storage.get<RoomState>("room");
+        ws.send(
+          JSON.stringify({ type: "pong", rev: room?.rev ?? 0 }),
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async webSocketClose(
+    ws: WebSocket,
+    _code: number,
+    _reason: string,
+    _wasClean: boolean,
+  ): Promise<void> {
+    try {
+      ws.close();
+    } catch {
+      // ignore
+    }
   }
 }
 

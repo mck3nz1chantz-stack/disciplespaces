@@ -101,9 +101,9 @@ export function Modal({
           "relative z-10 w-full max-w-md rounded-t-2xl sm:rounded-2xl bg-surface border border-border shadow-xl p-5",
           "pb-[max(1.25rem,env(safe-area-inset-bottom))]",
           containBody
-            ? // Leave room above home indicator; full viewport on small phones
-              "flex flex-col h-[min(92dvh,100%)] max-h-[min(92dvh,100%)] overflow-hidden sm:h-[90dvh] sm:max-h-[90dvh]"
-            : "max-h-[min(92dvh,100%)] overflow-y-auto sm:max-h-[90dvh]",
+            ? // Bounded height so body flex-1 + overflow-y-auto can scroll on phones
+              "flex flex-col max-h-[92dvh] overflow-hidden min-h-0 sm:max-h-[90dvh]"
+            : "max-h-[92dvh] overflow-y-auto overscroll-contain sm:max-h-[90dvh] [-webkit-overflow-scrolling:touch]",
         ].join(" ")}
       >
         <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
@@ -159,7 +159,9 @@ export function Modal({
         {containBody ? (
           <div
             ref={bodyRef}
-            className="relative flex-1 min-h-0 overflow-hidden"
+            // Scrollable by default so long forms (Fix link, etc.) work.
+            // Session panes still use absolute + their own overflow-y-auto.
+            className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
           >
             {children}
           </div>

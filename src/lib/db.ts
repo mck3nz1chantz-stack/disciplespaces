@@ -16,6 +16,19 @@ import { defaultSpaceSync } from "./sync/defaults";
  */
 export type SpaceRow = Omit<Space, "sessions">;
 
+/** Shared-layer delete markers (room + vault). Never includes private notes. */
+export type SharedTombstoneKind = "session" | "prayer";
+
+export interface SharedTombstoneRow {
+  /** `${kind}:${entityId}` */
+  key: string;
+  spaceId: string;
+  kind: SharedTombstoneKind;
+  /** Entity id that was deleted */
+  id: string;
+  deletedAt: string;
+}
+
 export class DiscipleSpacesDB extends Dexie {
   spaces!: EntityTable<SpaceRow, "id">;
   sessions!: EntityTable<Session, "id">;
@@ -23,6 +36,7 @@ export class DiscipleSpacesDB extends Dexie {
   privateNotes!: EntityTable<PrivateNote, "id">;
   prayerBoard!: EntityTable<PrayerBoardEntry, "id">;
   syncQueue!: EntityTable<SyncQueueItem, "id">;
+  sharedTombstones!: EntityTable<SharedTombstoneRow, "key">;
 
   constructor() {
     super("discipleSpaces");

@@ -28,31 +28,41 @@ import {
 } from "../lib/db";
 import { FIRST_LAUNCH_ACK_KEY } from "../lib/legal";
 import {
-  buildSharedSnapshot,
+  applyRemoteTombstonesLocally,
+  buildSharedSnapshotWithTombstones,
   createRoom as relayCreateRoom,
   defaultSpaceSync,
   deleteRoom as relayDeleteRoom,
+  HOST_ONLY_ROSTER_MESSAGE,
+  HOST_ONLY_TITLE_MESSAGE,
+  isSpaceGuest,
   isSpaceRelayConfigured,
   joinRoom as relayJoinRoom,
   normalizeSpaceSync,
+  nowUpdatedAt,
+  pickLwwEntity,
+  bindGroupKeyHash as relayBindGroupKeyHash,
+  previewRoom as relayPreviewRoom,
   pullRoom as relayPullRoom,
   pushRoom as relayPushRoom,
+  recordTombstone,
+  registerConnectedSpaceSyncRunner,
   registerSpaceRoom as relayRegisterSpaceRoom,
+  resolveJoinCredentials,
   rotateJoinCode as relayRotateJoinCode,
+  scheduleConnectedSpaceSync,
+  SpaceRelayConflictError,
   SpaceRelayNotConfiguredError,
 } from "../lib/sync";
+import { scheduleAccountVaultUpload } from "../lib/keys/vaultAuto";
 import {
   clearPendingGroupKeySecret,
-  createRotationProposal,
   generateGroupKey,
   getGroupKeyMeta,
-  getPendingGroupKeySecret,
   getStoredGroupKey,
   persistGroupKey,
   setPendingGroupKeySecret,
-  allMembersApproved,
   type GroupKeyMeta,
-  type GroupKeyRotationProposal,
 } from "../lib/keys/groupKey";
 import { sha256Hex } from "../lib/keys/crypto";
 import {
@@ -311,6 +321,32 @@ interface AppState {
     /** Newly added sessions this join imported. */
     addedSessions: number;
   }>;
+  /**
+   * Repair path: re-link THIS local Space to the host’s current room key.
+   * Never deletes meetings, people, prayer, or private notes.
+   * Soft-unlinks stale room metadata, joins with the new key (merge), then syncs.
+   * Rejects keys that belong to a different spaceId (avoids silent merge into wrong group).
+   */
+  relinkSpaceWithRoomKey: (input: {
+    spaceId: string;
+    shortCode: string;
+    displayName: string;
+  }) => Promise<{
+    space: Space;
+    sessionCount: number;
+    addedSessions: number;
+    roomName: string;
+  }>;
+  /**
+   * Host: issue a new room key (join code) for this group.
+   * Same room + members + history stay; old code stops working.
+   * Already-linked devices keep working via room id; friends re-Join only if
+   * they lost the link. Optionally rotates Group Key material on this device.
+   */
+  reissueRoomKey: (
+    spaceId: string,
+    opts?: { rotateGroupKey?: boolean },
+  ) => Promise<{ space: Space; shortCode: string; groupKeySecret?: string }>;
   /** Low-level patch of sync metadata (local only). */
   patchSpaceSync: (
     spaceId: string,
@@ -320,18 +356,29 @@ interface AppState {
   /**
    * Ensure this Space has a Group Key on this device.
    * Does not wipe data. Returns secret only when newly created.
+   * Host only.
    */
   ensureSpaceGroupKey: (
     spaceId: string,
   ) => Promise<{ meta: GroupKeyMeta; secret: string | null }>;
 
   /**
-   * Any member may propose Group Key regenerate.
-   * Solo member completes immediately (unanimous of 1).
+   * Host-only: regenerate Group Key immediately (no member votes).
+   * Rotates short join code when the room is connected.
+   */
+  regenerateGroupKeyNow: (spaceId: string) => Promise<{
+    completed: boolean;
+    newSecret: string;
+    fingerprint: string;
+    space: Space;
+  }>;
+
+  /**
+   * @deprecated Use regenerateGroupKeyNow. Kept for stuck pending-rotation cleanup.
    */
   proposeGroupKeyRotation: (
     spaceId: string,
-    actor: { memberId: string; memberName: string },
+    actor?: { memberId: string; memberName: string },
   ) => Promise<{
     completed: boolean;
     newSecret?: string;
@@ -339,29 +386,8 @@ interface AppState {
     space: Space;
   }>;
 
-  /** Record approval; completes when all members have approved. */
-  approveGroupKeyRotation: (
-    spaceId: string,
-    actor: { memberId: string; memberName: string; onBehalf?: boolean },
-  ) => Promise<{
-    completed: boolean;
-    newSecret?: string;
-    fingerprint?: string;
-    space: Space;
-  }>;
-
+  /** Clears a leftover pending rotation (host). */
   cancelGroupKeyRotation: (spaceId: string) => Promise<Space>;
-
-  /**
-   * When all members have approved, the proposing device (holds pending secret)
-   * finalizes: persists new Group Key + rotates join code if connected.
-   */
-  finalizeGroupKeyRotation: (spaceId: string) => Promise<{
-    completed: boolean;
-    newSecret?: string;
-    fingerprint?: string;
-    space: Space;
-  }>;
 }
 
 function sortSessions(sessions: Session[]): Session[] {
@@ -564,6 +590,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         sessionTpl = all[0];
       }
       if (sessionTpl) {
+        const stamp = nowUpdatedAt();
         const first: Session = {
           id: crypto.randomUUID(),
           spaceId: id,
@@ -573,6 +600,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           passagesStudied: [],
           responses: emptyResponses(sessionTpl),
           notes: "",
+          updatedAt: stamp,
         };
         await db.sessions.add(first);
         sessions = [first];
@@ -601,12 +629,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
+    // Account Key vault is personal home for Spaces (encrypted)
+    scheduleAccountVaultUpload();
+
     return hydrated;
   },
 
   updateSpace: async (id, patch) => {
     const row = await db.spaces.get(id);
     if (!row) throw new Error("Space not found");
+
+    // Guests must not rename host groups or change roster capacity type
+    if (isSpaceGuest(row.sync)) {
+      const triesName =
+        patch.name !== undefined &&
+        patch.name.trim() !== "" &&
+        patch.name.trim() !== row.name;
+      const triesDescription =
+        patch.description !== undefined &&
+        (patch.description === null
+          ? Boolean(row.description)
+          : (patch.description.trim() || undefined) !== row.description);
+      const triesKind =
+        patch.spaceKind !== undefined &&
+        normalizeSpaceKind(patch.spaceKind) !==
+          normalizeSpaceKind(row.spaceKind);
+      if (triesName || triesDescription || triesKind) {
+        throw new Error(HOST_ONLY_TITLE_MESSAGE);
+      }
+    }
 
     const nextRow: SpaceRow = {
       ...row,
@@ -653,6 +704,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
     set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    notifySharedDataChanged(id);
     return updated;
   },
 
@@ -674,11 +726,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       spaces: state.spaces.filter((s) => s.id !== id),
       sessions: state.sessions.filter((s) => s.spaceId !== id),
     }));
+    scheduleAccountVaultUpload();
   },
 
   setSpaceMembers: async (spaceId, members) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
+    if (isSpaceGuest(row.sync)) {
+      throw new Error(HOST_ONLY_ROSTER_MESSAGE);
+    }
     const max = maxMembersForSpace(row.spaceKind);
 
     const nextRow: SpaceRow = {
@@ -688,12 +744,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
     set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    notifySharedDataChanged(spaceId);
     return updated;
   },
 
   addMember: async (spaceId, name) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
+    if (isSpaceGuest(row.sync)) {
+      throw new Error(HOST_ONLY_ROSTER_MESSAGE);
+    }
     const max = maxMembersForSpace(row.spaceKind);
     if (row.members.length >= max) {
       throw new Error(`A space can have at most ${max} members`);
@@ -708,12 +768,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
     set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    notifySharedDataChanged(spaceId);
     return updated;
   },
 
   updateMember: async (spaceId, memberId, name) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
+    if (isSpaceGuest(row.sync)) {
+      throw new Error(HOST_ONLY_ROSTER_MESSAGE);
+    }
     const trimmed = name.trim();
     if (!trimmed) throw new Error("Member name is required");
 
@@ -728,12 +792,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
     set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    notifySharedDataChanged(spaceId);
     return updated;
   },
 
   removeMember: async (spaceId, memberId) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
+    if (isSpaceGuest(row.sync)) {
+      throw new Error(HOST_ONLY_ROSTER_MESSAGE);
+    }
 
     const nextRow: SpaceRow = {
       ...row,
@@ -757,6 +825,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
     set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    notifySharedDataChanged(spaceId);
     return updated;
   },
 
@@ -781,6 +850,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       row.members.some((m) => m.id === id),
     );
 
+    const stamp = nowUpdatedAt();
     const session: Session = {
       id: crypto.randomUUID(),
       spaceId,
@@ -794,6 +864,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sharedNotes: sharedNotes?.trim() || undefined,
       keyTakeaways: keyTakeaways?.trim() || undefined,
       actionItems,
+      updatedAt: stamp,
     };
 
     await db.sessions.add(session);
@@ -806,6 +877,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessions,
       spaces: patchSpaceInState(state.spaces, updatedSpace),
     }));
+    notifySharedDataChanged(spaceId);
     return session;
   },
 
@@ -840,6 +912,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         patch.notes !== undefined
           ? patch.notes.trim() || undefined
           : existing.notes,
+      updatedAt: nowUpdatedAt(),
     };
 
     await db.sessions.put(updated);
@@ -852,12 +925,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessions,
       spaces: patchSpaceInState(state.spaces, updatedSpace),
     }));
+    notifySharedDataChanged(existing.spaceId);
     return updated;
   },
 
   deleteSession: async (id) => {
     const existing = await db.sessions.get(id);
     if (!existing) return;
+
+    const deletedAt = nowUpdatedAt();
+    await recordTombstone(existing.spaceId, "session", id, deletedAt);
 
     await db.transaction("rw", db.sessions, db.privateNotes, async () => {
       await db.privateNotes.where("sessionId").equals(id).delete();
@@ -877,6 +954,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ sessions });
     }
+    notifySharedDataChanged(existing.spaceId);
   },
 
   addPassageToSession: async (sessionId, passage) => {
@@ -1186,20 +1264,59 @@ export const useAppStore = create<AppState>((set, get) => ({
     let addedPrayers = 0;
     let skippedPrayers = 0;
 
-    await db.transaction("rw", db.sessions, db.prayerBoard, async () => {
+    // Skip re-adding entities covered by a local tombstone (unless remote is newer)
+    const localTombs = await db.sharedTombstones
+      .where("spaceId")
+      .equals(payload.space.id)
+      .toArray();
+    const sessionTomb = new Map(
+      localTombs
+        .filter((t) => t.kind === "session")
+        .map((t) => [t.id, t.deletedAt] as const),
+    );
+    const prayerTomb = new Map(
+      localTombs
+        .filter((t) => t.kind === "prayer")
+        .map((t) => [t.id, t.deletedAt] as const),
+    );
+
+    await db.transaction(
+      "rw",
+      db.sessions,
+      db.prayerBoard,
+      db.sharedTombstones,
+      async () => {
       for (const session of payload.sessions) {
         if (session.spaceId !== payload.space.id) continue;
+        const delAt = sessionTomb.get(session.id);
+        if (delAt) {
+          const liveMs = session.updatedAt
+            ? Date.parse(session.updatedAt)
+            : 0;
+          const delMs = Date.parse(delAt) || 0;
+          if (!(Number.isFinite(liveMs) && liveMs > delMs)) {
+            skippedSessions += 1;
+            continue;
+          }
+          // Resurrect: drop tombstone
+          await db.sharedTombstones.delete(`session:${session.id}`);
+          sessionTomb.delete(session.id);
+        }
         const has = await db.sessions.get(session.id);
         if (has) {
           if (mergeStrategy === "replace-shared") {
-            // Relay pull: remote shared fields win; never touch privateNotes table
-            await db.sessions.put({
-              ...has,
+            // LWW by updatedAt — never touch privateNotes table
+            const winner = pickLwwEntity(has, {
               ...session,
               id: has.id,
               spaceId: payload.space.id,
-              passagesStudied: session.passagesStudied ?? [],
-              attendees: session.attendees ?? [],
+              passagesStudied: session.passagesStudied ?? has.passagesStudied ?? [],
+              attendees: session.attendees ?? has.attendees ?? [],
+            });
+            await db.sessions.put({
+              ...winner,
+              id: has.id,
+              spaceId: payload.space.id,
             });
             addedSessions += 1;
           } else {
@@ -1212,12 +1329,24 @@ export const useAppStore = create<AppState>((set, get) => ({
           spaceId: payload.space.id,
           passagesStudied: session.passagesStudied ?? [],
           attendees: session.attendees ?? [],
+          updatedAt: session.updatedAt || session.date || nowUpdatedAt(),
         });
         addedSessions += 1;
       }
 
       for (const entry of payload.prayerBoard ?? []) {
         if (entry.spaceId && entry.spaceId !== payload.space.id) continue;
+        const delAt = prayerTomb.get(entry.id);
+        if (delAt) {
+          const liveMs = entry.updatedAt ? Date.parse(entry.updatedAt) : 0;
+          const delMs = Date.parse(delAt) || 0;
+          if (!(Number.isFinite(liveMs) && liveMs > delMs)) {
+            skippedPrayers += 1;
+            continue;
+          }
+          await db.sharedTombstones.delete(`prayer:${entry.id}`);
+          prayerTomb.delete(entry.id);
+        }
         const has = await db.prayerBoard.get(entry.id);
         const normalized = normalizePrayerBoardEntry(entry, payload.space.id);
         if (!normalized) {
@@ -1226,9 +1355,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         if (has) {
           if (mergeStrategy === "replace-shared") {
-            await db.prayerBoard.put({
-              ...has,
+            const winner = pickLwwEntity(has, {
               ...normalized,
+              id: has.id,
+              spaceId: payload.space.id,
+            });
+            await db.prayerBoard.put({
+              ...winner,
               id: has.id,
               spaceId: payload.space.id,
             });
@@ -1241,7 +1374,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         await db.prayerBoard.add(normalized);
         addedPrayers += 1;
       }
-    });
+    },
+    );
 
     const space = await hydrateSpace(spaceRow);
     const sessions = sortSessions(
@@ -1341,7 +1475,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       .where("spaceId")
       .equals(spaceId)
       .toArray();
-    const snapshot = buildSharedSnapshot(space, sessions, prayerBoard);
+    const snapshot = await buildSharedSnapshotWithTombstones(
+      space,
+      sessions,
+      prayerBoard,
+    );
     // Server reuses room for this spaceId unless forceNew — prevents orphan rooms.
     // Reuse path also merges this snapshot so past sessions land for guests.
     const result = await relayCreateRoom({
@@ -1388,77 +1526,168 @@ export const useAppStore = create<AppState>((set, get) => ({
       );
     }
 
-    const runPullPush = async (roomId: string, shortCode?: string) => {
-      const pulled = await relayPullRoom({
-        roomId,
-        sinceRev: sync.remoteRev,
-      });
-      if (!("unchanged" in pulled)) {
-        const snap = pulled.snapshot;
-        await get().importSpaceExport(
-          {
-            v: 1,
-            kind: "ds-export",
-            exportedAt: snap.exportedAt,
-            space: {
-              id: snap.spaceId,
-              name: snap.name,
-              description: snap.description,
-              createdAt: snap.createdAt,
-              members: snap.members,
-              preferredBibleVersion: "KJV",
-              inviteCode: snap.inviteCode,
-              spaceTemplate: snap.spaceTemplate,
-              spaceKind: snap.spaceKind,
-              defaultSessionTemplateId: snap.defaultSessionTemplateId,
-            },
-            sessions: snap.sessions,
-            prayerBoard: snap.prayerBoard,
+    const applyPulledSnapshot = async (
+      snap: {
+        spaceId: string;
+        name: string;
+        description?: string;
+        createdAt: string;
+        members: Member[];
+        inviteCode?: string;
+        spaceTemplate?: SpaceTemplateId;
+        spaceKind?: SpaceKind;
+        defaultSessionTemplateId?: string;
+        sessions: Session[];
+        prayerBoard: PrayerBoardEntry[];
+        tombstones?: {
+          sessions?: Array<{ id: string; deletedAt: string }>;
+          prayerBoard?: Array<{ id: string; deletedAt: string }>;
+        };
+        exportedAt: string;
+      },
+      roomId: string,
+      rev: number,
+      shortCode?: string,
+    ) => {
+      await get().importSpaceExport(
+        {
+          v: 1,
+          kind: "ds-export",
+          exportedAt: snap.exportedAt,
+          space: {
+            id: snap.spaceId,
+            name: snap.name,
+            description: snap.description,
+            createdAt: snap.createdAt,
+            members: snap.members,
+            preferredBibleVersion: "KJV",
+            inviteCode: snap.inviteCode,
+            spaceTemplate: snap.spaceTemplate,
+            spaceKind: snap.spaceKind,
+            defaultSessionTemplateId: snap.defaultSessionTemplateId,
           },
-          { mergeStrategy: "replace-shared" },
-        );
-        await get().patchSpaceSync(spaceId, {
-          mode: "connected",
-          roomId,
-          shortCode: shortCode ?? sync.shortCode,
-          remoteRev: pulled.rev,
-        });
-      }
-
-      const fresh = await db.spaces.get(spaceId);
-      if (!fresh) throw new Error("Space not found");
-      const hydrated = await hydrateSpace(fresh);
-      const sessions = await db.sessions
-        .where("spaceId")
-        .equals(spaceId)
-        .toArray();
-      const prayerBoard = await db.prayerBoard
-        .where("spaceId")
-        .equals(spaceId)
-        .toArray();
-      const snapshot = buildSharedSnapshot(hydrated, sessions, prayerBoard);
-      // Always push to the room we just pulled (heal may have changed roomId)
-      const liveRoomId =
-        normalizeSpaceSync(fresh.sync).roomId || roomId;
-      const push = await relayPushRoom({
-        roomId: liveRoomId,
-        snapshot,
-        baseRev: normalizeSpaceSync(fresh.sync).remoteRev,
+          sessions: snap.sessions,
+          prayerBoard: snap.prayerBoard,
+        },
+        { mergeStrategy: "replace-shared" },
+      );
+      // Propagate shared deletes (private notes on deleted sessions stay local)
+      await applyRemoteTombstonesLocally(spaceId, {
+        sessions: snap.tombstones?.sessions ?? [],
+        prayerBoard: snap.tombstones?.prayerBoard ?? [],
       });
-
-      void relayRegisterSpaceRoom({ spaceId, roomId: liveRoomId });
-
-      return get().patchSpaceSync(spaceId, {
+      await get().patchSpaceSync(spaceId, {
         mode: "connected",
-        roomId: liveRoomId,
-        shortCode:
-          shortCode ??
-          normalizeSpaceSync(fresh.sync).shortCode ??
-          sync.shortCode,
-        remoteRev: push.rev,
-        lastSyncedAt: new Date().toISOString(),
-        lastError: undefined,
+        roomId,
+        shortCode: shortCode ?? sync.shortCode,
+        remoteRev: rev,
       });
+      // Refresh live lists after tombstone deletes
+      await get().loadSpaces();
+      await get().loadSessionsForSpace(spaceId);
+    };
+
+    const runPullPush = async (roomId: string, shortCode?: string) => {
+      const MAX_ATTEMPTS = 4;
+      let attempt = 0;
+      let liveRoomId = roomId;
+      let liveShort = shortCode;
+
+      while (attempt < MAX_ATTEMPTS) {
+        attempt += 1;
+        const pulled = await relayPullRoom({
+          roomId: liveRoomId,
+          sinceRev: sync.remoteRev,
+        });
+        if (!("unchanged" in pulled)) {
+          await applyPulledSnapshot(
+            pulled.snapshot,
+            liveRoomId,
+            pulled.rev,
+            liveShort,
+          );
+          sync = {
+            ...sync,
+            remoteRev: pulled.rev,
+            roomId: liveRoomId,
+            shortCode: liveShort ?? sync.shortCode,
+          };
+        }
+
+        const fresh = await db.spaces.get(spaceId);
+        if (!fresh) throw new Error("Space not found");
+        const hydrated = await hydrateSpace(fresh);
+        const sessions = await db.sessions
+          .where("spaceId")
+          .equals(spaceId)
+          .toArray();
+        const prayerBoard = await db.prayerBoard
+          .where("spaceId")
+          .equals(spaceId)
+          .toArray();
+        const snapshot = await buildSharedSnapshotWithTombstones(
+          hydrated,
+          sessions,
+          prayerBoard,
+        );
+        liveRoomId = normalizeSpaceSync(fresh.sync).roomId || liveRoomId;
+        const baseRev = normalizeSpaceSync(fresh.sync).remoteRev;
+
+        try {
+          const push = await relayPushRoom({
+            roomId: liveRoomId,
+            snapshot,
+            baseRev,
+            mergeShared: true,
+          });
+
+          void relayRegisterSpaceRoom({ spaceId, roomId: liveRoomId });
+
+          // Personal vault is home for Spaces under Account Key
+          scheduleAccountVaultUpload();
+
+          return get().patchSpaceSync(spaceId, {
+            mode: "connected",
+            roomId: liveRoomId,
+            shortCode:
+              liveShort ??
+              normalizeSpaceSync(fresh.sync).shortCode ??
+              sync.shortCode,
+            remoteRev: push.rev,
+            lastSyncedAt: new Date().toISOString(),
+            lastError: undefined,
+          });
+        } catch (pushErr) {
+          if (
+            pushErr instanceof SpaceRelayConflictError &&
+            attempt < MAX_ATTEMPTS
+          ) {
+            // Server advanced — apply their snapshot and retry push
+            if (pushErr.snapshot) {
+              await applyPulledSnapshot(
+                pushErr.snapshot,
+                liveRoomId,
+                pushErr.rev,
+                liveShort,
+              );
+            } else {
+              await get().patchSpaceSync(spaceId, {
+                remoteRev: pushErr.rev,
+              });
+            }
+            sync = {
+              ...sync,
+              remoteRev: pushErr.rev,
+              roomId: liveRoomId,
+            };
+            continue;
+          }
+          throw pushErr;
+        }
+      }
+      throw new Error(
+        "Could not finish sync after several tries. Stay Online and tap Sync now again.",
+      );
     };
 
     /** Re-attach to the live room when local roomId is dead but we still have a key. */
@@ -1497,6 +1726,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       return await runPullPush(sync.roomId, sync.shortCode);
     } catch (err) {
+      if (err instanceof SpaceRelayConflictError) {
+        const friendly = err.message;
+        await get().patchSpaceSync(spaceId, { lastError: friendly });
+        throw err;
+      }
       const message = err instanceof Error ? err.message : "Sync failed";
       const looksStale =
         /404|not found|couldn.?t reach|network|failed/i.test(message);
@@ -1554,13 +1788,89 @@ export const useAppStore = create<AppState>((set, get) => ({
     return updated;
   },
 
+  relinkSpaceWithRoomKey: async ({ spaceId, shortCode, displayName }) => {
+    if (!isSpaceRelayConfigured()) {
+      throw new SpaceRelayNotConfiguredError();
+    }
+    const name = displayName.trim();
+    if (!name) throw new Error("Choose or enter your name for the member list");
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+
+    // Resolve room key vs Group Key (never send wrong key type silently)
+    const creds = await resolveJoinCredentials(shortCode);
+
+    // Confirm this key points at the same group (spaceId) before touching link metadata
+    let roomName = row.name;
+    try {
+      const preview = await relayPreviewRoom(creds);
+      roomName = preview.name || roomName;
+      if (preview.spaceId && preview.spaceId !== spaceId) {
+        throw new Error(
+          `That key is for “${preview.name || "another group"}”, not this Space. Your people and meetings stay here. Use Home → Join a group if you meant a different group.`,
+        );
+      }
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        (/not this Space|another group|Account Key|Group Key|Couldn.?t join|Couldn.?t recognize|personal backup/i.test(
+          err.message,
+        ))
+      ) {
+        throw err;
+      }
+      // Older relay / network: continue; join will validate the code
+    }
+
+    // Soft unlink only — never delete remote room, never touch local rows
+    const prior = normalizeSpaceSync(row.sync);
+    if (prior.mode === "connected" || prior.roomId || prior.lastError) {
+      await get().unlinkSpaceFromRelay(spaceId, { deleteRemote: false });
+    }
+
+    const joined = await get().joinSpaceViaRelay({
+      shortCode,
+      displayName: name,
+    });
+
+    if (joined.space.id !== spaceId) {
+      // Should not happen after spaceId check; keep both Spaces if it does
+      throw new Error(
+        `Linked group “${joined.space.name}” is a different Space than this one. Your original group is still on this phone with all its data.`,
+      );
+    }
+
+    // Push/pull once so local history and room meet
+    let space = joined.space;
+    try {
+      space = await get().syncSpaceNow(spaceId);
+    } catch {
+      // Already linked; user can Sync again
+      space = joined.space;
+    }
+
+    scheduleAccountVaultUpload();
+
+    return {
+      space,
+      sessionCount: joined.sessionCount,
+      addedSessions: joined.addedSessions,
+      roomName,
+    };
+  },
+
   joinSpaceViaRelay: async ({ shortCode, displayName }) => {
     if (!isSpaceRelayConfigured()) {
       throw new SpaceRelayNotConfiguredError();
     }
     const name = displayName.trim();
     if (!name) throw new Error("Enter your name to join");
-    const result = await relayJoinRoom({ shortCode, displayName: name });
+    const creds = await resolveJoinCredentials(shortCode);
+    const result = await relayJoinRoom({
+      shortCode: creds.shortCode,
+      groupKeyHash: creds.groupKeyHash,
+      displayName: name,
+    });
     const snap = result.snapshot;
     const prior = await db.spaces.get(snap.spaceId);
     const had = Boolean(prior);
@@ -1593,8 +1903,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       { mergeStrategy: "replace-shared" },
     );
 
-    // Ensure joiner is on the member list
-    const row = await db.spaces.get(snap.spaceId);
+    await applyRemoteTombstonesLocally(snap.spaceId, {
+      sessions: snap.tombstones?.sessions ?? [],
+      prayerBoard: snap.tombstones?.prayerBoard ?? [],
+    });
+
+    // Ensure joiner is on the member list (local)
+    let row = await db.spaces.get(snap.spaceId);
     if (row) {
       const max = maxMembersForSpace(row.spaceKind);
       if (
@@ -1606,10 +1921,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...row,
           members: [...row.members, joiner],
         });
+        row = await db.spaces.get(snap.spaceId);
       }
     }
 
-    const space = await get().patchSpaceSync(snap.spaceId, {
+    let space = await get().patchSpaceSync(snap.spaceId, {
       mode: "connected",
       roomId: result.roomId,
       shortCode: result.shortCode,
@@ -1625,12 +1941,134 @@ export const useAppStore = create<AppState>((set, get) => ({
       roomId: result.roomId,
     });
 
+    // Immediately push merged local snapshot so host sees you without waiting
+    try {
+      const fresh = await db.spaces.get(snap.spaceId);
+      if (fresh) {
+        const hydrated = await hydrateSpace(fresh);
+        const sessions = await db.sessions
+          .where("spaceId")
+          .equals(snap.spaceId)
+          .toArray();
+        const prayerBoard = await db.prayerBoard
+          .where("spaceId")
+          .equals(snap.spaceId)
+          .toArray();
+        const snapshot = await buildSharedSnapshotWithTombstones(
+          hydrated,
+          sessions,
+          prayerBoard,
+        );
+        const push = await relayPushRoom({
+          roomId: result.roomId,
+          snapshot,
+          baseRev: result.rev,
+          mergeShared: true,
+        });
+        space = await get().patchSpaceSync(snap.spaceId, {
+          remoteRev: push.rev,
+          lastSyncedAt: new Date().toISOString(),
+          lastError: undefined,
+        });
+      }
+    } catch {
+      // Join already succeeded; guest can Sync later
+    }
+
     const sessionCount = Array.isArray(snap.sessions) ? snap.sessions.length : 0;
     return {
       space,
       alreadyHad: had,
       sessionCount,
       addedSessions: imported.addedSessions,
+    };
+  },
+
+  reissueRoomKey: async (spaceId, opts) => {
+    if (!isSpaceRelayConfigured()) {
+      throw new SpaceRelayNotConfiguredError();
+    }
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    const sync = normalizeSpaceSync(row.sync);
+    if (sync.deviceRole === "guest") {
+      throw new Error(
+        "Only the host can issue a new room key. Ask them to open the group and use New room key.",
+      );
+    }
+
+    // Ensure room exists and is linked
+    let linkedSync = sync;
+    if (linkedSync.mode !== "connected" || !linkedSync.roomId) {
+      const opened = await get().connectSpaceToRelay(spaceId);
+      linkedSync = normalizeSpaceSync(opened.sync);
+    }
+    if (!linkedSync.roomId) {
+      throw new Error("Could not open the group room to issue a new key.");
+    }
+
+    let groupKeySecret: string | undefined;
+    let groupKeyHash: string | undefined;
+    if (opts?.rotateGroupKey) {
+      const { secret, meta: gen } = await generateGroupKey();
+      const meta = await persistGroupKey(spaceId, secret, gen);
+      groupKeySecret = secret;
+      groupKeyHash = meta.verifier;
+      await get().patchSpaceSync(spaceId, {
+        groupKeyFingerprint: meta.fingerprint,
+        groupKeyId: meta.keyId,
+        groupKeyRotatedAt: new Date().toISOString(),
+        groupKeyRotation: undefined,
+      });
+    } else {
+      const existing = getStoredGroupKey(spaceId);
+      if (existing) {
+        groupKeyHash = await sha256Hex(existing);
+      }
+    }
+
+    // Mint new short code; same roomId → members list + history stay on server
+    const rotated = await relayRotateJoinCode({
+      roomId: linkedSync.roomId,
+      groupKeyHash,
+    });
+
+    // Push current local members/sessions so the room is the source of truth
+    const fresh = await db.spaces.get(spaceId);
+    if (!fresh) throw new Error("Space not found");
+    const hydrated = await hydrateSpace(fresh);
+    const sessions = await db.sessions.where("spaceId").equals(spaceId).toArray();
+    const prayerBoard = await db.prayerBoard
+      .where("spaceId")
+      .equals(spaceId)
+      .toArray();
+    const snapshot = await buildSharedSnapshotWithTombstones(
+      hydrated,
+      sessions,
+      prayerBoard,
+    );
+    const push = await relayPushRoom({
+      roomId: linkedSync.roomId,
+      snapshot,
+      baseRev: rotated.rev,
+      mergeShared: true,
+    });
+
+    const space = await get().patchSpaceSync(spaceId, {
+      mode: "connected",
+      roomId: linkedSync.roomId,
+      shortCode: rotated.shortCode,
+      remoteRev: push.rev,
+      lastSyncedAt: new Date().toISOString(),
+      lastError: undefined,
+      paused: false,
+      deviceRole: "host",
+    });
+
+    return {
+      space,
+      shortCode: rotated.shortCode,
+      groupKeySecret,
     };
   },
 
@@ -1657,6 +2095,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       updatedAt: now,
     };
     await db.privateNotes.add(note);
+    // Private notes never go to the room — only optional Account Key vault
+    scheduleAccountVaultUpload();
     return note;
   },
 
@@ -1671,11 +2111,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       updatedAt: new Date().toISOString(),
     };
     await db.privateNotes.put(note);
+    scheduleAccountVaultUpload();
     return note;
   },
 
   deletePrivateNote: async (id) => {
     await db.privateNotes.delete(id);
+    scheduleAccountVaultUpload();
   },
 
   listPrivateNotes: async ({ spaceId, sessionId, sectionKey }) => {
@@ -1729,6 +2171,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       updatedAt: now,
     };
     await db.prayerBoard.add(entry);
+    notifySharedDataChanged(spaceId);
     return entry;
   },
 
@@ -1776,16 +2219,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     if (!next.content.trim()) throw new Error("Prayer note cannot be empty");
     await db.prayerBoard.put(next);
+    notifySharedDataChanged(existing.spaceId);
     return next;
   },
 
   deletePrayerBoardEntry: async (id) => {
+    const existing = await db.prayerBoard.get(id);
+    if (existing) {
+      await recordTombstone(
+        existing.spaceId,
+        "prayer",
+        id,
+        nowUpdatedAt(),
+      );
+    }
     await db.prayerBoard.delete(id);
+    if (existing) notifySharedDataChanged(existing.spaceId);
   },
 
   ensureSpaceGroupKey: async (spaceId) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
+    if (isSpaceGuest(row.sync)) {
+      throw new Error(
+        "Only the host can create or view the Group Key on this device.",
+      );
+    }
     const existingMeta = getGroupKeyMeta(spaceId);
     const existingSecret = getStoredGroupKey(spaceId);
     if (existingMeta && existingSecret) {
@@ -1796,6 +2255,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           groupKeyId: existingMeta.keyId,
         });
       }
+      // Ensure relay can resolve trusted re-link by Group Key
+      if (sync.mode === "connected" && sync.roomId) {
+        void relayBindGroupKeyHash({
+          roomId: sync.roomId,
+          groupKeyHash: existingMeta.verifier,
+        });
+      }
       return { meta: existingMeta, secret: null };
     }
     const { secret, meta: gen } = await generateGroupKey();
@@ -1804,169 +2270,57 @@ export const useAppStore = create<AppState>((set, get) => ({
       groupKeyFingerprint: meta.fingerprint,
       groupKeyId: meta.keyId,
       groupKeyRotatedAt: meta.createdAt,
+      groupKeyRotation: undefined,
     });
+    const syncAfter = normalizeSpaceSync(
+      (await db.spaces.get(spaceId))?.sync,
+    );
+    if (syncAfter.mode === "connected" && syncAfter.roomId) {
+      void relayBindGroupKeyHash({
+        roomId: syncAfter.roomId,
+        groupKeyHash: meta.verifier,
+      });
+    }
     return { meta, secret };
   },
 
-  proposeGroupKeyRotation: async (spaceId, actor) => {
+  regenerateGroupKeyNow: async (spaceId) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
-    if (row.members.length === 0) {
-      throw new Error("Add members before rotating the Group Key");
-    }
-    const sync = normalizeSpaceSync(row.sync);
-    if (sync.groupKeyRotation?.status === "pending") {
+    if (isSpaceGuest(row.sync)) {
       throw new Error(
-        "A Group Key rotation is already waiting for approvals. Finish or cancel it first.",
+        "Only the host can regenerate the Group Key. Guests re-Join with the new room key after the host shares it.",
       );
     }
-    if (!row.members.some((m) => m.id === actor.memberId)) {
-      throw new Error("Only current members may propose a Group Key change");
-    }
-
+    // Drop any legacy multi-member pending vote
+    clearPendingGroupKeySecret(spaceId);
     const { secret, meta: gen } = await generateGroupKey();
     const proposedKeyHash = await sha256Hex(secret);
     setPendingGroupKeySecret(spaceId, secret);
-
-    const proposal = createRotationProposal({
-      spaceId,
-      proposedKeyHash,
-      proposedFingerprint: gen.fingerprint,
-      proposedByMemberId: actor.memberId,
-      proposedByName: actor.memberName,
-      requiredMemberIds: row.members.map((m) => m.id),
-    });
-
-    // Solo member = unanimous of one → complete immediately
-    if (proposal.requiredMemberIds.length === 1) {
-      return completeGroupKeyRotationLocal(
-        get,
-        spaceId,
-        secret,
-        gen.fingerprint,
-        proposedKeyHash,
-      );
-    }
-
-    const space = await get().patchSpaceSync(spaceId, {
-      groupKeyRotation: {
-        id: proposal.id,
-        proposedKeyHash: proposal.proposedKeyHash,
-        proposedFingerprint: proposal.proposedFingerprint,
-        proposedByMemberId: proposal.proposedByMemberId,
-        proposedByName: proposal.proposedByName,
-        proposedAt: proposal.proposedAt,
-        requiredMemberIds: proposal.requiredMemberIds,
-        approvals: proposal.approvals,
-        status: "pending",
-      },
-    });
-    return { completed: false, space };
-  },
-
-  approveGroupKeyRotation: async (spaceId, actor) => {
-    const row = await db.spaces.get(spaceId);
-    if (!row) throw new Error("Space not found");
-    const sync = normalizeSpaceSync(row.sync);
-    const rot = sync.groupKeyRotation;
-    if (!rot || rot.status !== "pending") {
-      throw new Error("No Group Key rotation is waiting for approval");
-    }
-    if (!rot.requiredMemberIds.includes(actor.memberId)) {
-      throw new Error("This person is not on the current member list");
-    }
-    if (rot.approvals.some((a) => a.memberId === actor.memberId)) {
-      // Already approved — maybe complete if everyone else done
-      if (allMembersApproved(rot as GroupKeyRotationProposal)) {
-        const secret = getPendingGroupKeySecret(spaceId);
-        if (!secret) {
-          throw new Error(
-            "New Group Key is not on this device. Ask the proposer to finish on their phone, or cancel and re-propose.",
-          );
-        }
-        return completeGroupKeyRotationLocal(
-          get,
-          spaceId,
-          secret,
-          rot.proposedFingerprint,
-          rot.proposedKeyHash,
-        );
-      }
-      return {
-        completed: false,
-        space: await hydrateSpace(row),
-      };
-    }
-
-    const nextRot = {
-      ...rot,
-      approvals: [
-        ...rot.approvals,
-        {
-          memberId: actor.memberId,
-          name: actor.memberName,
-          at: new Date().toISOString(),
-          onBehalf: actor.onBehalf === true,
-        },
-      ],
-    };
-
-    const spaceMid = await get().patchSpaceSync(spaceId, {
-      groupKeyRotation: nextRot,
-    });
-
-    if (!allMembersApproved(nextRot as GroupKeyRotationProposal)) {
-      return { completed: false, space: spaceMid };
-    }
-
-    const secret = getPendingGroupKeySecret(spaceId);
-    if (!secret) {
-      // Approvals complete; proposer device must finalize with pending secret
-      return {
-        completed: false,
-        space: spaceMid,
-      };
-    }
     return completeGroupKeyRotationLocal(
       get,
       spaceId,
       secret,
-      rot.proposedFingerprint,
-      rot.proposedKeyHash,
+      gen.fingerprint,
+      proposedKeyHash,
     );
   },
 
+  /** Host-only immediate regen (no votes). */
+  proposeGroupKeyRotation: async (spaceId) => {
+    return get().regenerateGroupKeyNow(spaceId);
+  },
+
   cancelGroupKeyRotation: async (spaceId) => {
+    const row = await db.spaces.get(spaceId);
+    if (!row) throw new Error("Space not found");
+    if (isSpaceGuest(row.sync)) {
+      throw new Error("Only the host can manage Group Key rotation.");
+    }
     clearPendingGroupKeySecret(spaceId);
     return get().patchSpaceSync(spaceId, {
       groupKeyRotation: undefined,
     });
-  },
-
-  finalizeGroupKeyRotation: async (spaceId) => {
-    const row = await db.spaces.get(spaceId);
-    if (!row) throw new Error("Space not found");
-    const sync = normalizeSpaceSync(row.sync);
-    const rot = sync.groupKeyRotation;
-    if (!rot || rot.status !== "pending") {
-      throw new Error("No Group Key rotation in progress");
-    }
-    if (!allMembersApproved(rot as GroupKeyRotationProposal)) {
-      throw new Error("Not all members have approved yet");
-    }
-    const secret = getPendingGroupKeySecret(spaceId);
-    if (!secret) {
-      throw new Error(
-        "This phone does not hold the new Group Key. Finish on the device that tapped Regenerate, then share the new key with members.",
-      );
-    }
-    return completeGroupKeyRotationLocal(
-      get,
-      spaceId,
-      secret,
-      rot.proposedFingerprint,
-      rot.proposedKeyHash,
-    );
   },
 }));
 
@@ -2069,6 +2423,20 @@ function normalizePrayerBoardEntry(
     updatedAt: raw.updatedAt || createdAt,
   };
 }
+
+/**
+ * After shared-layer local writes: debounced room sync (if connected) +
+ * Account Key vault upload (personal Spaces home).
+ */
+function notifySharedDataChanged(spaceId: string): void {
+  scheduleConnectedSpaceSync(spaceId);
+  scheduleAccountVaultUpload();
+}
+
+// Wire auto-sync runner once the store exists (avoids import cycles)
+registerConnectedSpaceSyncRunner((spaceId) =>
+  useAppStore.getState().syncSpaceNow(spaceId),
+);
 
 function mergeMembers(
   local: Member[],

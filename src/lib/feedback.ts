@@ -27,6 +27,10 @@ export interface FeedbackDiagnostics {
 
 export interface FeedbackPayload {
   v: 1;
+  /** AppHub registry id — reports pull into shell/bugs/disciple-spaces.v1.json */
+  appId: "disciple-spaces";
+  /** AppHub AppBugReport.v1 compatibility */
+  schema?: "AppBugReport.v1";
   kind: FeedbackKind;
   message: string;
   contact?: string;
@@ -90,18 +94,27 @@ export function queuedFeedbackCount(): number {
   return readQueue().length;
 }
 
-async function postFeedback(payload: FeedbackPayload): Promise<void> {
-  if (!isSpaceRelayConfigured()) {
-    throw new Error(
-      "Feedback service isn’t on this build. Tell the host who invited you, or try again later.",
-    );
+function getAppHubIngestUrl(): string {
+  try {
+    const url =
+      typeof import.meta !== "undefined" &&
+      (import.meta.env?.VITE_APPHUB_INGEST_URL as string | undefined);
+    return (url || "").replace(/\/$/, "");
+  } catch {
+    return "";
   }
-  const base = getSpaceRelayBaseUrl();
-  const res = await fetch(`${base}/feedback`, {
+}
+
+async function postJson(
+  url: string,
+  payload: FeedbackPayload,
+  headers?: Record<string, string>,
+): Promise<void> {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Device-Id": getDeviceId(),
+      ...(headers || {}),
     },
     body: JSON.stringify(payload),
   });
@@ -114,6 +127,38 @@ async function postFeedback(payload: FeedbackPayload): Promise<void> {
       // ignore
     }
     throw new Error(msg);
+  }
+}
+
+async function postFeedback(payload: FeedbackPayload): Promise<void> {
+  const apphub = getAppHubIngestUrl();
+  const relayOk = isSpaceRelayConfigured();
+
+  if (!relayOk && !apphub) {
+    throw new Error(
+      "Feedback service isn’t on this build. Tell the host who invited you, or try again later.",
+    );
+  }
+
+  // Primary: pilot relay inbox (production users)
+  if (relayOk) {
+    const base = getSpaceRelayBaseUrl();
+    await postJson(`${base}/feedback`, payload, {
+      "X-Device-Id": getDeviceId(),
+    });
+  }
+
+  // Optional dual-write → AppHub operator ledger (local :8767)
+  if (apphub) {
+    try {
+      await postJson(apphub, {
+        ...payload,
+        schema: "AppBugReport.v1",
+      });
+    } catch {
+      // Don't fail user flow if operator AppHub is offline
+      if (!relayOk) throw new Error("Could not reach AppHub ingest.");
+    }
   }
 }
 
@@ -136,6 +181,8 @@ export async function submitFeedback(input: {
 
   const payload: FeedbackPayload = {
     v: 1,
+    appId: "disciple-spaces",
+    schema: "AppBugReport.v1",
     kind: input.kind,
     message,
     contact: input.contact?.trim().slice(0, 120) || undefined,
@@ -159,7 +206,8 @@ export async function submitFeedback(input: {
   const offline =
     typeof navigator !== "undefined" && !navigator.onLine;
 
-  if (offline || !isSpaceRelayConfigured()) {
+  const hasEndpoint = isSpaceRelayConfigured() || !!getAppHubIngestUrl();
+  if (offline || !hasEndpoint) {
     const q = readQueue();
     q.push(payload);
     writeQueue(q);
@@ -183,7 +231,7 @@ export async function submitFeedback(input: {
 
 /** Flush any feedback saved while offline. */
 export async function flushFeedbackQueue(): Promise<number> {
-  if (!isSpaceRelayConfigured()) return 0;
+  if (!isSpaceRelayConfigured() && !getAppHubIngestUrl()) return 0;
   if (typeof navigator !== "undefined" && !navigator.onLine) return 0;
 
   const q = readQueue();

@@ -189,17 +189,20 @@ export function Settings() {
         <h3 className="text-base font-semibold text-primary">Data boundaries</h3>
         <ul className="text-sm text-muted space-y-1.5 list-disc pl-5">
           <li>
-            Private notes stay on this device by default. Optional personal
-            backups (DSP1.) can include them encrypted with your Account Key.
+            <strong className="text-primary font-medium">Account Key</strong> is
+            the home for <em>your</em> Spaces (encrypted vault when Online).
+            Private notes stay on this device unless you opt into encrypted
+            personal backup under that key.
           </li>
           <li>
-            By default Spaces are local-only. Connect (when available) shares
-            only group-facing data for easy join and sync — never private notes.
+            A <strong className="text-primary font-medium">room key</strong>{" "}
+            only shares group-facing meetings, people, and prayer with invitees —
+            never private notes. It is not your personal backup.
           </li>
           <li>
-            File backups (DSX1. group / DSP1. personal) are always available.
-            Account Key and Group Key are optional — never required to use the
-            app.
+            File backups (DSX1. group / DSP1. personal) remain the hard safety
+            net. Account Key and Group Key are optional — never required to use
+            the app offline.
           </li>
           <li>
             Prefer one stable URL. Preview links are separate storage buckets —

@@ -38,7 +38,7 @@ export const TESTING_GUIDE_STEPS = [
   {
     title: "Sync (connected groups)",
     detail:
-      "If the host used Connect for easy invite: tap Sync now on the group when Online. You’ll see “Group updated” when it works. Private notes never sync.",
+      "If the host opened a group room: shared meetings sync when Online (auto + Sync now). Private notes never go to the room. Your Spaces also stay under your Account Key (encrypted) when you create one.",
   },
   {
     title: "Invite simply",
@@ -102,7 +102,7 @@ export const DATA_CONFIDENCE_STEPS = [
   {
     title: "Back up each Space",
     detail:
-      "Your Spaces & data → Back up → download the file (shared data only; starts with DSX1.).",
+      "Your Spaces & data → Back up → download the file (shared data only; starts with DSX1.). Or Account Key → Upload my Spaces so another device can Link & restore.",
   },
   {
     title: "Store the files safely",
@@ -124,7 +124,7 @@ export const DATA_CONFIDENCE_STEPS = [
 export const BACKUP_STEPS = DATA_CONFIDENCE_STEPS;
 
 export const RESTORE_NOTE =
-  "Import adds missing sessions; sessions already on the device are skipped. Private notes are never included in exports or Space rooms. Cloudflare hosts the app shell — it cannot recover a wiped phone unless you Connect a Space or keep your own backup files.";
+  "Import adds missing sessions; sessions already on the device are skipped. Private notes are never included in group files (DSX1.) or Space rooms. Account Key cloud restore can bring Spaces (and encrypted notes if you opted in). Cloudflare hosts the app shell — it cannot recover a wiped phone without your key vault or backup files.";
 
 export const KJV_NOTICE =
   "Bible text: King James Version (public domain).";
@@ -144,14 +144,14 @@ export const INVITE_PRIVACY_NOTE =
   "DiscipleSpaces is a personal small-group study tool on each device. It is not a legally protected confidential space. Share invites only with people you trust.";
 
 export const INVITE_HISTORY_NOTE =
-  "A simple invite gets them into the group. Past shared meetings come with Connect + Sync, or when you send a group file (under Other ways).";
+  "A simple invite gets them into the group. Past shared meetings come with room key + Sync, or when you send a group file (under Other ways).";
 
 export const INVITE_SYNC_NOTE =
-  "Add their name so your headcount is right. Share so they open the same group on their phone. Notes marked “Just for me” never leave this device.";
+  "Host: add their name so your headcount is right, then share the room key or QR. Guests Join once, then tap Sync. Notes marked “Just for me” never leave this device.";
 
 /** One-liner for Invite happy path. */
 export const INVITE_SIMPLE_HINT =
-  "Add their name for your headcount, then Share or show the QR. They join on their phone.";
+  "Host adds their name for your list, then Share or show the QR. They Join on their phone and tap Sync.";
 
 export const OFFLINE_BANNER_HINT =
   "Working offline · Spaces on this phone still work. Connected Spaces catch up when you’re back online.";

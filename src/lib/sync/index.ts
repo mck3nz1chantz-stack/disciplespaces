@@ -9,13 +9,38 @@ export {
   normalizeSpaceSync,
   canConnectSpaceToRelay,
   isSpaceGuest,
+  isSpaceHost,
+  HOST_ONLY_ROSTER_MESSAGE,
+  HOST_ONLY_TITLE_MESSAGE,
 } from "./defaults";
 export { getDeviceId, getDeviceSecret } from "./deviceIdentity";
 export {
   assertNoPrivateNotes,
   buildSharedSnapshot,
+  buildSharedSnapshotWithTombstones,
   type SharedSpaceSnapshot,
 } from "./sharedSnapshot";
+export {
+  entityUpdatedAtMs,
+  pickLwwEntity,
+  incomingIsNewerOrEqual,
+  nowUpdatedAt,
+} from "./merge";
+export {
+  recordTombstone,
+  listTombstonesForSpace,
+  applyRemoteTombstonesLocally,
+  mergeTombstoneLists,
+  applyTombstonesToEntities,
+  type SharedTombstonesPayload,
+  type SnapshotTombstone,
+} from "./tombstones";
+export {
+  registerConnectedSpaceSyncRunner,
+  scheduleConnectedSpaceSync,
+  flushConnectedSpaceSync,
+} from "./autoSync";
+export { subscribeRoomLive, type RoomLiveHandler } from "./liveRoom";
 export {
   createRoom,
   joinRoom,
@@ -25,10 +50,20 @@ export {
   deleteRoom,
   rotateJoinCode,
   registerSpaceRoom,
+  bindGroupKeyHash,
   normalizeShortCode,
   SpaceRelayNotConfiguredError,
+  SpaceRelayConflictError,
   type CreateRoomResult,
   type JoinRoomResult,
   type PreviewRoomResult,
   type PullResult,
 } from "./client";
+export {
+  classifyInviteKey,
+  looksLikeRoomShortCode,
+  wrongKeyHelp,
+  groupKeyHashFromInput,
+  resolveJoinCredentials,
+  type InviteKeyKind,
+} from "./inviteKey";

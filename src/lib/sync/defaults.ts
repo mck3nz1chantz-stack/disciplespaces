@@ -55,3 +55,16 @@ export function isSpaceGuest(
 ): boolean {
   return normalizeSpaceSync(sync).deviceRole === "guest";
 }
+
+/** Host on this device — may edit title, roster, open room. Guests Sync only. */
+export function isSpaceHost(
+  sync: SpaceSyncState | undefined | null,
+): boolean {
+  return !isSpaceGuest(sync);
+}
+
+export const HOST_ONLY_ROSTER_MESSAGE =
+  "Only the host can add or remove people on the list. Ask them to update who’s here, then tap Sync.";
+
+export const HOST_ONLY_TITLE_MESSAGE =
+  "Only the host can rename this group. Tap Sync to pull the latest name and meetings.";

@@ -1,3 +1,4 @@
+<!-- DiscipleSpaces favicon v3 — gold cross on deep green tile -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DiscipleSpaces">
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
@@ -5,17 +6,17 @@
       <stop offset="100%" stop-color="#1e3a2f"/>
     </linearGradient>
     <linearGradient id="cross" x1="0.15" y1="0" x2="0.85" y2="1">
-      <stop offset="0%" stop-color="#e0c57a"/>
-      <stop offset="50%" stop-color="#c4a35a"/>
-      <stop offset="100%" stop-color="#a8863f"/>
+      <stop offset="0%" stop-color="#e8cf88"/>
+      <stop offset="50%" stop-color="#d4b06a"/>
+      <stop offset="100%" stop-color="#b89448"/>
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="14" fill="url(#tile)"/>
-  <circle cx="32" cy="34" r="21" fill="#c4a35a" opacity="0.16"/>
+  <circle cx="32" cy="34" r="22" fill="#d4b06a" opacity="0.18"/>
   <!-- Rounded Latin cross -->
   <path
     fill="url(#cross)"
     d="M28 14h8a2 2 0 0 1 2 2v10h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H38v16a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2V38H16a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h10V16a2 2 0 0 1 2-2z"
   />
-  <rect x="30" y="16" width="2.5" height="34" rx="1" fill="#f7f5f0" opacity="0.22"/>
+  <rect x="30" y="16" width="2.5" height="34" rx="1" fill="#f7f5f0" opacity="0.28"/>
 </svg>

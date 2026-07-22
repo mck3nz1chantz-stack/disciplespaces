@@ -24,6 +24,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  RefreshCw,
   Share2,
   Trash2,
   UserPlus,
@@ -85,6 +86,13 @@ import {
   useLiveTemplates,
 } from "../hooks/useLiveDb";
 import { useSessionSectionSpy } from "../hooks/useSessionSectionSpy";
+import {
+  isSpaceGuest,
+  isSpaceHost,
+  normalizeSpaceSync,
+} from "../lib/sync";
+import { useOnlineMode } from "../hooks/useOnlineMode";
+import { useRoomLiveSync } from "../hooks/useRoomLiveSync";
 
 /** Session list lens: one mode, or all modes in this Space. */
 type SessionViewMode = SpaceTemplateId | "all";
@@ -109,9 +117,12 @@ export function SpaceDetail() {
   const deleteSpace = useAppStore((s) => s.deleteSpace);
   const setSpaceMembers = useAppStore((s) => s.setSpaceMembers);
   const addMember = useAppStore((s) => s.addMember);
+  const syncSpaceNow = useAppStore((s) => s.syncSpaceNow);
+  const setSpaceSyncPaused = useAppStore((s) => s.setSpaceSyncPaused);
   const createSession = useAppStore((s) => s.createSession);
   const updateSession = useAppStore((s) => s.updateSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
+  const { mode: onlineMode } = useOnlineMode();
 
   const space = liveSpace ?? null;
   const spaceSessions = liveSessions ?? [];
@@ -119,6 +130,9 @@ export function SpaceDetail() {
     liveTemplates && liveTemplates.length > 0
       ? liveTemplates
       : storeTemplates;
+
+  // Phase 6: WebSocket + poll while this group is open
+  useRoomLiveSync(space?.id);
 
   const loading = liveSpace === undefined || liveSessions === undefined;
   const notFound = liveSpace === null;
@@ -170,6 +184,7 @@ export function SpaceDetail() {
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickName, setQuickName] = useState("");
   const [quickAdding, setQuickAdding] = useState(false);
+  const [guestSyncing, setGuestSyncing] = useState(false);
   const sessionScrollRef = useRef<HTMLDivElement>(null);
 
   const onLockedSectionChange = useCallback((key: string) => {
@@ -229,6 +244,21 @@ export function SpaceDetail() {
     if (fresh) setActiveSession(fresh);
   }, [liveSessions, activeSession?.id]);
 
+  // Opening a connected group: soft pull+push so shared meetings are current
+  useEffect(() => {
+    if (!space?.id || onlineMode !== "online") return;
+    const sync = normalizeSpaceSync(space.sync);
+    if (sync.mode !== "connected" || !sync.roomId || sync.paused) return;
+    const t = window.setTimeout(() => {
+      void syncSpaceNow(space.id).catch(() => {
+        // lastError on Space; bar shows status
+      });
+    }, 600);
+    return () => window.clearTimeout(t);
+    // Only when entering this group (or reconnecting Online)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [space?.id, onlineMode]);
+
   const modeCounts = useMemo(
     () => countSessionsByMode(spaceSessions),
     [spaceSessions],
@@ -258,6 +288,12 @@ export function SpaceDetail() {
 
   function openEdit() {
     if (!space) return;
+    if (isSpaceGuest(space.sync)) {
+      toast.message("Only the host can edit the group title", {
+        description: "Tap Sync to pull the latest name and people from the host.",
+      });
+      return;
+    }
     setEditName(space.name);
     setEditDescription(space.description ?? "");
     setDraftSpaceKind(normalizeSpaceKind(space.spaceKind));
@@ -282,6 +318,13 @@ export function SpaceDetail() {
 
   function openMembers() {
     if (!space) return;
+    if (isSpaceGuest(space.sync)) {
+      toast.message("Only the host manages who’s here", {
+        description:
+          "Ask the host to add or remove people, then tap Sync to refresh.",
+      });
+      return;
+    }
     setDraftMembers(space.members.map((m) => ({ ...m })));
     setMembersOpen(true);
   }
@@ -289,6 +332,10 @@ export function SpaceDetail() {
   async function handleQuickAdd(e?: FormEvent) {
     e?.preventDefault();
     if (!space || !id) return;
+    if (isSpaceGuest(space.sync)) {
+      toast.error("Only the host can add people to this group");
+      return;
+    }
     const name = quickName.trim();
     if (!name) {
       toast.error("Enter a name");
@@ -304,6 +351,39 @@ export function SpaceDetail() {
       toast.error(err instanceof Error ? err.message : "Could not add person");
     } finally {
       setQuickAdding(false);
+    }
+  }
+
+  async function handleGuestSync() {
+    if (!space) return;
+    const sync = normalizeSpaceSync(space.sync);
+    if (sync.mode !== "connected" || !sync.roomId) {
+      toast.message("Link this group first", {
+        description:
+          "Use Join a group with the host’s current room key, then Sync.",
+      });
+      return;
+    }
+    if (onlineMode === "offline") {
+      toast.message("App is set to Offline", {
+        description: "Turn Online on (connection card), then tap Sync.",
+      });
+      return;
+    }
+    setGuestSyncing(true);
+    try {
+      if (sync.paused) await setSpaceSyncPaused(space.id, false);
+      await syncSpaceNow(space.id);
+      toast.success("Group updated from host", {
+        description:
+          "People list, meetings, and prayer board match the shared room.",
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Sync failed", {
+        duration: 10000,
+      });
+    } finally {
+      setGuestSyncing(false);
     }
   }
 
@@ -433,11 +513,20 @@ export function SpaceDetail() {
     setSessionMode("edit");
   }
 
-  /** URL is the primary source of truth for Bible log context. */
+  /**
+   * URL is the primary source of truth for Bible log context.
+   * Prefer an explicit session; otherwise attach the latest meeting so
+   * logging is one-tap in the reader (session-first study).
+   */
   function openBibleForSpace(sessionId?: string) {
     if (!space) return;
     const params = new URLSearchParams({ space: space.id });
-    if (sessionId) params.set("session", sessionId);
+    const resolvedSession =
+      sessionId ??
+      activeSession?.id ??
+      spaceSessions[0]?.id ??
+      undefined;
+    if (resolvedSession) params.set("session", resolvedSession);
     navigate(`/bible?${params.toString()}`);
   }
 
@@ -744,26 +833,35 @@ export function SpaceDetail() {
 
   const maxPeople = maxMembersForSpace(space.spaceKind);
   const peopleCount = space.members.length;
-  const canAddPeople = peopleCount < maxPeople;
+  const isHost = isSpaceHost(space.sync);
+  const isGuest = isSpaceGuest(space.sync);
+  const spaceSync = normalizeSpaceSync(space.sync);
+  const guestLinked =
+    isGuest &&
+    spaceSync.mode === "connected" &&
+    Boolean(spaceSync.roomId);
+  const canAddPeople = isHost && peopleCount < maxPeople;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
         <BackLink />
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            className="!p-2"
-            onClick={openEdit}
-            aria-label="Edit group"
-          >
-            <Pencil className="h-5 w-5" aria-hidden />
-          </Button>
+          {isHost && (
+            <Button
+              variant="ghost"
+              className="!p-2"
+              onClick={openEdit}
+              aria-label="Edit group"
+            >
+              <Pencil className="h-5 w-5" aria-hidden />
+            </Button>
+          )}
           <Button
             variant="ghost"
             className="!p-2 text-danger"
             onClick={() => setDeleteOpen(true)}
-            aria-label="Delete group"
+            aria-label={isGuest ? "Remove group from this device" : "Delete group"}
           >
             <Trash2 className="h-5 w-5" aria-hidden />
           </Button>
@@ -785,9 +883,57 @@ export function SpaceDetail() {
           <span className="text-muted font-normal">
             {" "}
             · {spaceKindLabel(space.spaceKind)}
+            {isGuest ? " · Guest" : ""}
           </span>
         </p>
       </div>
+
+      {/* Guest: obvious Sync to pull host data before anything else */}
+      {isGuest && (
+        <section
+          className="rounded-2xl border-2 border-primary/40 bg-primary/10 px-3 py-3.5 space-y-2.5 shadow-sm"
+          aria-label="Sync group from host"
+        >
+          <div className="flex items-start gap-2.5">
+            <RefreshCw
+              className="h-5 w-5 shrink-0 text-primary mt-0.5"
+              aria-hidden
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-primary leading-tight">
+                Sync with host
+              </p>
+              <p className="text-xs text-muted mt-0.5 leading-relaxed">
+                {guestLinked
+                  ? "Pull the latest people list, meetings, and prayer board from the shared room."
+                  : "Join once with the host’s room key, then Sync anytime to update this group."}
+              </p>
+            </div>
+          </div>
+          {guestLinked ? (
+            <Button
+              fullWidth
+              className="!py-3.5 text-base font-semibold shadow-md"
+              disabled={guestSyncing}
+              onClick={() => void handleGuestSync()}
+            >
+              <RefreshCw
+                className={[
+                  "h-5 w-5",
+                  guestSyncing ? "animate-spin" : "",
+                ].join(" ")}
+                aria-hidden
+              />
+              {guestSyncing ? "Syncing…" : "Sync"}
+            </Button>
+          ) : (
+            <p className="text-xs text-muted text-center rounded-lg border border-border bg-bg/80 px-2 py-2">
+              Use <strong className="text-text">Join a group</strong> with the
+              host’s room key first — then this Sync button unlocks.
+            </p>
+          )}
+        </section>
+      )}
 
       {/* Zone 1 — Who’s here (people + invite before connect chrome) */}
       <section className="space-y-2.5" aria-label="Who is here">
@@ -796,27 +942,41 @@ export function SpaceDetail() {
             <Users className="h-4 w-4" aria-hidden />
             Who’s here
           </h3>
-          <button
-            type="button"
-            onClick={openMembers}
-            className="text-xs font-medium text-primary touch-manipulation tap-target px-2"
-          >
-            Edit list
-          </button>
+          {isHost ? (
+            <button
+              type="button"
+              onClick={openMembers}
+              className="text-xs font-medium text-primary touch-manipulation tap-target px-2"
+            >
+              Edit list
+            </button>
+          ) : (
+            <span className="text-xs text-muted px-2">Host manages list</span>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {space.members.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={openMembers}
-              className="inline-flex max-w-[9.5rem] min-h-11 items-center rounded-full border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-primary touch-manipulation active:scale-[0.98]"
-              title={m.name}
-            >
-              <span className="truncate">{m.name}</span>
-            </button>
-          ))}
+          {space.members.map((m) =>
+            isHost ? (
+              <button
+                key={m.id}
+                type="button"
+                onClick={openMembers}
+                className="inline-flex max-w-[9.5rem] min-h-11 items-center rounded-full border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-primary touch-manipulation active:scale-[0.98]"
+                title={m.name}
+              >
+                <span className="truncate">{m.name}</span>
+              </button>
+            ) : (
+              <span
+                key={m.id}
+                className="inline-flex max-w-[9.5rem] min-h-11 items-center rounded-full border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-primary"
+                title={m.name}
+              >
+                <span className="truncate">{m.name}</span>
+              </span>
+            ),
+          )}
           {canAddPeople && (
             <button
               type="button"
@@ -830,14 +990,16 @@ export function SpaceDetail() {
               Add
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setInviteOpen(true)}
-            className="inline-flex min-h-11 items-center gap-1 rounded-full border border-primary/30 bg-primary text-white px-3.5 py-2.5 text-sm font-medium touch-manipulation active:scale-[0.98]"
-          >
-            <UserPlus className="h-4 w-4" aria-hidden />
-            Invite
-          </button>
+          {isHost && (
+            <button
+              type="button"
+              onClick={() => setInviteOpen(true)}
+              className="inline-flex min-h-11 items-center gap-1 rounded-full border border-primary/30 bg-primary text-on-primary px-3.5 py-2.5 text-sm font-medium touch-manipulation active:scale-[0.98]"
+            >
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Invite
+            </button>
+          )}
         </div>
 
         {quickAddOpen && canAddPeople && (
@@ -867,12 +1029,32 @@ export function SpaceDetail() {
         )}
 
         <p className="text-xs text-muted">
-          Tap a name to edit. Invite so they can open this group on their phone.
+          {isHost
+            ? "Tap a name to edit. Invite so they can open this group on their phone."
+            : "Only the host can add or remove people. Tap Sync to refresh the list."}
         </p>
       </section>
 
       {/* Zone 2 — Primary worship CTA (sticky in lower thumb zone) */}
-      <div className="sticky-thumb-actions -mx-1 px-1 py-1">
+      <div className="sticky-thumb-actions -mx-1 px-1 py-1 space-y-2">
+        {guestLinked && (
+          <Button
+            fullWidth
+            variant="secondary"
+            className="!py-3.5 text-base font-semibold border-2 border-primary/35"
+            disabled={guestSyncing}
+            onClick={() => void handleGuestSync()}
+          >
+            <RefreshCw
+              className={[
+                "h-5 w-5",
+                guestSyncing ? "animate-spin" : "",
+              ].join(" ")}
+              aria-hidden
+            />
+            {guestSyncing ? "Syncing…" : "Sync"}
+          </Button>
+        )}
         <Button
           fullWidth
           className="!py-4 text-base shadow-md border border-primary/20"
@@ -898,7 +1080,7 @@ export function SpaceDetail() {
           >
             <BookOpen className="h-6 w-6 text-primary" aria-hidden />
             <span className="text-xs font-medium text-primary leading-tight">
-              Bible
+              {spaceSessions[0] || activeSession ? "Study" : "Bible"}
             </span>
           </button>
           <button
@@ -1579,7 +1761,7 @@ function ModeChip({
       className={[
         "shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-semibold touch-manipulation tap-target border transition-colors",
         selected
-          ? "border-primary bg-primary text-white"
+          ? "border-primary bg-primary text-on-primary"
           : "border-border bg-bg text-primary hover:border-primary/40",
       ].join(" ")}
     >
@@ -1588,7 +1770,7 @@ function ModeChip({
         <span
           className={[
             "tabular-nums text-[10px] font-medium",
-            selected ? "text-white/80" : "text-muted",
+            selected ? "text-on-primary/80" : "text-muted",
           ].join(" ")}
         >
           {count}

@@ -1,49 +1,35 @@
 /**
- * Per-Space Group Key + unanimous regenerate (all members).
+ * Per-Space Group Key — host only, immediate regenerate (no member votes).
  * Additive only — does not wipe local sessions/notes.
  */
 
-import { useMemo, useState } from "react";
-import {
-  KeyRound,
-  Loader2,
-  RefreshCw,
-  Users,
-} from "lucide-react";
+import { useState } from "react";
+import { KeyRound, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./Button";
 import { KeyRevealGate } from "./KeyRevealGate";
 import { useAppStore } from "../stores/useAppStore";
-import {
-  getGroupKeyMeta,
-  getPendingGroupKeySecret,
-  getStoredGroupKey,
-} from "../lib/keys";
-import { normalizeSpaceSync } from "../lib/sync";
+import { getGroupKeyMeta, getStoredGroupKey } from "../lib/keys";
+import { isSpaceGuest, normalizeSpaceSync } from "../lib/sync";
 import type { Space } from "../types";
 
 interface GroupKeySectionProps {
   space: Space;
-  /** Prefer a known member when proposing / approving. */
+  /** Unused — kept for call-site compatibility. */
   actingMemberId?: string | null;
 }
 
-export function GroupKeySection({
-  space,
-  actingMemberId = null,
-}: GroupKeySectionProps) {
-  const proposeGroupKeyRotation = useAppStore((s) => s.proposeGroupKeyRotation);
-  const approveGroupKeyRotation = useAppStore((s) => s.approveGroupKeyRotation);
+export function GroupKeySection({ space }: GroupKeySectionProps) {
+  const regenerateGroupKeyNow = useAppStore((s) => s.regenerateGroupKeyNow);
   const cancelGroupKeyRotation = useAppStore((s) => s.cancelGroupKeyRotation);
-  const finalizeGroupKeyRotation = useAppStore((s) => s.finalizeGroupKeyRotation);
   const ensureSpaceGroupKey = useAppStore((s) => s.ensureSpaceGroupKey);
 
   const sync = normalizeSpaceSync(space.sync);
+  const guest = isSpaceGuest(sync);
   const meta = getGroupKeyMeta(space.id);
   const fingerprint =
     meta?.fingerprint ?? sync.groupKeyFingerprint ?? null;
-  const rotation = sync.groupKeyRotation;
-  const pending = rotation?.status === "pending" ? rotation : null;
+  const stalePending = sync.groupKeyRotation?.status === "pending";
 
   const [busy, setBusy] = useState(false);
   const [reveal, setReveal] = useState<{
@@ -53,28 +39,21 @@ export function GroupKeySection({
     fingerprint?: string;
   } | null>(null);
 
-  const defaultMember = useMemo(() => {
-    if (actingMemberId) {
-      const m = space.members.find((x) => x.id === actingMemberId);
-      if (m) return m;
-    }
-    return space.members[0] ?? null;
-  }, [space.members, actingMemberId]);
-
-  const approvedIds = new Set(pending?.approvals.map((a) => a.memberId) ?? []);
-  const remaining =
-    pending?.requiredMemberIds.filter((id) => !approvedIds.has(id)) ?? [];
-
-  async function run(action: () => Promise<unknown>, ok: string) {
-    setBusy(true);
-    try {
-      await action();
-      toast.success(ok);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setBusy(false);
-    }
+  if (guest) {
+    return (
+      <div className="rounded-xl border border-border bg-bg px-3 py-3 space-y-1.5">
+        <p className="text-sm font-semibold text-primary flex items-center gap-2">
+          <KeyRound className="h-4 w-4 shrink-0" aria-hidden />
+          Group Key
+        </p>
+        <p className="text-xs text-muted leading-relaxed">
+          Only the host manages keys. To re-join, paste the host’s{" "}
+          <strong className="text-text">room key</strong> (short code like
+          ABCD-EF on their group card). Group Key (DS-GRP-…) is optional trusted
+          re-link — not the usual invite.
+        </p>
+      </div>
+    );
   }
 
   async function handleCreate() {
@@ -86,7 +65,7 @@ export function GroupKeySection({
           secret: result.secret,
           title: "Group Key",
           description:
-            "This is your group’s trusted key. Share only with current members. Short join codes are still for inviting people; regenerate this key when someone leaves or it may have leaked.",
+            "Trusted re-link secret — not the everyday invite. Friends normally Join with the short room key (ABCD-EF) on this group’s card. Share Group Key only with trusted members. Regenerating also issues a new room key when the room is open.",
           fingerprint: result.meta.fingerprint,
         });
       } else {
@@ -96,7 +75,7 @@ export function GroupKeySection({
             secret: existing,
             title: "Group Key",
             description:
-              "Store this securely. Only current members should have it.",
+              "Store this securely. Only you (host) should share it with trusted people.",
             fingerprint: getGroupKeyMeta(space.id)?.fingerprint,
           });
         } else {
@@ -127,65 +106,39 @@ export function GroupKeySection({
     });
   }
 
-  async function handlePropose() {
-    if (!defaultMember) {
-      toast.error("Add at least one member before managing a Group Key");
-      return;
-    }
+  async function handleRegenerate() {
     if (
       !window.confirm(
-        `Regenerate Group Key for “${space.name}”?\n\nEvery member must approve. When complete, a new join code is issued and the old Group Key stops working.\n\nContinue?`,
+        `Regenerate Group Key for “${space.name}”?\n\n` +
+          "• Happens immediately (no member votes)\n" +
+          "• Old Group Key stops working\n" +
+          "• A new room key (join code) is issued if the room is open\n" +
+          "• Share the new room key only with people who should stay\n" +
+          "• People already linked can keep Syncing; others re-Join\n\n" +
+          "Continue?",
       )
     ) {
       return;
     }
     setBusy(true);
     try {
-      const result = await proposeGroupKeyRotation(space.id, {
-        memberId: defaultMember.id,
-        memberName: defaultMember.name,
+      const result = await regenerateGroupKeyNow(space.id);
+      setReveal({
+        secret: result.newSecret,
+        title: "New Group Key",
+        description:
+          "Old key retired. Save this key. Share the new room key only with people who should stay in the group. Guests who lost the link re-Join with the new code, then Sync.",
+        fingerprint: result.fingerprint,
       });
-      if (result.completed && result.newSecret) {
-        setReveal({
-          secret: result.newSecret,
-          title: "New Group Key",
-          description:
-            "All members approved (or you were the only member). Old key and join code are retired. Save this new key and share the new join code with trusted members only.",
-          fingerprint: result.fingerprint,
-        });
-        toast.success("Group Key rotated");
-      } else {
-        toast.success("Rotation proposed — waiting for all members");
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not propose");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleApprove(memberId: string, name: string, onBehalf: boolean) {
-    setBusy(true);
-    try {
-      const result = await approveGroupKeyRotation(space.id, {
-        memberId,
-        memberName: name,
-        onBehalf,
+      const code = normalizeSpaceSync(result.space.sync).shortCode;
+      toast.success("Group Key regenerated", {
+        description: code
+          ? `New room key: ${code}`
+          : "Share the new key with trusted members only.",
+        duration: 8000,
       });
-      if (result.completed && result.newSecret) {
-        setReveal({
-          secret: result.newSecret,
-          title: "New Group Key",
-          description:
-            "Everyone approved. Save this key. A new short join code is active — share it only with people who should stay in the group.",
-          fingerprint: result.fingerprint,
-        });
-        toast.success("Group Key rotated — all members approved");
-      } else {
-        toast.success(`Recorded approval for ${name}`);
-      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not approve");
+      toast.error(err instanceof Error ? err.message : "Could not regenerate");
     } finally {
       setBusy(false);
     }
@@ -198,10 +151,10 @@ export function GroupKeySection({
         <div className="min-w-0">
           <p className="text-sm font-semibold text-primary">Group Key</p>
           <p className="text-xs text-muted mt-0.5 leading-relaxed">
-            Trusted members only. Any member may propose regenerate;{" "}
-            <strong className="text-primary">all members</strong> must approve.
-            On complete, a <strong className="text-primary">new join code</strong>{" "}
-            is issued.
+            Host only — regenerate anytime (no votes). That retires the old key
+            and issues a{" "}
+            <strong className="text-primary">new room key</strong> when the room
+            is connected. You alone add or remove people on the list.
           </p>
         </div>
       </div>
@@ -212,163 +165,81 @@ export function GroupKeySection({
           {getStoredGroupKey(space.id) ? "Key saved" : "Not stored"}
         </dd>
         <dt className="text-muted">Fingerprint</dt>
-        <dd className="text-right font-mono">
-          {fingerprint ?? "—"}
-        </dd>
+        <dd className="text-right font-mono">{fingerprint ?? "—"}</dd>
         {sync.shortCode && (
           <>
-            <dt className="text-muted">Join code</dt>
+            <dt className="text-muted">Room key</dt>
             <dd className="text-right font-mono font-medium">{sync.shortCode}</dd>
           </>
         )}
       </dl>
 
-      {!pending && (
-        <div className="flex flex-wrap gap-1.5">
-          {!getStoredGroupKey(space.id) ? (
-            <Button
-              variant="secondary"
-              className="!py-2 !text-xs"
-              disabled={busy}
-              onClick={() => void handleCreate()}
-            >
-              {busy ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <KeyRound className="h-3.5 w-3.5" aria-hidden />
-              )}
-              Create Group Key
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              className="!py-2 !text-xs"
-              disabled={busy}
-              onClick={handleView}
-            >
-              View key
-            </Button>
-          )}
-          <Button
-            variant="secondary"
-            className="!py-2 !text-xs"
-            disabled={busy || space.members.length === 0}
-            onClick={() => void handlePropose()}
-          >
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-            Regenerate…
-          </Button>
-        </div>
-      )}
-
-      {pending && (
-        <div className="space-y-2 rounded-lg border border-amber-300/40 bg-amber-50/50 dark:bg-amber-950/20 px-2.5 py-2">
-          <p className="text-xs font-medium text-primary flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5" aria-hidden />
-            Waiting for all members ({pending.approvals.length}/
-            {pending.requiredMemberIds.length})
+      {stalePending && (
+        <div className="rounded-lg border border-amber-300/40 bg-amber-50/50 dark:bg-amber-950/20 px-2.5 py-2 space-y-2">
+          <p className="text-xs text-muted leading-relaxed">
+            An old “waiting for approvals” rotation is leftover. Cancel it, or
+            Regenerate now to finish with the new host-only flow.
           </p>
-          <p className="text-[11px] text-muted leading-relaxed">
-            Proposed by {pending.proposedByName}. New key fingerprint{" "}
-            <span className="font-mono">{pending.proposedFingerprint}</span>
-          </p>
-          <ul className="space-y-1.5">
-            {space.members.map((m) => {
-              const done = approvedIds.has(m.id);
-              return (
-                <li
-                  key={m.id}
-                  className="flex items-center justify-between gap-2 text-xs"
-                >
-                  <span className={done ? "text-muted line-through" : "text-primary"}>
-                    {m.name}
-                    {done ? " · approved" : ""}
-                  </span>
-                  {!done && (
-                    <Button
-                      variant="ghost"
-                      className="!py-1 !px-2 !text-[11px]"
-                      disabled={busy}
-                      onClick={() => {
-                        const onBehalf = defaultMember?.id !== m.id;
-                        if (onBehalf) {
-                          if (
-                            !window.confirm(
-                              `Mark approval for ${m.name}?\n\nOnly do this if you confirmed with them in person. Misuse weakens group safety.`,
-                            )
-                          ) {
-                            return;
-                          }
-                        }
-                        void handleApprove(m.id, m.name, onBehalf);
-                      }}
-                    >
-                      Approve
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          {remaining.length === 0 && (
-            <div className="space-y-1.5">
-              <p className="text-[11px] text-muted leading-relaxed">
-                All members approved. The device that tapped{" "}
-                <strong className="text-primary">Regenerate</strong> should
-                finish to reveal the new Group Key and join code.
-              </p>
-              {getPendingGroupKeySecret(space.id) && (
-                <Button
-                  variant="secondary"
-                  className="!py-2 !text-xs"
-                  disabled={busy}
-                  onClick={() => {
-                    void (async () => {
-                      setBusy(true);
-                      try {
-                        const result = await finalizeGroupKeyRotation(space.id);
-                        if (result.completed && result.newSecret) {
-                          setReveal({
-                            secret: result.newSecret,
-                            title: "New Group Key",
-                            description:
-                              "Rotation complete. Save this key and share the new join code only with trusted members.",
-                            fingerprint: result.fingerprint,
-                          });
-                          toast.success("Group Key rotated");
-                        }
-                      } catch (err) {
-                        toast.error(
-                          err instanceof Error
-                            ? err.message
-                            : "Could not finish rotation",
-                        );
-                      } finally {
-                        setBusy(false);
-                      }
-                    })();
-                  }}
-                >
-                  Finish rotation on this device
-                </Button>
-              )}
-            </div>
-          )}
           <Button
             variant="ghost"
             className="!py-1.5 !text-xs"
             disabled={busy}
-            onClick={() =>
-              void run(
-                () => cancelGroupKeyRotation(space.id),
-                "Rotation cancelled",
-              )
-            }
+            onClick={() => {
+              void (async () => {
+                setBusy(true);
+                try {
+                  await cancelGroupKeyRotation(space.id);
+                  toast.success("Old rotation cleared");
+                } catch (err) {
+                  toast.error(
+                    err instanceof Error ? err.message : "Could not clear",
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              })();
+            }}
           >
-            Cancel rotation
+            Clear old rotation
           </Button>
         </div>
       )}
+
+      <div className="flex flex-wrap gap-1.5">
+        {!getStoredGroupKey(space.id) ? (
+          <Button
+            variant="secondary"
+            className="!py-2 !text-xs"
+            disabled={busy}
+            onClick={() => void handleCreate()}
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <KeyRound className="h-3.5 w-3.5" aria-hidden />
+            )}
+            Create Group Key
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            className="!py-2 !text-xs"
+            disabled={busy}
+            onClick={handleView}
+          >
+            View key
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          className="!py-2 !text-xs"
+          disabled={busy}
+          onClick={() => void handleRegenerate()}
+        >
+          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          Regenerate now
+        </Button>
+      </div>
 
       {reveal && (
         <KeyRevealGate
@@ -380,7 +251,7 @@ export function GroupKeySection({
           fingerprint={reveal.fingerprint}
           extraLines={[
             `Space: ${space.name}`,
-            sync.shortCode ? `Join code: ${sync.shortCode}` : "",
+            sync.shortCode ? `Room key: ${sync.shortCode}` : "",
           ].filter(Boolean)}
           onComplete={() => setReveal(null)}
         />

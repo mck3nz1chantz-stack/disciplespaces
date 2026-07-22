@@ -14,7 +14,7 @@
 
 import type { Transaction } from "dexie";
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 export interface SchemaMigration {
   /** Dexie version number (monotonic). */
@@ -254,6 +254,20 @@ export const SCHEMA_MIGRATIONS: SchemaMigration[] = [
             raw.sync = { ...existing, mode: "local-only" };
           }
         });
+    },
+  },
+  {
+    version: 8,
+    notes:
+      "Shared tombstones for deleted sessions/prayer rows so room + vault merges drop them (LWW vs entity updatedAt)",
+    stores: {
+      spaces: "id, name, createdAt, inviteCode, spaceTemplate, spaceKind",
+      sessions: "id, spaceId, date, templateId",
+      templates: "id, name",
+      privateNotes: "id, spaceId, sessionId, createdAt",
+      prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
+      syncQueue: "id, spaceId, status, createdAt",
+      sharedTombstones: "key, spaceId, kind, id, deletedAt",
     },
   },
 ];

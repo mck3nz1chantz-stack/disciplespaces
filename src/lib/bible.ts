@@ -101,6 +101,9 @@ const VERSION_KEY = "ds-bible-version-v1";
 export interface ReadingPosition {
   bookId: string;
   chapter: number;
+  /** Display label cached for “Continue reading” without loading the index. */
+  bookName?: string;
+  updatedAt?: string;
 }
 
 export function loadReadingVersion(): BibleVersionId {
@@ -465,7 +468,14 @@ export function loadReadingPosition(): ReadingPosition | null {
       typeof parsed.chapter === "number" &&
       parsed.chapter >= 1
     ) {
-      return parsed;
+      return {
+        bookId: parsed.bookId,
+        chapter: parsed.chapter,
+        bookName:
+          typeof parsed.bookName === "string" ? parsed.bookName : undefined,
+        updatedAt:
+          typeof parsed.updatedAt === "string" ? parsed.updatedAt : undefined,
+      };
     }
   } catch {
     // ignore
@@ -475,10 +485,22 @@ export function loadReadingPosition(): ReadingPosition | null {
 
 export function saveReadingPosition(pos: ReadingPosition): void {
   try {
-    localStorage.setItem(POSITION_KEY, JSON.stringify(pos));
+    const payload: ReadingPosition = {
+      bookId: pos.bookId,
+      chapter: pos.chapter,
+      bookName: pos.bookName,
+      updatedAt: pos.updatedAt ?? new Date().toISOString(),
+    };
+    localStorage.setItem(POSITION_KEY, JSON.stringify(payload));
   } catch {
     // ignore
   }
+}
+
+/** Human label for continue cards — prefers cached book name. */
+export function formatReadingPositionLabel(pos: ReadingPosition): string {
+  const name = pos.bookName?.trim() || pos.bookId;
+  return `${name} ${pos.chapter}`;
 }
 
 export function groupBooksByTestament(books: BibleBookMeta[]): {

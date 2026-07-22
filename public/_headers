@@ -31,6 +31,12 @@
 /data/bible/*
   Cache-Control: public, max-age=604800
 
-# Icons
+# Icons + favicon — short cache so cross icon updates show after deploy
 /icons/*
-  Cache-Control: public, max-age=604800
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/favicon.svg
+  Cache-Control: public, max-age=0, must-revalidate
+
+/favicon.ico
+  Cache-Control: public, max-age=0, must-revalidate

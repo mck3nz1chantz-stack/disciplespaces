@@ -24,6 +24,7 @@ Applied in `src/lib/db.ts` via `this.version(n).stores(...).upgrade(...)`.
 | 5 | `spaceKind` (`group` \| `family`) for member capacity; private notes may store `sectionKey` / `updatedAt` |
 | 6 | Shared `prayerBoard` table (individual/group scopes; included in Space Update export) |
 | 7 | `space.sync` metadata (default `local-only`) + `syncQueue` table for opportunistic shared-layer push; **privateNotes never queued** |
+| 8 | `sharedTombstones` table — deleted sessions/prayer rows propagate via room + vault (LWW vs entity `updatedAt`) |
 
 ### Account Key / Group Key (no Dexie bump)
 
@@ -37,6 +38,22 @@ from `DSX1.` Space Updates.
 
 Optional `session.title` string on session rows. Older sessions without `title`
 keep working — UI falls back to primary passage ref, then template name.
+
+### Session updatedAt + sync correctness (no Dexie bump)
+
+Optional `session.updatedAt` for shared-layer LWW merge (room + Account Key
+vault). Older rows without a stamp lose to any stamped row. Relay enforces
+`baseRev` (409) so concurrent pushes re-pull and retry. Snapshot includes
+`title` + `updatedAt`. Personal Spaces auto-upload under Account Key when
+Online.
+
+### v8 notes (tombstones + light realtime)
+
+- Deleting a shared session or prayer writes a tombstone; room merge drops the
+  entity on other devices (unless a newer edit resurrects it).
+- Private notes are never tombstoned on the room; session delete still removes
+  local private notes on *this* device only (existing behavior).
+- Open group: WebSocket `/rooms/:id/live` + poll fallback triggers soft sync.
 
 `CURRENT_SCHEMA_VERSION` should match the highest entry.
 

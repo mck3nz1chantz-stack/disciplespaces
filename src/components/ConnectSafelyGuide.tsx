@@ -32,34 +32,35 @@ export const CONNECT_SAFELY_STEPS: ConnectStep[] = [
     n: 1,
     title: "Host opens the group room",
     detail:
-      "Creating a group (or “Open group room”) gives you a room key (like ABCD-EF). You are the host. Only you open the room — friends never create one.",
+      "Creating a group (or “Open group room”) gives you a room key (like ABCD-EF). You are the host. Only you open the room, rename the group, and manage who’s here — friends never create a second room.",
     who: "host",
   },
   {
     n: 2,
     title: "Share the room key",
     detail:
-      "Copy or invite with that key. Guests need the room key from the host’s group card — not a second “Connect” on their phone.",
+      "Copy or Invite with that key. Guests need the room key from the host’s group card — not a second “Open group room” on their phone.",
     who: "host",
   },
   {
     n: 3,
     title: "Guests only Join",
     detail:
-      "Same website → Join a group → room key + name. One join links their phone to your room. Their other groups stay as they are.",
+      "Same website → Join a group → room key + name. One join links their phone to your room. Guests cannot edit the title or people list.",
     who: "guest",
   },
   {
     n: 4,
     title: "Sync when Online",
     detail:
-      "After you’re linked, tap Sync now. You can use Offline mode later for a meeting; go Online again to refresh. Private notes stay on-device; Account Key can encrypt personal backups.",
+      "After you’re linked, tap Sync (guests see a large Sync card on the group page). Host Syncs after changing people or meetings; guests Sync to pull those updates. Offline mode pauses refresh; Private notes stay on-device.",
     who: "both",
   },
 ];
 
 export const CONNECT_SAFELY_DONT = [
   "Guests: only Join with the host’s room key — never open a second room.",
+  "Guests: do not edit the people list or group title — ask the host, then Sync.",
   "One room per group. The server reuses the same room for the group id.",
   "Always use https://disciple-spaces.pages.dev (same site as the host).",
   "Joining one group does not delete or change your other Spaces.",
@@ -69,8 +70,8 @@ export const CONNECT_SAFELY_DONT = [
 export const DOUBLE_ROOM_FIX = [
   "Symptom: you both “have the group” but Sync fails or data doesn’t match.",
   "Cause: two cloud rooms were opened for one group (old Connect-on-both-phones path).",
-  "Now: one room key per group; host opens once; guests only Join; server reuses the room.",
-  "Stuck now: host Syncs or re-opens room, shares the room key; guest Joins that key again.",
+  "Now: one room key per group; host opens once; guests only Join + Sync; server reuses the room.",
+  "Stuck now: host taps New room key (keep members) or Syncs, shares the current key; guest Joins that key again, then Sync.",
 ] as const;
 
 function StepList({
@@ -93,7 +94,7 @@ function StepList({
         <li key={step.n} className="flex gap-3">
           <span
             className={[
-              "shrink-0 flex items-center justify-center rounded-full bg-primary text-white font-semibold tabular-nums",
+              "shrink-0 flex items-center justify-center rounded-full bg-primary text-on-primary font-semibold tabular-nums",
               compact ? "h-7 w-7 text-xs" : "h-8 w-8 text-sm",
             ].join(" ")}
             aria-hidden

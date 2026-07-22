@@ -4,6 +4,7 @@ import {
   CloudOff,
   Copy,
   KeyRound,
+  Link2,
   Loader2,
   RefreshCw,
   Wifi,
@@ -16,6 +17,7 @@ import {
   ConnectSafelyHelpButton,
   ConnectSafelyModal,
 } from "./ConnectSafelyGuide";
+import { RelinkRoomModal } from "./RelinkRoomModal";
 import { useAppStore } from "../stores/useAppStore";
 import { useOnlineMode } from "../hooks/useOnlineMode";
 import {
@@ -54,6 +56,7 @@ function lastSyncedLabel(iso?: string): string | null {
 export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const connectSpaceToRelay = useAppStore((s) => s.connectSpaceToRelay);
   const syncSpaceNow = useAppStore((s) => s.syncSpaceNow);
+  const reissueRoomKey = useAppStore((s) => s.reissueRoomKey);
   const setSpaceSyncPaused = useAppStore((s) => s.setSpaceSyncPaused);
   const buildSpaceExportPayload = useAppStore((s) => s.buildSpaceExportPayload);
 
@@ -62,6 +65,7 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
   const [justSynced, setJustSynced] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [openRoomConfirm, setOpenRoomConfirm] = useState(false);
+  const [relinkOpen, setRelinkOpen] = useState(false);
 
   const relayReady = isSpaceRelayConfigured();
   const sync = normalizeSpaceSync(space.sync);
@@ -109,16 +113,16 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       window.setTimeout(() => setJustSynced(false), 4000);
       toast.success("Group updated", {
         description:
-          "Shared meetings and people are up to date. Private notes stay on this phone.",
+          "Shared meetings and people are up to date. Private notes stay on this phone. Your personal Spaces also save under your Account Key when Online.",
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Sync failed";
       toast.error("Sync didn’t finish", {
-        duration: 12000,
-        description: `${msg} Your group is still on this phone — nothing was deleted. The big code above is your room key (invite), not a fault code.`,
+        duration: 14000,
+        description: `${msg} Your group is still on this phone — nothing was deleted. Use Fix link with the host’s current room key to re-connect without losing people or meetings.`,
         action: {
-          label: "Save group file",
-          onClick: () => void saveGroupFile(),
+          label: "Fix link",
+          onClick: () => setRelinkOpen(true),
         },
       });
     } finally {
@@ -182,7 +186,7 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
     toast.message(next === "online" ? "Online mode" : "Offline mode", {
       description:
         next === "online"
-          ? "Shared groups may refresh when the network is available."
+          ? "Connected groups and your Account Key vault may refresh when the network is available."
           : "Sync paused — your group stays on this phone until you go Online again.",
       duration: 3500,
     });
@@ -194,6 +198,61 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
       () => toast.success("Room key copied"),
       () => toast.error("Could not copy"),
     );
+  }
+
+  /**
+   * Host re-sync: new join code, same room + members + meetings.
+   * Friends already linked keep working; anyone with only the old code re-Joins.
+   */
+  async function handleReissueRoomKey() {
+    if (!mayOpenRoom) {
+      toast.message("Only the host can issue a new room key");
+      return;
+    }
+    if (mode === "offline") {
+      toast.message("Turn Online on first");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Issue a new room key for “${space.name}”?\n\n` +
+          "• Same group, members, and meetings stay on the server\n" +
+          "• The old join code stops working\n" +
+          "• Friends already linked can still Sync\n" +
+          "• Anyone not linked yet uses the new key in Join a group\n\n" +
+          "Continue?",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await reissueRoomKey(space.id, { rotateGroupKey: true });
+      setJustSynced(true);
+      window.setTimeout(() => setJustSynced(false), 4000);
+      try {
+        await navigator.clipboard.writeText(result.shortCode);
+      } catch {
+        // ignore
+      }
+      toast.success(`New room key · ${result.shortCode}`, {
+        description:
+          "Copied to clipboard. Share only with people who should stay in this group. Members on the list stay — they re-Join only if their phone lost the link.",
+        duration: 12000,
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not issue a new room key",
+        {
+          action: {
+            label: "Save group file",
+            onClick: () => void saveGroupFile(),
+          },
+        },
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   const statusLine = (() => {
@@ -267,7 +326,7 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
             className={[
               "rounded-full min-h-10 px-3 py-2 text-xs font-semibold touch-manipulation transition-colors",
               mode === "online"
-                ? "bg-primary text-white"
+                ? "bg-primary text-on-primary"
                 : "text-muted hover:text-primary",
             ].join(" ")}
             aria-pressed={mode === "online"}
@@ -319,17 +378,36 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
             Friends: Join a group → paste this key. After they join, you both
             tap Sync so past meetings transfer. They never open a second room.
           </p>
+          <Button
+            variant="secondary"
+            className="!py-2 w-full !text-xs"
+            disabled={busy}
+            onClick={() => void handleReissueRoomKey()}
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            New room key (keep members)
+          </Button>
         </div>
       )}
 
       {connected && roomKey && guest && (
-        <p className="text-xs text-muted text-center rounded-lg border border-border bg-bg/80 px-2 py-2">
-          Linked with room key{" "}
-          <span className="font-mono font-medium text-primary">{roomKey}</span>
-          . Tap Sync when Online to refresh. If Sync fails, use{" "}
-          <strong className="text-text">Join a group</strong> again with the
-          host’s <em>current</em> key (same site).
-        </p>
+        <div className="rounded-xl border-2 border-primary/30 bg-bg px-3 py-3 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted text-center">
+            Pull latest from host
+          </p>
+          <p className="text-xs text-muted text-center leading-relaxed">
+            Linked with room key{" "}
+            <span className="font-mono font-medium text-primary">{roomKey}</span>
+            . Tap <strong className="text-primary">Sync</strong> after the host
+            updates people or meetings. If Sync fails, use{" "}
+            <strong className="text-text">Fix link</strong> with their{" "}
+            <em>current</em> room key — your data stays on this phone.
+          </p>
+        </div>
       )}
 
       {sync.lastError && (
@@ -340,16 +418,27 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
           <p className="text-danger">{sync.lastError}</p>
           <p className="text-muted">
             <strong className="text-primary">Your Space is still here</strong> —
-            failed Sync never deletes meetings or notes. Save a group file so
-            you can’t lose it.
+            failed Sync never deletes meetings, people, or notes. Fix the link
+            with the host’s current room key.
           </p>
-          <Button
-            variant="secondary"
-            className="!py-2 w-full"
-            onClick={() => void saveGroupFile()}
-          >
-            Save group file now
-          </Button>
+          <div className="flex flex-col gap-1.5">
+            <Button
+              variant="primary"
+              className="!py-2.5 w-full"
+              disabled={!relayReady}
+              onClick={() => setRelinkOpen(true)}
+            >
+              <Link2 className="h-4 w-4" aria-hidden />
+              Fix link — keep my data
+            </Button>
+            <Button
+              variant="secondary"
+              className="!py-2 w-full"
+              onClick={() => void saveGroupFile()}
+            >
+              Save group file now
+            </Button>
+          </div>
         </div>
       )}
 
@@ -358,28 +447,39 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
           <Button
             fullWidth
             variant={justSynced ? "secondary" : "primary"}
-            className="!py-3.5"
+            className={
+              guest
+                ? "!py-4 text-base font-semibold shadow-md"
+                : "!py-3.5"
+            }
             disabled={busy}
             onClick={() => void handleSync()}
           >
             {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
             ) : justSynced ? (
-              <Cloud className="h-4 w-4" aria-hidden />
+              <Cloud className="h-5 w-5" aria-hidden />
             ) : (
-              <RefreshCw className="h-4 w-4" aria-hidden />
+              <RefreshCw className="h-5 w-5" aria-hidden />
             )}
-            {busy ? "Syncing…" : justSynced ? "Synced" : "Sync now"}
+            {busy
+              ? "Syncing…"
+              : justSynced
+                ? "Synced ✓"
+                : guest
+                  ? "Sync"
+                  : "Sync now"}
           </Button>
         ) : guest ? (
           <Button
             fullWidth
-            variant="secondary"
+            variant="primary"
             className="!py-3.5"
-            onClick={() => setGuideOpen(true)}
+            disabled={!relayReady}
+            onClick={() => setRelinkOpen(true)}
           >
-            <KeyRound className="h-4 w-4" aria-hidden />
-            Need the host’s room key
+            <Link2 className="h-4 w-4" aria-hidden />
+            {relayReady ? "Re-join with room key" : "Relay not on this build"}
           </Button>
         ) : (
           <Button
@@ -399,12 +499,23 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         )}
       </div>
 
+      {/* Always offer repair for guests, and for hosts after errors */}
+      {relayReady && (guest || sync.lastError || connected) && (
+        <Button
+          variant="ghost"
+          className="!py-2 w-full !text-xs"
+          onClick={() => setRelinkOpen(true)}
+        >
+          <Link2 className="h-3.5 w-3.5" aria-hidden />
+          Fix link with host’s current room key
+        </Button>
+      )}
+
       {guest && !connected && (
         <p className="text-[11px] text-muted leading-relaxed text-center">
-          You don’t create rooms. Use{" "}
-          <strong className="text-text">Join a group</strong> with the host’s
-          room key once — then Sync keeps you linked. Other Spaces on this phone
-          stay put.
+          You don’t create rooms. Paste the host’s room key in{" "}
+          <strong className="text-text">Re-join</strong> (or Home → Join a
+          group). Your people and meetings on this phone stay put.
         </p>
       )}
 
@@ -444,6 +555,12 @@ export function SpaceConnectionBar({ space }: SpaceConnectionBarProps) {
         primaryLabel={busy ? "Opening…" : "Open room & get key"}
         onPrimary={() => void confirmOpenRoom()}
         primaryBusy={busy}
+      />
+
+      <RelinkRoomModal
+        open={relinkOpen}
+        space={space}
+        onClose={() => setRelinkOpen(false)}
       />
     </section>
   );

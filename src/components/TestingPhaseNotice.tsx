@@ -29,6 +29,7 @@ export const TESTING_GUIDE_EXPANDED_KEY = "ds-testing-guide-expanded-v2";
 export function TestingPhaseRibbon() {
   return (
     <div
+      data-testing-ribbon
       className="border-b border-amber-300/80 bg-amber-100 text-amber-950 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-50"
       role="status"
     >

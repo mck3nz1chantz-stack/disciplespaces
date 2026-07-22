@@ -127,11 +127,11 @@
     "deployCommand": "npm run deploy",
     "status": "deployed",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://88b8178b.disciple-spaces.pages.dev",
-    "deployedAt": "2026-07-16T01:01:16Z",
-    "releaseNotes": "Who are you join picker + rooms/preview"
+    "latestDeploymentUrl": "https://38864a1a.disciple-spaces.pages.dev",
+    "deployedAt": "2026-07-21T18:00:00Z",
+    "releaseNotes": "Fix link modal scrollable + modal body overflow fix"
   },
-  "grokBuildStatus": "preview-deployed-who-are-you",
+  "grokBuildStatus": "deployed-fix-link-scroll",
   "grokDocsStatus": "pending",
   "grokLawStatus": "pending-prebuild",
   "nextPhase": "Deploy space-relay Worker + set VITE_SPACE_RELAY_URL; opportunistic auto-sync; custom domain when product-ready; GrokDocs / GrokLaw",

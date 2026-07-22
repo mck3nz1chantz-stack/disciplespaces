@@ -31,7 +31,20 @@ function registerServiceWorker() {
       .register("/sw.js", { scope: "/" })
       .then((registration) => {
         useAppStore.getState().setOfflineReady(true);
-        // Check for updates periodically
+        // New SW (e.g. favicon cache bump) takes over ASAP
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          if (!worker) return;
+          worker.addEventListener("statechange", () => {
+            if (
+              worker.state === "installed" &&
+              navigator.serviceWorker.controller
+            ) {
+              // Activate immediately so icon/shell updates apply
+              worker.postMessage?.({ type: "SKIP_WAITING" });
+            }
+          });
+        });
         registration.update().catch(() => {});
       })
       .catch(() => {

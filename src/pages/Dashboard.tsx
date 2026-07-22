@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
-import { ChevronDown, Plus, UserPlus, Users } from "lucide-react";
+import { BookOpen, ChevronDown, Plus, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
@@ -28,6 +28,10 @@ import {
   getSpaceTemplateMeta,
   type SpaceTemplateId,
 } from "../lib/spaceTemplates";
+import {
+  formatReadingPositionLabel,
+  loadReadingPosition,
+} from "../lib/bible";
 import type { Member, Space, SpaceKind } from "../types";
 import {
   maxMembersForSpace,
@@ -94,6 +98,12 @@ export function Dashboard() {
 
   const showChecklist =
     showQuickStart && !isLoading && (spaces.length === 0 || !hasAnySessions);
+
+  const continueReading = useMemo(() => {
+    const pos = loadReadingPosition();
+    if (!pos) return null;
+    return formatReadingPositionLabel(pos);
+  }, [spaces.length]);
 
   function resetForm() {
     setName("");
@@ -190,6 +200,30 @@ export function Dashboard() {
           Join a group
         </Button>
       </div>
+
+      {continueReading && (
+        <Link to="/bible" className="block touch-manipulation">
+          <Card
+            padding="sm"
+            className="flex items-center gap-3 hover:border-primary/30 transition-colors bg-surface/80"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <BookOpen className="h-5 w-5" aria-hidden />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+                Continue reading
+              </p>
+              <p className="text-sm font-serif font-medium text-primary truncate">
+                {continueReading}
+              </p>
+            </div>
+            <span className="text-xs font-medium text-primary shrink-0">
+              Open
+            </span>
+          </Card>
+        </Link>
+      )}
 
       {showChecklist && (
         <QuickStartChecklist

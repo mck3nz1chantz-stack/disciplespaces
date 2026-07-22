@@ -280,10 +280,13 @@ export function JoinSpaceModal({
     resetIdentity([]);
   }
 
-  /** FAITH-7K2 style short codes (relay) — not a full offline package. */
-  function looksLikeShortCode(text: string): boolean {
-    const t = text.trim().toUpperCase().replace(/\s+/g, "");
-    return /^[A-Z0-9]{3,8}-?[A-Z0-9]{2,6}$/.test(t) && !/DS[MX]?1\./i.test(text);
+  /** Room key (ABCD-EF) or Group Key (DS-GRP-…) — not offline packages. */
+  function looksLikeOnlineJoinKey(text: string): boolean {
+    const t = text.trim();
+    if (!t || /DS[MX]?1\./i.test(t)) return false;
+    if (/DS-GRP-|DSGRP|DS-ACC-|DSACC/i.test(t)) return true;
+    const compact = t.toUpperCase().replace(/\s+/g, "");
+    return /^[A-Z0-9]{3,8}-?[A-Z0-9]{2,6}$/.test(compact);
   }
 
   useEffect(() => {
@@ -405,12 +408,14 @@ export function JoinSpaceModal({
   async function handleContinue(e: FormEvent) {
     e.preventDefault();
     const text = raw.trim();
-    if (looksLikeShortCode(text) && !/DS1\.|DSX1\.|DSM1\./i.test(text)) {
+    if (looksLikeOnlineJoinKey(text)) {
       setShortCodeJoin(true);
       setParsed(null);
       setPreviewLoading(true);
       try {
-        const preview = await previewRoom({ shortCode: text });
+        const { resolveJoinCredentials } = await import("../lib/sync/inviteKey");
+        const creds = await resolveJoinCredentials(text);
+        const preview = await previewRoom(creds);
         setPreviewGroupName(preview.name);
         setPreviewSessionCount(
           typeof preview.sessionCount === "number" ? preview.sessionCount : null,
@@ -418,8 +423,17 @@ export function JoinSpaceModal({
         resetIdentity(uniquePeople(preview.members));
         setStep("confirm");
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not find group");
-        // Still allow free-name join if preview fails (older relay)
+        const msg = err instanceof Error ? err.message : "Could not find group";
+        toast.error(msg, { duration: 12000 });
+        // Wrong key type (Account Key / garbage) — stay on paste step
+        if (
+          /Account Key|personal backup|Couldn.?t recognize|Invalid Group Key/i.test(
+            msg,
+          )
+        ) {
+          return;
+        }
+        // Unknown/expired code: still let them try Join (host may open room next)
         setPreviewGroupName(null);
         setPreviewSessionCount(null);
         resetIdentity([]);

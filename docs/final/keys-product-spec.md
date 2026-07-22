@@ -7,8 +7,8 @@
 
 | Decision | Choice |
 |----------|--------|
-| Who may propose Group Key regenerate | **Any member** |
-| Sign-off threshold | **All members** (unanimous) |
+| Who may regenerate Group Key | **Host only** (immediate; no votes) |
+| Sign-off threshold | **None** — host regenerates when needed |
 | Private notes encryption | **Same Account Key** |
 | After Group Key rotate | **Auto-issue new short join code** |
 | Email/password accounts | **Never** |
@@ -17,9 +17,9 @@
 
 ## Modes (online-first Spaces)
 
-1. **Group room key (primary)** — host creates/opens a group online → short room key (join code). One room per Space id. Guests **only Join**.
-2. **Host** — Space creator; opens the room; can regenerate after group vote (Group Key + new join code).
-3. **Account Key (promoted)** — same person, phone + desktop, no email/password; encrypts personal backups. Not required for guests to Join.
+1. **Account Key (personal home)** — *your* Spaces live encrypted under this key (auto vault upload when Online). Link key on another device to restore. Not a login; not required for guests to Join a room.
+2. **Group room key** — host creates/opens a group online → short room key (join code). One room per Space id. Guests **only Join**. Room is collaboration only, not personal recovery.
+3. **Host** — Space creator; opens the room; can regenerate Group Key + new join code.
 4. **Offline + hard backup** — Offline mode pauses sync after you’re linked; DSX1/DSP1 remain the safety net.
 
 ## Account Key
@@ -35,10 +35,9 @@
 - Format: `DS-GRP-` + secret.
 - Lives under **Space → Sharing & keys** (not global Settings).
 - Short **join code** stays for inviting; Group Key for trusted re-link / after membership change.
-- **Propose regenerate:** any member.
-- **Approve:** every current space member must approve (in-app on their device, or “confirmed in person” on a device with disclaimer).
-- On complete: new Group Key material to connected devices, **new short join code**, old join code invalid, old Group Key invalid.
-- Nudge after member remove: suggest regenerate.
+- **Regenerate:** host only, immediate (no multi-member vote). Guests re-Join with the new room key if they lost the link.
+- On complete: new Group Key on host device, **new short join code** when room is connected; old join code invalid, old Group Key invalid.
+- Member add/remove: host only. Nudge after member remove: suggest regenerate.
 
 ## Data boundaries
 
@@ -60,9 +59,8 @@
 ## MVP notes (v1)
 
 - **Account Key** fully works offline: create, view, regenerate, personal backup with optional encrypted notes, link on another device, restore DSP1.
-- **Group Key** create / view / regenerate works on-device. Unanimous “all members” approvals are recorded on the Space (including in-person “approve on behalf” with confirm). Multi-device live sign-off over the relay (syncing only hashes/approvals, not raw keys) can land later; face-to-face groups can complete on one phone.
+- **Group Key** create / view / regenerate works on-device for the host only; regenerate completes immediately and rotates the room key when connected.
 - Raw Group Key never sent to the relay; only optional hash after rotate. New join code via `POST /rooms/:id/rotate-code`.
-- Pending rotation secret stays on the **proposing device** until finalize.
 
 ## UI copy principles
 

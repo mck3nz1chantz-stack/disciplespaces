@@ -17,7 +17,7 @@ const interactive =
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-primary text-white shadow-sm hover:bg-primary-soft active:bg-primary-soft",
+    "bg-primary text-on-primary shadow-sm hover:bg-primary-soft active:bg-primary-soft",
   secondary:
     "bg-surface-muted text-primary border border-border hover:bg-border/50 hover:border-primary/25",
   ghost:

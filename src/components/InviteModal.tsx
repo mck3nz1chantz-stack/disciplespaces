@@ -27,7 +27,7 @@ import {
   INVITE_PRIVACY_NOTE,
   INVITE_SIMPLE_HINT,
 } from "../lib/legal";
-import { normalizeSpaceSync } from "../lib/sync";
+import { isSpaceGuest, normalizeSpaceSync } from "../lib/sync";
 import { ConnectSafelyDisclosure } from "./ConnectSafelyGuide";
 
 interface InviteModalProps {
@@ -79,6 +79,14 @@ export function InviteModal({ open, spaceId, onClose }: InviteModalProps) {
       setAdvancedOpen(false);
       return;
     }
+    // Guests cannot invite or grow the roster — host only
+    if (space && isSpaceGuest(space.sync)) {
+      toast.message("Only the host can invite people", {
+        description: "Ask them to share the room key. You can Sync to update.",
+      });
+      onClose();
+      return;
+    }
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -117,7 +125,7 @@ export function InviteModal({ open, spaceId, onClose }: InviteModalProps) {
     return () => {
       cancelled = true;
     };
-  }, [open, spaceId, createInvitePayload, getSpace, onClose]);
+  }, [open, spaceId, space, createInvitePayload, getSpace, onClose]);
 
   useEffect(() => {
     if (!open || !spaceId || !includeHistory) {

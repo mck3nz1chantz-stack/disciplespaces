@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { BookOpen, CircleHelp, Home, Settings } from "lucide-react";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { OfflineBanner } from "./OfflineBanner";
@@ -28,6 +34,8 @@ const tabs = [
 
 export function Layout() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isBibleRoute = location.pathname.startsWith("/bible");
   const hasAcknowledgedLegal = useAppStore((s) => s.hasAcknowledgedLegal);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -71,16 +79,21 @@ export function Layout() {
 
   return (
     <div className="relative z-[1] min-h-dvh flex flex-col bg-transparent text-text">
-      <header className="safe-top sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur-md">
+      <header className="safe-top sticky top-0 z-20 border-b border-border/80 bg-surface/75 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/60">
         <div className="mx-auto max-w-lg safe-x py-2.5 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted flex items-center gap-1.5 flex-wrap">
-              ChantzMedia
-              <span className="inline-flex items-center rounded-full bg-amber-200 text-amber-950 dark:bg-amber-800 dark:text-amber-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide normal-case">
+            <h1 className="text-lg leading-tight tracking-tight font-serif text-primary">
+              DiscipleSpaces
+            </h1>
+            <p className="text-[11px] font-medium text-muted flex items-center gap-1.5 flex-wrap mt-0.5">
+              <span className="tracking-[0.06em] uppercase">ChantzMedia</span>
+              <span className="text-border" aria-hidden>
+                ·
+              </span>
+              <span className="inline-flex items-center rounded-full bg-amber-200/90 text-amber-950 dark:bg-amber-800/90 dark:text-amber-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide">
                 {TESTING_PHASE_BADGE}
               </span>
             </p>
-            <h1 className="text-lg leading-tight">DiscipleSpaces</h1>
           </div>
           {/* Header is weak thumb zone — keep controls compact, ≥44px hits */}
           <div className="flex items-center gap-0.5 shrink-0 -mr-1">
@@ -102,12 +115,18 @@ export function Layout() {
       <TestingPhaseRibbon />
       <OfflineBanner />
 
-      <main className="relative z-[1] flex-1 mx-auto w-full max-w-lg safe-x py-4 pb-nav">
+      <main
+        className={[
+          "relative z-[1] flex-1 mx-auto w-full safe-x py-4 pb-nav",
+          /* Bible gets a slightly wider measure for immersive reading */
+          isBibleRoute ? "max-w-xl" : "max-w-lg",
+        ].join(" ")}
+      >
         <Outlet />
       </main>
 
       <nav
-        className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/92 backdrop-blur-md safe-bottom safe-x"
+        className="fixed bottom-0 inset-x-0 z-20 border-t border-border/80 bg-surface/80 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/65 safe-bottom safe-x"
         aria-label="Main"
       >
         <ul className="mx-auto max-w-lg grid grid-cols-3">
@@ -118,11 +137,11 @@ export function Layout() {
                 end={end}
                 className={({ isActive }) =>
                   [
-                    "flex flex-col items-center justify-center gap-0.5 py-3 px-2",
+                    "flex flex-col items-center justify-center gap-0.5 py-3 px-2 mx-1 my-1",
                     "text-xs font-medium touch-manipulation tap-target cursor-pointer",
-                    "transition-colors duration-150 rounded-lg",
+                    "transition-colors duration-150 rounded-xl",
                     isActive
-                      ? "text-primary"
+                      ? "text-primary bg-primary/10"
                       : "text-muted hover:text-primary hover:bg-surface-muted/80",
                   ].join(" ")
                 }

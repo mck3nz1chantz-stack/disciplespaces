@@ -74,11 +74,24 @@ Pass `forceNew: true` only when the host explicitly starts a brand-new room
 
 Join and rotate-code also refresh the spaceId binding.
 
+## Sync correctness (push)
+
+- Client sends `baseRev` (last pulled room rev). If the room advanced, the DO
+  returns **409** with current `rev` + `snapshot` so the app can merge LWW and
+  retry. Legacy clients that omit `baseRev` still write (no check).
+- `mergeShared: true` unions sessions/prayers by id with **updatedAt LWW**
+  (missing stamps lose). Members still union by name.
+- **Tombstones** (`snapshot.tombstones.sessions` / `.prayerBoard`) drop deleted
+  entities; a later edit with newer `updatedAt` can resurrect.
+- **Live channel:** `GET /rooms/:roomId/live` WebSocket → `{ type: "room-updated", rev }`.
+  On successful push, DO broadcasts to connected sockets.
+
 ## Common “can’t sync” causes
 
 1. Guest typed offline **reference** invite code instead of Connect **join** code → invalid code.
 2. **Legacy:** host and guest each pressed **Connect** → two rooms. Current relay reuses by spaceId; guests still must **Join**, not Connect.
-3. Older app builds skipped updating existing sessions on pull (add-only import). Relay pull now uses replace-shared merge.
+3. Older app builds skipped updating existing sessions on pull (add-only import). Relay pull now uses replace-shared merge with LWW.
+4. Personal Spaces recovery is **Account Key vault**, not the room. Room only shares group-facing data.
 
 ## CORS
 

@@ -1,10 +1,12 @@
 /**
  * Settings: Account Key create / view / regenerate + private notes opt-in.
+ * Linking a key now also tries to restore Spaces from the encrypted cloud vault.
  * Never wipes IndexedDB data.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  CloudUpload,
   KeyRound,
   Link2,
   Loader2,
@@ -27,17 +29,82 @@ import {
   setAccountKeyPrefs,
   type AccountKeyMeta,
 } from "../lib/keys";
-import { useAppStore } from "../stores/useAppStore";
+import {
+  downloadAccountVault,
+  peekAccountVault,
+  uploadAccountVault,
+  type VaultMeta,
+} from "../lib/keys/accountVault";
+import { setVaultSyncedAt } from "../lib/keys/vaultAuto";
 import {
   buildPersonalBackup,
+  decryptPersonalNotes,
   downloadPersonalBackup,
 } from "../lib/keys/personalBackup";
+import { useAppStore } from "../stores/useAppStore";
 import { db } from "../lib/db";
+import { isSpaceRelayConfigured } from "../lib/sync";
+
+async function gatherBackupInput() {
+  const spaces = useAppStore.getState().spaces;
+  const sessions = await db.sessions.toArray();
+  const prayers = await db.prayerBoard.toArray();
+  const notes = await db.privateNotes.toArray();
+  const sessionsBySpace = new Map<string, typeof sessions>();
+  const prayerBySpace = new Map<string, typeof prayers>();
+  for (const s of sessions) {
+    const list = sessionsBySpace.get(s.spaceId) ?? [];
+    list.push(s);
+    sessionsBySpace.set(s.spaceId, list);
+  }
+  for (const p of prayers) {
+    const list = prayerBySpace.get(p.spaceId) ?? [];
+    list.push(p);
+    prayerBySpace.set(p.spaceId, list);
+  }
+  return { spaces, sessionsBySpace, prayerBySpace, privateNotes: notes };
+}
+
+async function restorePersonalPayload(
+  personal: Awaited<ReturnType<typeof downloadAccountVault>>,
+): Promise<{ spaces: number; sessions: number; notes: number }> {
+  if (!personal) return { spaces: 0, sessions: 0, notes: 0 };
+  const importSpaceExport = useAppStore.getState().importSpaceExport;
+  let sessionTotal = 0;
+  for (const pack of personal.spaces) {
+    // LWW replace-shared so Account Key vault is true personal home
+    const result = await importSpaceExport(pack, {
+      mergeStrategy: "replace-shared",
+    });
+    sessionTotal += result.addedSessions;
+  }
+  let notesRestored = 0;
+  if (personal.privateNotesIncluded && personal.privateNotesEnc) {
+    const key = getStoredAccountKey();
+    if (key) {
+      const notes = await decryptPersonalNotes(personal, key);
+      for (const n of notes) {
+        const exists = await db.privateNotes.get(n.id);
+        if (!exists) {
+          await db.privateNotes.put(n);
+          notesRestored += 1;
+        }
+      }
+    }
+  }
+  await useAppStore.getState().loadSpaces();
+  return {
+    spaces: personal.spaces.length,
+    sessions: sessionTotal,
+    notes: notesRestored,
+  };
+}
 
 export function AccountKeyCard() {
   const spaces = useAppStore((s) => s.spaces);
   const [meta, setMeta] = useState<AccountKeyMeta | null>(null);
   const [prefs, setPrefs] = useState(getAccountKeyPrefs());
+  const [vaultMeta, setVaultMeta] = useState<VaultMeta | null>(null);
   const [reveal, setReveal] = useState<{
     secret: string;
     title: string;
@@ -56,6 +123,20 @@ export function AccountKeyCard() {
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!hasAccountKey() || !isSpaceRelayConfigured()) {
+      setVaultMeta(null);
+      return;
+    }
+    let cancelled = false;
+    void peekAccountVault().then((m) => {
+      if (!cancelled) setVaultMeta(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meta?.keyId, spaces.length]);
+
   async function handleCreate() {
     setBusy(true);
     try {
@@ -65,8 +146,19 @@ export function AccountKeyCard() {
         secret,
         title: "Your Account Key",
         description:
-          "This links your data across phone and desktop without email or password. Save it now — we cannot reset it for you.",
+          "This is the home for your Spaces. Save it now — we cannot reset it for you. When Online, DiscipleSpaces encrypts and stores your groups under this key so another phone can restore them. Group room keys are only for inviting people — not your personal backup.",
       });
+      // Seed empty vault so link on another device knows the key is real
+      if (isSpaceRelayConfigured()) {
+        try {
+          const input = await gatherBackupInput();
+          const vm = await uploadAccountVault(input);
+          setVaultSyncedAt(vm.updatedAt);
+          setVaultMeta(vm);
+        } catch {
+          // optional on create
+        }
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create key");
     } finally {
@@ -77,7 +169,7 @@ export function AccountKeyCard() {
   async function handleRegenerate() {
     if (
       !window.confirm(
-        "Regenerate Account Key?\n\nThe old key will stop working on every device. Spaces and private notes on this phone stay put — but other devices must enter the new key or restore a new personal backup.\n\nContinue?",
+        "Regenerate Account Key?\n\nThe old key will stop working on every device. Spaces and private notes on this phone stay put — but other devices must enter the new key, and you should Upload my Spaces again.\n\nContinue?",
       )
     ) {
       return;
@@ -90,9 +182,19 @@ export function AccountKeyCard() {
         secret,
         title: "New Account Key",
         description:
-          "Your previous Account Key no longer works. Save this new key securely. Local Spaces and notes on this device were not deleted.",
+          "Your previous Account Key no longer works. Save this new key securely. Local Spaces and notes on this device were not deleted. Upload my Spaces so the new key can restore them elsewhere.",
       });
       toast.success("Account Key regenerated");
+      if (isSpaceRelayConfigured()) {
+        try {
+          const input = await gatherBackupInput();
+          const vm = await uploadAccountVault(input);
+          setVaultSyncedAt(vm.updatedAt);
+          setVaultMeta(vm);
+        } catch {
+          // optional
+        }
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not regenerate");
     } finally {
@@ -121,10 +223,137 @@ export function AccountKeyCard() {
       const m = await linkAccountKey(linkInput);
       setMeta(m);
       setLinkOpen(false);
+      const keyText = linkInput;
       setLinkInput("");
-      toast.success("Account Key linked on this device");
+
+      // Pull encrypted Spaces from cloud vault (if this key ever uploaded)
+      let restored: { spaces: number; sessions: number; notes: number } | null =
+        null;
+      if (isSpaceRelayConfigured()) {
+        try {
+          const personal = await downloadAccountVault(keyText);
+          if (personal && personal.spaces.length > 0) {
+            restored = await restorePersonalPayload(personal);
+          }
+          setVaultMeta(await peekAccountVault());
+        } catch (err) {
+          toast.message("Account Key linked", {
+            description:
+              err instanceof Error
+                ? err.message
+                : "Could not reach cloud backup — try Upload on your other device, or restore a DSP1. file.",
+            duration: 9000,
+          });
+          setBusy(false);
+          return;
+        }
+      }
+
+      if (restored && restored.spaces > 0) {
+        toast.success(
+          `Account linked · restored ${restored.spaces} space${restored.spaces === 1 ? "" : "s"}`,
+          {
+            description: [
+              restored.sessions > 0
+                ? `${restored.sessions} new session${restored.sessions === 1 ? "" : "s"}`
+                : "spaces already matched local data",
+              restored.notes > 0
+                ? `${restored.notes} private note${restored.notes === 1 ? "" : "s"}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            duration: 10000,
+          },
+        );
+      } else {
+        toast.success("Account Key linked on this device", {
+          description: isSpaceRelayConfigured()
+            ? "No Spaces under this key yet. On your other device open Settings → Account Key → Save Spaces to my key (or wait for auto-save Online), then link again — or restore a personal backup file (DSP1.)."
+            : "Use a personal backup file (DSP1.) to move Spaces between devices on this build.",
+          duration: 10000,
+        });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not link key");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUploadVault() {
+    if (!hasAccountKey()) {
+      toast.error("Create or link an Account Key first");
+      return;
+    }
+    if (!isSpaceRelayConfigured()) {
+      toast.message("Cloud backup not on this build", {
+        description: "Use Download personal backup (file) instead.",
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const input = await gatherBackupInput();
+      if (input.spaces.length === 0) {
+        toast.message("No Spaces to upload yet", {
+          description: "Create a group first, then upload.",
+        });
+        return;
+      }
+      const vm = await uploadAccountVault(input);
+      setVaultSyncedAt(vm.updatedAt);
+      setVaultMeta(vm);
+      toast.success(
+        `Saved ${vm.spaceCount} space${vm.spaceCount === 1 ? "" : "s"} under your Account Key`,
+        {
+          description:
+            "On another device: Settings → Account Key → I already have a key → paste the same key to restore. Auto-save also runs when Online.",
+          duration: 9000,
+        },
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestoreVault() {
+    if (!hasAccountKey()) {
+      toast.error("Link your Account Key first");
+      return;
+    }
+    if (!isSpaceRelayConfigured()) {
+      toast.message("Cloud restore not on this build");
+      return;
+    }
+    setBusy(true);
+    try {
+      const personal = await downloadAccountVault();
+      if (!personal || personal.spaces.length === 0) {
+        toast.message("No cloud backup for this key yet", {
+          description:
+            "On your other device: Account Key → Save Spaces to my key. Or restore a DSP1. file under Your Spaces & data.",
+          duration: 8000,
+        });
+        return;
+      }
+      const restored = await restorePersonalPayload(personal);
+      const vm = await peekAccountVault();
+      if (vm?.updatedAt) setVaultSyncedAt(vm.updatedAt);
+      setVaultMeta(vm);
+      toast.success(
+        `Restored ${restored.spaces} space${restored.spaces === 1 ? "" : "s"} from your Account Key`,
+        {
+          description:
+            restored.sessions > 0
+              ? `${restored.sessions} session${restored.sessions === 1 ? "" : "s"} merged`
+              : "Spaces updated from your key’s cloud vault",
+        },
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Restore failed");
     } finally {
       setBusy(false);
     }
@@ -149,27 +378,8 @@ export function AccountKeyCard() {
   async function handlePersonalBackup() {
     setBusy(true);
     try {
-      const sessions = await db.sessions.toArray();
-      const prayers = await db.prayerBoard.toArray();
-      const notes = await db.privateNotes.toArray();
-      const sessionsBySpace = new Map<string, typeof sessions>();
-      const prayerBySpace = new Map<string, typeof prayers>();
-      for (const s of sessions) {
-        const list = sessionsBySpace.get(s.spaceId) ?? [];
-        list.push(s);
-        sessionsBySpace.set(s.spaceId, list);
-      }
-      for (const p of prayers) {
-        const list = prayerBySpace.get(p.spaceId) ?? [];
-        list.push(p);
-        prayerBySpace.set(p.spaceId, list);
-      }
-      const payload = await buildPersonalBackup({
-        spaces,
-        sessionsBySpace,
-        prayerBySpace,
-        privateNotes: notes,
-      });
+      const input = await gatherBackupInput();
+      const payload = await buildPersonalBackup(input);
       downloadPersonalBackup(payload);
       toast.success(
         payload.privateNotesIncluded
@@ -184,6 +394,7 @@ export function AccountKeyCard() {
   }
 
   const linked = meta != null && hasAccountKey();
+  const cloudOk = isSpaceRelayConfigured();
 
   return (
     <>
@@ -197,8 +408,12 @@ export function AccountKeyCard() {
               Account Key
             </h3>
             <p className="text-sm text-muted mt-0.5 leading-relaxed">
-              Optional. Link phone and desktop without email or password. You can
-              always use DiscipleSpaces without a key.
+              <strong className="text-primary font-medium">
+                Your Spaces live under this key
+              </strong>{" "}
+              (encrypted cloud backup when Online). Link phone and desktop
+              without email or password. A group room key only shares meetings
+              with people you invite — it is not your personal backup.
             </p>
           </div>
         </div>
@@ -213,11 +428,22 @@ export function AccountKeyCard() {
             <dd className="text-right text-xs">
               {meta.createdAt.slice(0, 10)}
             </dd>
+            {cloudOk && (
+              <>
+                <dt className="text-muted">Cloud Spaces</dt>
+                <dd className="text-right text-xs">
+                  {vaultMeta
+                    ? `${vaultMeta.spaceCount} · ${vaultMeta.updatedAt.slice(0, 10)}`
+                    : "Not uploaded yet"}
+                </dd>
+              </>
+            )}
           </dl>
         ) : (
           <p className="text-sm text-muted rounded-lg border border-border bg-bg/60 px-3 py-2">
-            No Account Key yet. Create one to encrypt personal backups (optional
-            private notes) and restore on another device.
+            No Account Key yet. Create one so your Spaces have a personal home.
+            The app will upload an encrypted copy when Online; another device
+            restores by pasting the same key.
           </p>
         )}
 
@@ -263,6 +489,30 @@ export function AccountKeyCard() {
                   Regenerate
                 </Button>
               </div>
+              {cloudOk && (
+                <>
+                  <Button
+                    fullWidth
+                    disabled={busy || spaces.length === 0}
+                    onClick={() => void handleUploadVault()}
+                  >
+                    {busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : (
+                      <CloudUpload className="h-4 w-4" aria-hidden />
+                    )}
+                    Save Spaces to my key
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    fullWidth
+                    disabled={busy}
+                    onClick={() => void handleRestoreVault()}
+                  >
+                    Restore Spaces from my key
+                  </Button>
+                </>
+              )}
               <Button
                 variant="secondary"
                 fullWidth
@@ -270,7 +520,7 @@ export function AccountKeyCard() {
                 onClick={() => void handlePersonalBackup()}
               >
                 <Shield className="h-4 w-4" aria-hidden />
-                Download personal backup
+                Download personal backup (file)
               </Button>
             </>
           )}
@@ -317,7 +567,8 @@ export function AccountKeyCard() {
         <div className="space-y-3 p-1">
           <p className="text-sm text-muted">
             Paste the Account Key from your other device. This does not delete
-            Spaces already on this phone.
+            Spaces already on this phone. If that device uploaded Spaces, they
+            restore automatically when Online.
           </p>
           <textarea
             className="w-full min-h-[88px] rounded-xl border border-border bg-bg px-3 py-2 text-sm font-mono"
@@ -332,7 +583,12 @@ export function AccountKeyCard() {
             disabled={busy || !linkInput.trim()}
             onClick={() => void handleLink()}
           >
-            Link this device
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Link2 className="h-4 w-4" aria-hidden />
+            )}
+            Link & restore Spaces
           </Button>
         </div>
       </Modal>

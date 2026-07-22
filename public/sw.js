@@ -3,10 +3,24 @@
  * Vanilla SW (no workbox generateSW) so production builds work on Node 25/26.
  */
 /* eslint-disable no-restricted-globals */
-const SHELL_CACHE = "ds-shell-v1";
+/** Bump when shell assets (favicon, icons, index) must force-refresh for all clients. */
+const SHELL_CACHE = "ds-shell-v3";
 const BIBLE_CACHE = "bible-data-pd-v1";
 
-const SHELL_URLS = ["/", "/index.html", "/manifest.webmanifest", "/favicon.svg"];
+const SHELL_URLS = [
+  "/",
+  "/index.html",
+  "/manifest.webmanifest",
+  "/favicon.svg?v=3",
+  "/icons/icon-192.png?v=3",
+  "/icons/icon-512.png?v=3",
+];
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -46,6 +60,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Favicon + app icons — network first so icon updates actually show
+  if (
+    /\/favicon\.(svg|ico|png)$/i.test(url.pathname) ||
+    /\/icons\/icon-\d+\.png$/i.test(url.pathname)
+  ) {
+    event.respondWith(networkFirst(req, SHELL_CACHE));
+    return;
+  }
+
   // Navigations — network first, fall back to cached shell
   if (req.mode === "navigate") {
     event.respondWith(
@@ -80,6 +103,21 @@ async function cacheFirst(req, cacheName) {
     void cache.put(req, res.clone());
   }
   return res;
+}
+
+async function networkFirst(req, cacheName) {
+  const cache = await caches.open(cacheName);
+  try {
+    const res = await fetch(req, { cache: "no-store" });
+    if (res.ok) void cache.put(req, res.clone());
+    return res;
+  } catch {
+    const cached = await cache.match(req);
+    if (cached) return cached;
+    // Try bare path without query
+    const bare = req.url.split("?")[0];
+    return (await cache.match(bare)) || Response.error();
+  }
 }
 
 async function staleWhileRevalidate(req, cacheName) {

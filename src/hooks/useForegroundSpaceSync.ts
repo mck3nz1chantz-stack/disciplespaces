@@ -3,25 +3,30 @@ import { toast } from "sonner";
 import { useAppStore } from "../stores/useAppStore";
 import { isOnlineModeEnabled } from "../lib/onlineMode";
 import { isSpaceRelayConfigured, normalizeSpaceSync } from "../lib/sync";
+import {
+  checkAccountVaultOnForeground,
+  maybeBootVaultCheck,
+} from "../lib/keys/vaultAuto";
 
 /** Minimum gap between full auto-sync passes (ms). */
 const MIN_INTERVAL_MS = 45_000;
 /** Don’t spam “Groups updated” toasts more often than this. */
 const SUCCESS_TOAST_MIN_MS = 90_000;
+const VAULT_TOAST_MIN_MS = 120_000;
 
 /**
  * Soft auto-sync: when the app is foregrounded / online mode / network up,
- * pull+push each connected Space that is not paused. Never touches private notes.
- * Shows a brief success toast (throttled) so people know it happened.
+ * 1) Account Key vault check (personal Spaces home under the key)
+ * 2) pull+push each connected Space that is not paused
+ * Never puts private notes on the room relay.
  */
 export function useForegroundSpaceSync(): void {
   const lastRun = useRef(0);
   const lastSuccessToast = useRef(0);
+  const lastVaultToast = useRef(0);
   const running = useRef(false);
 
   useEffect(() => {
-    if (!isSpaceRelayConfigured()) return;
-
     async function syncConnected(reason: string) {
       if (!isOnlineModeEnabled()) return;
       // Do not gate on navigator.onLine — false offline is common on phones.
@@ -42,23 +47,45 @@ export function useForegroundSpaceSync(): void {
         }
       }
 
-      const list = useAppStore.getState().spaces.filter((s) => {
-        const sync = normalizeSpaceSync(s.sync);
-        return (
-          sync.mode === "connected" &&
-          Boolean(sync.roomId) &&
-          sync.paused !== true
-        );
-      });
-
-      if (list.length === 0) return;
-
       running.current = true;
       lastRun.current = Date.now();
       let failures = 0;
       let successes = 0;
 
       try {
+        // Phase 4: personal Spaces under Account Key first
+        if (reason === "manual-boot") {
+          await maybeBootVaultCheck();
+        } else {
+          const vault = await checkAccountVaultOnForeground();
+          if (vault.restored) {
+            const t = Date.now();
+            if (t - lastVaultToast.current >= VAULT_TOAST_MIN_MS) {
+              lastVaultToast.current = t;
+              toast.success("Spaces restored from your Account Key", {
+                description:
+                  vault.spaces > 0
+                    ? `${vault.spaces} group${vault.spaces === 1 ? "" : "s"} merged from cloud.`
+                    : "Cloud backup applied.",
+                duration: 4000,
+              });
+            }
+          }
+        }
+
+        if (!isSpaceRelayConfigured()) return;
+
+        const list = useAppStore.getState().spaces.filter((s) => {
+          const sync = normalizeSpaceSync(s.sync);
+          return (
+            sync.mode === "connected" &&
+            Boolean(sync.roomId) &&
+            sync.paused !== true
+          );
+        });
+
+        if (list.length === 0) return;
+
         for (const space of list) {
           try {
             await syncSpaceNow(space.id);
@@ -68,7 +95,6 @@ export function useForegroundSpaceSync(): void {
           }
         }
         if (failures > 0 && failures === list.length) {
-          // Prefer the real lastError from the first failed group
           const failed = useAppStore
             .getState()
             .spaces.find((s) => normalizeSpaceSync(s.sync).lastError);

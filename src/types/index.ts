@@ -79,6 +79,11 @@ export interface Session {
   sharedNotes?: string;
   keyTakeaways?: string;
   actionItems?: string[];
+  /**
+   * Last edit time (ISO) for shared-layer LWW merge on room/vault sync.
+   * Missing on older rows — treated as older than any stamped row.
+   */
+  updatedAt?: string;
 }
 
 /**

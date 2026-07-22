@@ -138,8 +138,8 @@ export function SessionView({
         </div>
         <PassageList passages={passages} readOnly compact />
         {onOpenBible && (
-          <Button variant="secondary" fullWidth onClick={onOpenBible}>
-            Open Bible to log more
+          <Button fullWidth onClick={onOpenBible}>
+            Open reader for this session
           </Button>
         )}
       </section>
