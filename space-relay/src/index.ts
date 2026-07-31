@@ -592,6 +592,35 @@ async function bindShortCodeToRoom(
   }
 }
 
+/** Drop short-code index entries so reissued keys actually invalidate the old code. */
+async function unbindShortCode(env: Env, shortCode: string): Promise<void> {
+  const keys = new Set<string>([
+    normalizeShortCode(shortCode),
+    shortCode.trim().toUpperCase(),
+  ]);
+  // Legacy hyphenated forms used by resolveRoomIdFromShortCode
+  const norm = normalizeShortCode(shortCode);
+  if (norm.length === 6) {
+    keys.add(`${norm.slice(0, 4)}-${norm.slice(4)}`);
+  }
+  if (norm.length === 8) {
+    keys.add(`${norm.slice(0, 4)}-${norm.slice(4)}`);
+  }
+  for (const key of keys) {
+    if (!key) continue;
+    const codeStub = env.SPACE_ROOM.get(
+      env.SPACE_ROOM.idFromName(`code:${key}`),
+    );
+    try {
+      await codeStub.fetch(
+        new Request("https://room/unbind-code", { method: "POST" }),
+      );
+    } catch {
+      // best-effort — rotate still proceeds with the new binding
+    }
+  }
+}
+
 function normalizeGroupKeyHash(raw: string): string {
   return String(raw || "")
     .trim()
@@ -683,6 +712,15 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
             }),
           }),
         );
+        // Transfer host authority to this device (reinstall / new browser).
+        // Connect is host-only on the client, so reclaim is intentional.
+        await roomStub.fetch(
+          new Request("https://room/claim-host", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ deviceId: hostDeviceId }),
+          }),
+        );
         // Host re-open must refresh shared history — otherwise guests join a
         // stale snapshot from the first Connect (empty past sessions).
         const pushRes = await roomStub.fetch(
@@ -692,6 +730,7 @@ async function createRoom(req: Request, env: Env): Promise<Response> {
             body: JSON.stringify({
               snapshot: body.snapshot,
               mergeShared: true,
+              deviceId: hostDeviceId,
             }),
           }),
         );
@@ -845,7 +884,8 @@ async function previewRoom(req: Request, env: Env): Promise<Response> {
 
 /**
  * Issue a new short join code for an existing room (Group Key rotation).
- * Binds new code; room keeps same roomId and snapshot.
+ * Unbinds the previous code index so the old key stops resolving.
+ * Room keeps same roomId, members, and snapshot history.
  */
 async function rotateRoomJoinCode(
   req: Request,
@@ -859,6 +899,17 @@ async function rotateRoomJoinCode(
   const roomStub = env.SPACE_ROOM.get(
     env.SPACE_ROOM.idFromName(`room:${roomKey}`),
   );
+
+  // Capture previous short code before rotate so we can invalidate its index
+  let oldShortCode = "";
+  const before = await roomStub.fetch(
+    new Request("https://room/full", { method: "GET" }),
+  );
+  if (before.ok) {
+    const prior = (await before.json()) as RoomState;
+    oldShortCode = String(prior.shortCode || "");
+  }
+
   const newShortCode = makeShortCode();
   const rotateRes = await roomStub.fetch(
     new Request("https://room/rotate-code", {
@@ -878,6 +929,11 @@ async function rotateRoomJoinCode(
     return error(err.error || "Could not rotate join code", rotateRes.status, req);
   }
   const state = (await rotateRes.json()) as RoomState;
+
+  // Product promise: "old join code stops working"
+  if (oldShortCode && normalizeShortCode(oldShortCode) !== normalizeShortCode(state.shortCode)) {
+    await unbindShortCode(env, oldShortCode);
+  }
 
   await bindShortCodeToRoom(env, state.shortCode, state.roomId);
   if (body.groupKeyHash) {
@@ -1078,11 +1134,14 @@ function applyTombstonesToRows(
 
 /**
  * Union shared snapshots by entity id with updatedAt LWW + tombstones.
- * Members still union by name (first wins) so renames do not fork people.
+ * Members:
+ * - host push (membersAuthoritative): incoming roster wins (removals stick)
+ * - guest push: union by name so guests can add themselves without wiping list
  */
 function mergeSharedSnapshots(
   current: SharedSnapshot,
   incoming: SharedSnapshot,
+  opts?: { membersAuthoritative?: boolean },
 ): SharedSnapshot {
   type Row = { id?: string; updatedAt?: unknown; [key: string]: unknown };
   const byId = (rows: unknown): Map<string, Row> => {
@@ -1127,26 +1186,46 @@ function mergeSharedSnapshots(
   );
 
   type Member = { id?: string; name?: string; joinedAt?: string };
-  const memberMap = new Map<string, Member>();
-  const addMembers = (list: unknown) => {
-    if (!Array.isArray(list)) return;
-    for (const raw of list) {
-      if (!raw || typeof raw !== "object") continue;
-      const m = raw as Member;
-      const name = String(m.name || "").trim();
-      if (!name) continue;
-      const key = name.toLowerCase();
-      if (!memberMap.has(key)) {
-        memberMap.set(key, {
-          id: String(m.id || crypto.randomUUID()),
-          name,
-          joinedAt: m.joinedAt || new Date().toISOString(),
-        });
-      }
-    }
+  const normalizeMember = (raw: Member): Member | null => {
+    const name = String(raw.name || "").trim();
+    if (!name) return null;
+    return {
+      id: String(raw.id || crypto.randomUUID()),
+      name,
+      joinedAt: raw.joinedAt || new Date().toISOString(),
+    };
   };
-  addMembers(current.members);
-  addMembers(incoming.members);
+
+  let members: Member[];
+  if (opts?.membersAuthoritative && Array.isArray(incoming.members)) {
+    // Host roster is source of truth — removals and renames stick
+    const byName = new Map<string, Member>();
+    for (const raw of incoming.members) {
+      if (!raw || typeof raw !== "object") continue;
+      const m = normalizeMember(raw as Member);
+      if (!m) continue;
+      const key = m.name!.toLowerCase();
+      if (!byName.has(key)) byName.set(key, m);
+    }
+    members = Array.from(byName.values());
+  } else {
+    const memberMap = new Map<string, Member>();
+    const addMembers = (list: unknown) => {
+      if (!Array.isArray(list)) return;
+      for (const raw of list) {
+        if (!raw || typeof raw !== "object") continue;
+        const m = normalizeMember(raw as Member);
+        if (!m) continue;
+        const key = m.name!.toLowerCase();
+        if (!memberMap.has(key)) {
+          memberMap.set(key, m);
+        }
+      }
+    };
+    addMembers(current.members);
+    addMembers(incoming.members);
+    members = Array.from(memberMap.values());
+  }
 
   return {
     ...current,
@@ -1154,8 +1233,11 @@ function mergeSharedSnapshots(
     kind: "ds-shared-snapshot",
     v: 1,
     spaceId: String(incoming.spaceId || current.spaceId),
-    name: String(incoming.name || current.name),
-    members: Array.from(memberMap.values()),
+    // Host-authoritative also owns the display name
+    name: opts?.membersAuthoritative
+      ? String(incoming.name || current.name)
+      : String(incoming.name || current.name),
+    members,
     sessions: Array.from(sessions.values()),
     prayerBoard: Array.from(prayers.values()),
     tombstones: {
@@ -1281,6 +1363,11 @@ export class SpaceRoom implements DurableObject {
       return Response.json({ ok: true });
     }
 
+    if (path === "/unbind-code" && req.method === "POST") {
+      await this.state.storage.delete("codeBinding");
+      return Response.json({ ok: true });
+    }
+
     if (path === "/resolve-code" && req.method === "GET") {
       const binding = await this.state.storage.get<{ roomId: string }>(
         "codeBinding",
@@ -1317,6 +1404,25 @@ export class SpaceRoom implements DurableObject {
         return Response.json({ error: "Room not found" }, { status: 404 });
       }
       return Response.json(room);
+    }
+
+    /** Host re-open after reinstall — update hostDeviceId so roster authority sticks. */
+    if (path === "/claim-host" && req.method === "POST") {
+      const room = await this.state.storage.get<RoomState>("room");
+      if (!room) {
+        return Response.json({ error: "Room not found" }, { status: 404 });
+      }
+      const body = (await req.json()) as { deviceId?: string };
+      const nextHost = String(body.deviceId || "").trim();
+      if (nextHost) {
+        room.hostDeviceId = nextHost;
+        room.updatedAt = new Date().toISOString();
+        await this.state.storage.put("room", room);
+      }
+      return Response.json({
+        ok: true,
+        hostDeviceId: room.hostDeviceId,
+      });
     }
 
     if (path === "/join" && req.method === "POST") {
@@ -1388,6 +1494,7 @@ export class SpaceRoom implements DurableObject {
       const body = (await req.json()) as {
         snapshot?: SharedSnapshot;
         baseRev?: number;
+        deviceId?: string;
         /** Union sessions/prayers by id so host re-open never drops guest rows. */
         mergeShared?: boolean;
       };
@@ -1413,7 +1520,12 @@ export class SpaceRoom implements DurableObject {
         );
       }
       if (body.mergeShared) {
-        room.snapshot = mergeSharedSnapshots(room.snapshot, body.snapshot);
+        const pusherId = String(body.deviceId || "").trim();
+        const isHost =
+          Boolean(pusherId) && pusherId === String(room.hostDeviceId || "");
+        room.snapshot = mergeSharedSnapshots(room.snapshot, body.snapshot, {
+          membersAuthoritative: isHost,
+        });
       } else {
         room.snapshot = body.snapshot;
       }

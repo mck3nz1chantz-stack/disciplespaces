@@ -33,7 +33,7 @@ export const TESTING_GUIDE_STEPS = [
   {
     title: "Online / Offline toggle",
     detail:
-      "Header or on each group: Online = may refresh connected groups when you have network. Offline = stay on this phone only (good during a meeting if you don’t want sync).",
+      "Header only: Online = may refresh connected groups when you have network. Offline = stay on this phone only (good during a meeting if you don’t want sync). Each group shows link status — it does not have a second toggle.",
   },
   {
     title: "Sync (connected groups)",

@@ -67,3 +67,22 @@ export {
   resolveJoinCredentials,
   type InviteKeyKind,
 } from "./inviteKey";
+export {
+  captureSharedState,
+  diffSharedState,
+  formatSyncChangeDescription,
+  formatSyncSuccessTitle,
+  type SharedStateSnap,
+  type SyncChangeSummary,
+} from "./syncSummary";
+export {
+  getGroupLinkStatus,
+  type GroupLinkKind,
+  type GroupLinkStatus,
+} from "./linkStatus";
+export {
+  noteManualSyncToast,
+  shouldShowAutoSyncSuccessToast,
+  SYNC_SUCCESS_TOAST_ID,
+  SYNC_FAIL_TOAST_ID,
+} from "./toastCoord";

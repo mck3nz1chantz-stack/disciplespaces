@@ -2,7 +2,15 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useAppStore } from "../stores/useAppStore";
 import { isOnlineModeEnabled } from "../lib/onlineMode";
-import { isSpaceRelayConfigured, normalizeSpaceSync } from "../lib/sync";
+import {
+  formatSyncChangeDescription,
+  isSpaceRelayConfigured,
+  normalizeSpaceSync,
+  shouldShowAutoSyncSuccessToast,
+  SYNC_FAIL_TOAST_ID,
+  SYNC_SUCCESS_TOAST_ID,
+  type SyncChangeSummary,
+} from "../lib/sync";
 import {
   checkAccountVaultOnForeground,
   maybeBootVaultCheck,
@@ -10,8 +18,6 @@ import {
 
 /** Minimum gap between full auto-sync passes (ms). */
 const MIN_INTERVAL_MS = 45_000;
-/** Don’t spam “Groups updated” toasts more often than this. */
-const SUCCESS_TOAST_MIN_MS = 90_000;
 const VAULT_TOAST_MIN_MS = 120_000;
 
 /**
@@ -22,7 +28,6 @@ const VAULT_TOAST_MIN_MS = 120_000;
  */
 export function useForegroundSpaceSync(): void {
   const lastRun = useRef(0);
-  const lastSuccessToast = useRef(0);
   const lastVaultToast = useRef(0);
   const running = useRef(false);
 
@@ -86,10 +91,16 @@ export function useForegroundSpaceSync(): void {
 
         if (list.length === 0) return;
 
+        let anyNotable = false;
+        let lastChanges: SyncChangeSummary | null = null;
         for (const space of list) {
           try {
-            await syncSpaceNow(space.id);
+            const { changes } = await syncSpaceNow(space.id);
             successes += 1;
+            if (changes.hasChanges) {
+              anyNotable = true;
+              lastChanges = changes;
+            }
           } catch {
             failures += 1;
           }
@@ -102,18 +113,30 @@ export function useForegroundSpaceSync(): void {
             normalizeSpaceSync(failed?.sync).lastError ||
             "Tap Sync now on the group. If it still fails, re-Join with the host’s current room key.";
           toast.message("Couldn’t sync yet", {
+            id: SYNC_FAIL_TOAST_ID,
             description: detail,
             duration: 7000,
           });
         } else if (successes > 0) {
-          const t = Date.now();
-          if (t - lastSuccessToast.current >= SUCCESS_TOAST_MIN_MS) {
-            lastSuccessToast.current = t;
+          if (shouldShowAutoSyncSuccessToast(anyNotable)) {
             toast.success(
-              successes === 1 ? "Group updated" : "Groups updated",
+              successes === 1
+                ? anyNotable
+                  ? "Group updated"
+                  : "Group up to date"
+                : anyNotable
+                  ? "Groups updated"
+                  : "Groups up to date",
               {
-                description: "Shared meetings are up to date.",
-                duration: 2800,
+                id: SYNC_SUCCESS_TOAST_ID,
+                description:
+                  (anyNotable && lastChanges
+                    ? formatSyncChangeDescription(lastChanges)
+                    : null) ??
+                  (successes === 1
+                    ? "Shared meetings are up to date."
+                    : `${successes} groups refreshed.`),
+                duration: anyNotable ? 4200 : 2800,
               },
             );
           }

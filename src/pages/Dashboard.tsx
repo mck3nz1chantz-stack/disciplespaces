@@ -10,13 +10,14 @@ import { MemberEditor } from "../components/MemberEditor";
 import { JoinSpaceModal } from "../components/JoinSpaceModal";
 import { QuickStartChecklist } from "../components/QuickStartChecklist";
 import { ShareUpdateModal } from "../components/ShareUpdateModal";
-import { TestingGuideCard } from "../components/TestingPhaseNotice";
 import {
   consumePendingHomeAction,
   consumePendingJoinRaw,
 } from "../components/Layout";
+import { GroupLinkBadge } from "../components/GroupLinkBadge";
 import { lastActivityIso, useAppStore } from "../stores/useAppStore";
 import { useLiveSpaces } from "../hooks/useLiveDb";
+import { useOnlineMode } from "../hooks/useOnlineMode";
 import {
   FIRST_SPACE_TIP_KEY,
   QUICKSTART_DISMISS_KEY,
@@ -37,7 +38,6 @@ import {
   maxMembersForSpace,
   spaceKindLabel,
 } from "../types";
-
 export function Dashboard() {
   const navigate = useNavigate();
   const storeSpaces = useAppStore((s) => s.spaces);
@@ -48,6 +48,7 @@ export function Dashboard() {
   const error = useAppStore((s) => s.error);
   const initialize = useAppStore((s) => s.initialize);
   const createSpace = useAppStore((s) => s.createSpace);
+  const { mode: onlineMode } = useOnlineMode();
 
   const [open, setOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -177,14 +178,6 @@ export function Dashboard() {
         </p>
       </div>
 
-      <TestingGuideCard
-        variant="compact"
-        onBackup={() => {
-          setBackupMode("export");
-          setBackupOpen(true);
-        }}
-      />
-
       <div className="grid grid-cols-2 gap-2">
         <Button fullWidth className="!py-3.5" onClick={() => setOpen(true)}>
           <Plus className="h-5 w-5" aria-hidden />
@@ -299,9 +292,15 @@ export function Dashboard() {
                 <Card className="cursor-pointer transition-all duration-150 hover:border-primary/40 hover:shadow-md hover:-translate-y-px active:scale-[0.99] active:translate-y-0">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <h3 className="text-lg font-semibold truncate text-primary">
-                        {space.name}
-                      </h3>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h3 className="text-lg font-semibold truncate text-primary">
+                          {space.name}
+                        </h3>
+                        <GroupLinkBadge
+                          sync={space.sync}
+                          onlineMode={onlineMode}
+                        />
+                      </div>
                       <p className="text-sm text-muted mt-1">
                         {n === 0
                           ? "No people listed yet"

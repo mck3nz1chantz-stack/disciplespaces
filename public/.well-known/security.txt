@@ -1,0 +1,8 @@
+# DiscipleSpaces — vulnerability disclosure (RFC 9116)
+# Studio-hosted first-party app. Report security issues to the studio.
+
+Contact: mailto:hello@chantzmedia.com
+Expires: 2027-07-31T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://disciple-spaces.pages.dev/.well-known/security.txt
+Policy: https://chantzmedia.com

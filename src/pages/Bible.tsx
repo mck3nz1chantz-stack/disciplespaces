@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { BibleReaderVideoBg } from "../components/BibleReaderVideoBg";
 import { Modal } from "../components/Modal";
 import {
   LogPassageModal,
@@ -562,10 +563,23 @@ export function Bible() {
     };
   }
 
+  /** Next/prev chapter: jump to top of page so reading + video plate restart cleanly. */
+  const scrollBibleToTop = useCallback(() => {
+    const behavior: ScrollBehavior = prefersReducedMotion ? "auto" : "smooth";
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+    // Also align the Bible page anchor (covers nested focus / sticky chrome)
+    readerTopRef.current?.scrollIntoView({ behavior, block: "start" });
+  }, [prefersReducedMotion]);
+
   function prevChapter() {
     if (!currentBook) return;
     if (chapter > 1) {
       setChapter(chapter - 1);
+      scrollBibleToTop();
       return;
     }
     const idx = books.findIndex((b) => b.id === bookId);
@@ -573,6 +587,7 @@ export function Bible() {
       const prev = books[idx - 1];
       setBookId(prev.id);
       setChapter(prev.chapterCount);
+      scrollBibleToTop();
     }
   }
 
@@ -580,6 +595,7 @@ export function Bible() {
     if (!currentBook) return;
     if (chapter < currentBook.chapterCount) {
       setChapter(chapter + 1);
+      scrollBibleToTop();
       return;
     }
     const idx = books.findIndex((b) => b.id === bookId);
@@ -587,6 +603,7 @@ export function Bible() {
       const next = books[idx + 1];
       setBookId(next.id);
       setChapter(1);
+      scrollBibleToTop();
     }
   }
 
@@ -1326,9 +1343,20 @@ export function Bible() {
             </Card>
           )}
 
-          {/* Sanctuary chapter surface */}
+          {/* Sanctuary chapter surface — Cross video bg (AnimateStudio job) */}
           <article
-            className="bible-reader relative rounded-3xl px-5 py-6 sm:px-7 sm:py-8 overflow-hidden"
+            className={[
+              "bible-reader relative rounded-3xl px-5 py-6 sm:px-7 sm:py-8",
+              // LOCKED: overflow-hidden kills position:sticky for the video plate
+              // in Chrome (plate only lasts one screen). See
+              // docs/final/bible-reader-scroll-video-plate.md
+              // Only clip when motion is off and there is no sticky plate.
+              prefersReducedMotion
+                ? "overflow-hidden"
+                : "bible-reader--with-video overflow-visible",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             aria-busy={loadingChapter}
             aria-label={
               currentBook
@@ -1336,83 +1364,90 @@ export function Bible() {
                 : "Chapter"
             }
           >
-            {chapterGate && (
-              <div className="bible-chapter-gate" aria-hidden>
-                <p className="bible-chapter-gate__label">
-                  {chapterGate.bookName}
-                  <span>Chapter {chapterGate.chapter}</span>
+            <BibleReaderVideoBg
+              active={!prefersReducedMotion}
+              passageKey={`${bibleVersion}-${bookId}-${chapter}`}
+            />
+
+            <div className="bible-reader__content">
+              {chapterGate && (
+                <div className="bible-chapter-gate" aria-hidden>
+                  <p className="bible-chapter-gate__label">
+                    {chapterGate.bookName}
+                    <span>Chapter {chapterGate.chapter}</span>
+                  </p>
+                </div>
+              )}
+
+              <header className="mb-6 text-center">
+                <p className="text-[11px] font-sans font-medium uppercase tracking-[0.14em] text-muted mb-2">
+                  {versionMeta.shortLabel}
                 </p>
-              </div>
-            )}
+                <h2 className="text-[1.65rem] sm:text-[1.85rem] font-serif font-semibold text-primary tracking-tight leading-tight">
+                  {currentBook?.name}
+                </h2>
+                <p className="mt-1 font-serif text-lg text-muted tabular-nums">
+                  Chapter {chapter}
+                </p>
+                <div
+                  className="mx-auto mt-4 h-px w-16 bg-gradient-to-r from-transparent via-accent/70 to-transparent"
+                  aria-hidden
+                />
+              </header>
 
-            <header className="mb-6 text-center">
-              <p className="text-[11px] font-sans font-medium uppercase tracking-[0.14em] text-muted mb-2">
-                {versionMeta.shortLabel}
-              </p>
-              <h2 className="text-[1.65rem] sm:text-[1.85rem] font-serif font-semibold text-primary tracking-tight leading-tight">
-                {currentBook?.name}
-              </h2>
-              <p className="mt-1 font-serif text-lg text-muted tabular-nums">
-                Chapter {chapter}
-              </p>
-              <div
-                className="mx-auto mt-4 h-px w-16 bg-gradient-to-r from-transparent via-accent/70 to-transparent"
-                aria-hidden
-              />
-            </header>
+              {loadingChapter && !chapterData ? (
+                <p className="text-sm text-muted text-center py-10 font-serif italic">
+                  Loading chapter…
+                </p>
+              ) : chapterData ? (
+                <div
+                  className={[
+                    "bible-reader-prose space-y-0.5",
+                    loadingChapter && proseReveal ? "opacity-60" : "",
+                  ].join(" ")}
+                  data-reveal={proseReveal ? "true" : "false"}
+                  style={
+                    {
+                      ["--reader-font-scale"]: String(fontMultiplier),
+                    } as CSSProperties
+                  }
+                >
+                  {chapterData.verses.map((v) => {
+                    const inSelection =
+                      selectionRange != null &&
+                      v.verse >= selectionRange.start &&
+                      v.verse <= selectionRange.end;
+                    const active = highlightVerse === v.verse;
+                    const logged = loggedVersesInChapter.has(v.verse);
+                    const pulsing = pulseVerse === v.verse;
+                    return (
+                      <button
+                        key={v.verse}
+                        type="button"
+                        id={`v-${v.verse}`}
+                        onClick={() => handleVerseTap(v.verse)}
+                        data-selected={inSelection ? "true" : "false"}
+                        data-active={active ? "true" : "false"}
+                        data-logged={logged ? "true" : "false"}
+                        data-pulse={pulsing ? "true" : "false"}
+                        className="bible-reader-verse"
+                      >
+                        <span className="bible-reader-vnum tabular-nums">
+                          {v.verse}
+                        </span>
+                        {v.text}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
 
-            {loadingChapter && !chapterData ? (
-              <p className="text-sm text-muted text-center py-10 font-serif italic">
-                Loading chapter…
-              </p>
-            ) : chapterData ? (
-              <div
-                className={[
-                  "bible-reader-prose space-y-0.5",
-                  loadingChapter && proseReveal ? "opacity-60" : "",
-                ].join(" ")}
-                data-reveal={proseReveal ? "true" : "false"}
-                style={
-                  {
-                    ["--reader-font-scale"]: String(fontMultiplier),
-                  } as CSSProperties
-                }
-              >
-                {chapterData.verses.map((v) => {
-                  const inSelection =
-                    selectionRange != null &&
-                    v.verse >= selectionRange.start &&
-                    v.verse <= selectionRange.end;
-                  const active = highlightVerse === v.verse;
-                  const logged = loggedVersesInChapter.has(v.verse);
-                  const pulsing = pulseVerse === v.verse;
-                  return (
-                    <button
-                      key={v.verse}
-                      type="button"
-                      id={`v-${v.verse}`}
-                      onClick={() => handleVerseTap(v.verse)}
-                      data-selected={inSelection ? "true" : "false"}
-                      data-active={active ? "true" : "false"}
-                      data-logged={logged ? "true" : "false"}
-                      data-pulse={pulsing ? "true" : "false"}
-                      className="bible-reader-verse"
-                    >
-                      <span className="bible-reader-vnum tabular-nums">
-                        {v.verse}
-                      </span>
-                      {v.text}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-
-            {!focusMode && (
-              <p className="mt-6 text-center text-[11px] font-sans text-muted/80">
-                Tap a verse to select · tap another for a range
-              </p>
-            )}
+              {!focusMode && (
+                <p className="mt-6 text-center text-[11px] font-sans text-muted/80">
+                  Tap a verse to select · tap another for a range
+                </p>
+              )}
+            </div>
           </article>
 
           {/* Sticky log + private reflection — above bottom nav */}

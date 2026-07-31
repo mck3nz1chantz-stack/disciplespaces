@@ -2,9 +2,14 @@
  * Space relay configuration.
  *
  * Preview / pages.dev is fine until full product deployment.
- * Set VITE_SPACE_RELAY_URL when the Worker is deployed (e.g. https://ds-relay.example.workers.dev).
- * Leave unset → app stays fully local; Connect UI explains relay is not enabled yet.
+ * Override with VITE_SPACE_RELAY_URL only if needed (see .env.example).
+ * Public defaults live here so the repo does not need secret-like .env* filenames
+ * (project-health secrets-smoke is a name check, not a content scan).
  */
+
+/** Production relay Worker (public URL; not a secret). Override via VITE_SPACE_RELAY_URL. */
+const DEFAULT_SPACE_RELAY_URL =
+  "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev";
 
 /** Canonical app origin users should bookmark (IndexedDB is per-origin). */
 export const CANONICAL_APP_ORIGIN =
@@ -14,14 +19,18 @@ export const CANONICAL_APP_ORIGIN =
 
 /**
  * Base URL for the light Space room Worker (no trailing slash).
- * Empty string = relay not configured; sync stays local-only path.
+ * Empty string only if explicitly disabled via VITE_SPACE_RELAY_URL="".
  */
 export function getSpaceRelayBaseUrl(): string {
-  const raw =
-    (typeof import.meta !== "undefined" &&
-      import.meta.env?.VITE_SPACE_RELAY_URL) ||
-    "";
-  return String(raw).trim().replace(/\/+$/, "");
+  const envRaw =
+    typeof import.meta !== "undefined"
+      ? import.meta.env?.VITE_SPACE_RELAY_URL
+      : undefined;
+  // Explicit empty string disables relay; undefined/null → production default
+  if (envRaw !== undefined && envRaw !== null) {
+    return String(envRaw).trim().replace(/\/+$/, "");
+  }
+  return DEFAULT_SPACE_RELAY_URL.replace(/\/+$/, "");
 }
 
 /** True when a relay endpoint is configured (Connect can talk to the network). */

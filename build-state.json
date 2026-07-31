@@ -3,7 +3,7 @@
   "phase": "5 – Sharing, Invites & Polish",
   "status": "completed",
   "created": "2026-07-08T19:23:18.941Z",
-  "updated": "2026-07-22T20:30:00.000Z",
+  "updated": "2026-07-31T21:54:36.770Z",
   "launcher": "/Users/kenzi/Desktop/ChantzMediaLauncher",
   "version": "0.10.0",
   "stack": [
@@ -21,12 +21,38 @@
     "qrcode",
     "Cloudflare Pages"
   ],
-  "envVars": [],
+  "envVars": [
+    {
+      "name": "VITE_SPACE_RELAY_URL",
+      "required": false,
+      "notes": "Optional override; default relay URL in src/lib/sync/config.ts"
+    },
+    {
+      "name": "VITE_CANONICAL_ORIGIN",
+      "required": false,
+      "notes": "Optional; default https://disciple-spaces.pages.dev"
+    },
+    {
+      "name": "VITE_APPHUB_INGEST_URL",
+      "required": false,
+      "notes": "Optional local AppHub ingest for feedback"
+    }
+  ],
   "artifacts": [
     {
       "name": "Source",
       "path": "src/",
       "notes": "Live queries, migration schema, offline banner, storage UI, pagination, space templates"
+    },
+    {
+      "name": "Bible scroll-play video plate (locked recipe)",
+      "path": "docs/final/bible-reader-scroll-video-plate.md",
+      "notes": "AnimateStudio cross plate: sticky pin + no overflow-hidden; blob all-I-frame seek; content-scroll → currentTime. Component BibleReaderVideoBg.tsx"
+    },
+    {
+      "name": "Bible cross plate media",
+      "path": "public/media/crossanimation1-web.mp4",
+      "notes": "All-I-frame scrub encode; pair with BIBLE_CROSS_VIDEO_SRC ?v=scrubN"
     },
     {
       "name": "Migrations",
@@ -228,5 +254,60 @@
     "deploymentUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
     "productionUrl": "https://disciple-spaces.pages.dev",
     "notes": "Session modal height fix for Start today's meeting; prior restore/SW/host fixes included"
+  },
+  "hosting": {
+    "provider": "Cloudflare Pages",
+    "previewUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
+    "productionDomain": "disciple-spaces.pages.dev",
+    "productionUrl": "https://disciple-spaces.pages.dev",
+    "latestDeploymentUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
+    "notes": "Recorded from cloudflarePages/lastDeploy for project-health hosting check"
+  },
+  "discoverability": {
+    "seo": "partial",
+    "aieo": "pending",
+    "indexing": "allow-public-shell",
+    "notes": [
+      "public/robots.txt Allow: / for app shell",
+      "User data is local IndexedDB — not crawlable",
+      "security.txt at public/.well-known/security.txt"
+    ],
+    "updatedAt": "2026-07-31T21:53:59Z"
+  },
+  "clientHub": {
+    "factsPath": "docs/client-hub/facts.v1.json",
+    "updatedAt": "2026-07-31T21:53:59Z"
+  },
+  "shipGuard": {
+    "mode": "check",
+    "status": "cleared-with-notes",
+    "p0Count": 0,
+    "p1Count": 0,
+    "findingCount": 3,
+    "domain": "disciple-spaces.pages.dev",
+    "findingIds": [
+      "SG-EH-003",
+      "SG-BOT-002",
+      "SG-BOT-001"
+    ],
+    "updatedAt": "2026-07-31T21:54:36.097Z"
+  },
+  "safetyPass": {
+    "mode": "gate",
+    "operational": "clear",
+    "grokLawStatus": "pending",
+    "notes": "Removed .env.development/.env.production name-smoke hits; public VITE defaults in code + .env.example",
+    "updatedAt": "2026-07-31T21:53:59Z"
+  },
+  "vibePass": {
+    "mode": "check",
+    "status": "cleared",
+    "p0Count": 0,
+    "p1Count": 0,
+    "findingCount": 0,
+    "registry": true,
+    "notesPath": null,
+    "findingIds": [],
+    "updatedAt": "2026-07-31T21:54:36.770Z"
   }
 }

@@ -30,12 +30,15 @@ import { FIRST_LAUNCH_ACK_KEY } from "../lib/legal";
 import {
   applyRemoteTombstonesLocally,
   buildSharedSnapshotWithTombstones,
+  captureSharedState,
   createRoom as relayCreateRoom,
   defaultSpaceSync,
   deleteRoom as relayDeleteRoom,
+  diffSharedState,
   HOST_ONLY_ROSTER_MESSAGE,
   HOST_ONLY_TITLE_MESSAGE,
   isSpaceGuest,
+  isSpaceHost,
   isSpaceRelayConfigured,
   joinRoom as relayJoinRoom,
   normalizeSpaceSync,
@@ -53,6 +56,7 @@ import {
   scheduleConnectedSpaceSync,
   SpaceRelayConflictError,
   SpaceRelayNotConfiguredError,
+  type SyncChangeSummary,
 } from "../lib/sync";
 import { scheduleAccountVaultUpload } from "../lib/keys/vaultAuto";
 import {
@@ -299,8 +303,14 @@ interface AppState {
     spaceId: string,
     opts?: { forceNew?: boolean },
   ) => Promise<Space>;
-  /** Pull + push shared snapshot for a connected Space. */
-  syncSpaceNow: (spaceId: string) => Promise<Space>;
+  /**
+   * Pull + push shared snapshot for a connected Space.
+   * Returns the space plus a human “what changed” summary for toasts.
+   */
+  syncSpaceNow: (spaceId: string) => Promise<{
+    space: Space;
+    changes: SyncChangeSummary;
+  }>;
   /** Pause or resume automatic network sync (local edits still save). */
   setSpaceSyncPaused: (spaceId: string, paused: boolean) => Promise<Space>;
   /**
@@ -751,6 +761,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const nextRow: SpaceRow = {
       ...row,
       members: normalizeMembers(members, max).slice(0, max),
+      membersUpdatedAt: nowUpdatedAt(),
     };
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
@@ -775,6 +786,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const nextRow: SpaceRow = {
       ...row,
       members: [...row.members, createMember(trimmed)],
+      membersUpdatedAt: nowUpdatedAt(),
     };
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
@@ -799,7 +811,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error("Member not found");
     }
 
-    const nextRow: SpaceRow = { ...row, members };
+    const nextRow: SpaceRow = {
+      ...row,
+      members,
+      membersUpdatedAt: nowUpdatedAt(),
+    };
     await db.spaces.put(nextRow);
     const updated = await hydrateSpace(nextRow);
     set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
@@ -817,6 +833,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const nextRow: SpaceRow = {
       ...row,
       members: row.members.filter((m) => m.id !== memberId),
+      membersUpdatedAt: nowUpdatedAt(),
     };
     // Drop removed member from any pending unanimous rotation requirement
     const sync = normalizeSpaceSync(nextRow.sync);
@@ -1254,6 +1271,40 @@ export const useAppStore = create<AppState>((set, get) => ({
       const kind = normalizeSpaceKind(
         existing.spaceKind || payload.space.spaceKind,
       );
+      const max = maxMembersForSpace(kind);
+      const remoteMembers = payload.space.members ?? [];
+      /**
+       * Roster merge:
+       * - replace-shared (room pull): accept remote roster unless this device
+       *   edited people after last successful sync (host remove must not revive).
+       * - add-only (file import): classic union by name.
+       */
+      let nextMembers: Member[];
+      let nextMembersUpdatedAt = existing.membersUpdatedAt;
+      if (mergeStrategy === "replace-shared") {
+        const localRosterMs = existing.membersUpdatedAt
+          ? Date.parse(existing.membersUpdatedAt)
+          : 0;
+        const lastSyncMs = normalizeSpaceSync(existing.sync).lastSyncedAt
+          ? Date.parse(normalizeSpaceSync(existing.sync).lastSyncedAt!)
+          : 0;
+        const pendingLocalRoster =
+          Number.isFinite(localRosterMs) &&
+          localRosterMs > 0 &&
+          (!Number.isFinite(lastSyncMs) || localRosterMs > lastSyncMs);
+
+        if (pendingLocalRoster && isSpaceHost(existing.sync)) {
+          // Host has unsynced roster edits — keep local, only pick up new names
+          nextMembers = mergeMembers(existing.members, remoteMembers, max);
+        } else {
+          // Room roster is truth (host removals land on guests)
+          nextMembers = normalizeMembers(remoteMembers, max);
+          nextMembersUpdatedAt = existing.membersUpdatedAt;
+        }
+      } else {
+        nextMembers = mergeMembers(existing.members, remoteMembers, max);
+      }
+
       spaceRow = {
         ...existing,
         name: payload.space.name || existing.name,
@@ -1269,12 +1320,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           defaultSessionTemplateForSpace(
             existing.spaceTemplate || payload.space.spaceTemplate,
           ),
-        // Prefer union of members by name (cap by space kind)
-        members: mergeMembers(
-          existing.members,
-          payload.space.members ?? [],
-          maxMembersForSpace(kind),
-        ),
+        members: nextMembers,
+        membersUpdatedAt: nextMembersUpdatedAt,
         sync: normalizeSpaceSync(existing.sync),
       };
       await db.spaces.put(spaceRow);
@@ -1468,7 +1515,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Guests never open a new room (avoids two rooms for one group)
     if (existingSync.deviceRole === "guest") {
       if (existingSync.mode === "connected" && existingSync.roomId) {
-        return get().syncSpaceNow(spaceId);
+        const { space } = await get().syncSpaceNow(spaceId);
+        return space;
       }
       throw new Error(
         "Only the host can Connect this group. Ask them to Connect and share the join code, then use Join a group on this phone.",
@@ -1482,7 +1530,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       existingSync.roomId
     ) {
       try {
-        return await get().syncSpaceNow(spaceId);
+        const { space } = await get().syncSpaceNow(spaceId);
+        return space;
       } catch (err) {
         // Room missing → open-or-reuse by spaceId (server will reattach if registered)
         const msg = err instanceof Error ? err.message : "";
@@ -1525,7 +1574,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Always pull+push once so host local history is on the room before invites.
     // Critical when Open room was tapped after meetings were added offline.
     try {
-      return await get().syncSpaceNow(spaceId);
+      const { space } = await get().syncSpaceNow(spaceId);
+      return space;
     } catch {
       // Linked with the snapshot from create/reuse; Sync can retry later
       const rowAfter = await db.spaces.get(spaceId);
@@ -1546,6 +1596,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         "This group is not linked to a room yet. Host: Open group room. Guest: Join with the host’s room key.",
       );
     }
+
+    const beforeSnap = await captureSharedState(spaceId);
+
+    const withChanges = async (space: Space) => {
+      const afterSnap = await captureSharedState(spaceId);
+      return {
+        space,
+        changes: diffSharedState(beforeSnap, afterSnap),
+      };
+    };
 
     const applyPulledSnapshot = async (
       snap: {
@@ -1745,7 +1805,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
 
     try {
-      return await runPullPush(sync.roomId, sync.shortCode);
+      const space = await runPullPush(sync.roomId, sync.shortCode);
+      return await withChanges(space);
     } catch (err) {
       if (err instanceof SpaceRelayConflictError) {
         const friendly = err.message;
@@ -1760,7 +1821,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         const healed = await healStaleRoom();
         if (healed && sync.roomId) {
           try {
-            return await runPullPush(sync.roomId, sync.shortCode);
+            const space = await runPullPush(sync.roomId, sync.shortCode);
+            return await withChanges(space);
           } catch (err2) {
             const message2 =
               err2 instanceof Error ? err2.message : "Sync failed";
@@ -1864,7 +1926,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Push/pull once so local history and room meet
     let space = joined.space;
     try {
-      space = await get().syncSpaceNow(spaceId);
+      space = (await get().syncSpaceNow(spaceId)).space;
     } catch {
       // Already linked; user can Sync again
       space = joined.space;

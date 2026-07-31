@@ -40,15 +40,15 @@ export function OfflineIndicator() {
       ].join(" ")}
       title={
         offlineLook
-          ? "Offline mode — tap to set Online so groups can sync"
+          ? "Offline mode (app-wide) — tap to go Online so groups can sync"
           : networkOnline
-            ? "Online — tap to work offline only"
-            : "Online mode — Sync will try the network even if the browser is unsure"
+            ? "Online mode (app-wide) — tap to work offline only"
+            : "Online mode (app-wide) — Sync will try the network even if the browser is unsure"
       }
       aria-label={
         offlineLook
-          ? "Offline mode. Tap to switch to Online mode"
-          : "Online mode. Tap to switch to Offline mode"
+          ? "Offline mode for the whole app. Tap to switch to Online mode"
+          : "Online mode for the whole app. Tap to switch to Offline mode"
       }
     >
       {offlineLook ? (

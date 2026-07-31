@@ -44,6 +44,12 @@ export function TestingPhaseRibbon() {
           </span>
           Early development — back up often. Not a finished app.
         </p>
+        <Link
+          to="/settings"
+          className="shrink-0 text-[11px] font-semibold underline-offset-2 hover:underline touch-manipulation"
+        >
+          Guide
+        </Link>
       </div>
     </div>
   );

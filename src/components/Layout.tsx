@@ -21,7 +21,6 @@ import {
   readFlag,
 } from "../lib/onboarding";
 import { useForegroundSpaceSync } from "../hooks/useForegroundSpaceSync";
-import { TESTING_PHASE_BADGE } from "../lib/legal";
 
 const PENDING_ACTION_KEY = "ds-pending-home-action";
 const PENDING_JOIN_RAW_KEY = "ds-pending-join-raw";
@@ -87,15 +86,10 @@ export function Layout() {
             </h1>
             <p className="text-[11px] font-medium text-muted flex items-center gap-1.5 flex-wrap mt-0.5">
               <span className="tracking-[0.06em] uppercase">ChantzMedia</span>
-              <span className="text-border" aria-hidden>
-                ·
-              </span>
-              <span className="inline-flex items-center rounded-full bg-amber-200/90 text-amber-950 dark:bg-amber-800/90 dark:text-amber-50 px-1.5 py-0.5 text-[10px] font-bold tracking-wide">
-                {TESTING_PHASE_BADGE}
-              </span>
             </p>
           </div>
-          {/* Header is weak thumb zone — keep controls compact, ≥44px hits */}
+          {/* Header is weak thumb zone — keep controls compact, ≥44px hits.
+              Online/Offline lives only here (group cards show status, not a second toggle). */}
           <div className="flex items-center gap-0.5 shrink-0 -mr-1">
             <OfflineIndicator />
             <FeedbackLauncher />
@@ -112,6 +106,7 @@ export function Layout() {
         </div>
       </header>
 
+      {/* Single always-on testing strip (badge removed from title row) */}
       <TestingPhaseRibbon />
       <OfflineBanner />
 

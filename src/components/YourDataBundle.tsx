@@ -19,9 +19,13 @@ import { Button } from "./Button";
 import {
   CANONICAL_APP_ORIGIN,
   canConnectSpaceToRelay,
+  formatSyncChangeDescription,
+  formatSyncSuccessTitle,
   isSpaceGuest,
   isSpaceRelayConfigured,
   normalizeSpaceSync,
+  noteManualSyncToast,
+  SYNC_SUCCESS_TOAST_ID,
 } from "../lib/sync";
 import {
   DATA_CONFIDENCE_BODY,
@@ -320,13 +324,31 @@ export function YourDataBundle({
                           variant="secondary"
                           className="!py-2 !text-xs"
                           disabled={busy || !relayReady}
-                          onClick={() =>
-                            void runSpaceAction(
-                              space.id,
-                              () => syncSpaceNow(space.id),
-                              "Space updated",
-                            )
-                          }
+                          onClick={() => {
+                            setBusyId(space.id);
+                            void (async () => {
+                              try {
+                                const { changes } = await syncSpaceNow(
+                                  space.id,
+                                );
+                                noteManualSyncToast();
+                                toast.success(formatSyncSuccessTitle(changes), {
+                                  id: SYNC_SUCCESS_TOAST_ID,
+                                  description:
+                                    formatSyncChangeDescription(changes) ??
+                                    undefined,
+                                });
+                              } catch (err) {
+                                toast.error(
+                                  err instanceof Error
+                                    ? err.message
+                                    : "Something went wrong",
+                                );
+                              } finally {
+                                setBusyId(null);
+                              }
+                            })();
+                          }}
                         >
                           {busy ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />

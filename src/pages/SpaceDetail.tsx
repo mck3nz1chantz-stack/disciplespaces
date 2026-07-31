@@ -87,10 +87,12 @@ import {
 } from "../hooks/useLiveDb";
 import { useSessionSectionSpy } from "../hooks/useSessionSectionSpy";
 import {
+  getGroupLinkStatus,
   isSpaceGuest,
   isSpaceHost,
   normalizeSpaceSync,
 } from "../lib/sync";
+import { GroupLinkBadge } from "../components/GroupLinkBadge";
 import { useOnlineMode } from "../hooks/useOnlineMode";
 import { useRoomLiveSync } from "../hooks/useRoomLiveSync";
 
@@ -118,12 +120,12 @@ export function SpaceDetail() {
   const setSpaceMembers = useAppStore((s) => s.setSpaceMembers);
   const addMember = useAppStore((s) => s.addMember);
   const syncSpaceNow = useAppStore((s) => s.syncSpaceNow);
-  const setSpaceSyncPaused = useAppStore((s) => s.setSpaceSyncPaused);
   const createSession = useAppStore((s) => s.createSession);
   const updateSession = useAppStore((s) => s.updateSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
   const claimSpaceHostRole = useAppStore((s) => s.claimSpaceHostRole);
   const { mode: onlineMode } = useOnlineMode();
+  const [hostRestoreOpen, setHostRestoreOpen] = useState(false);
 
   const space = liveSpace ?? null;
   const spaceSessions = liveSessions ?? [];
@@ -185,7 +187,6 @@ export function SpaceDetail() {
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickName, setQuickName] = useState("");
   const [quickAdding, setQuickAdding] = useState(false);
-  const [guestSyncing, setGuestSyncing] = useState(false);
   const [claimingHost, setClaimingHost] = useState(false);
   const sessionScrollRef = useRef<HTMLDivElement>(null);
 
@@ -353,39 +354,6 @@ export function SpaceDetail() {
       toast.error(err instanceof Error ? err.message : "Could not add person");
     } finally {
       setQuickAdding(false);
-    }
-  }
-
-  async function handleGuestSync() {
-    if (!space) return;
-    const sync = normalizeSpaceSync(space.sync);
-    if (sync.mode !== "connected" || !sync.roomId) {
-      toast.message("Link this group first", {
-        description:
-          "Use Join a group with the host’s current room key, then Sync.",
-      });
-      return;
-    }
-    if (onlineMode === "offline") {
-      toast.message("App is set to Offline", {
-        description: "Turn Online on (connection card), then tap Sync.",
-      });
-      return;
-    }
-    setGuestSyncing(true);
-    try {
-      if (sync.paused) await setSpaceSyncPaused(space.id, false);
-      await syncSpaceNow(space.id);
-      toast.success("Group updated from host", {
-        description:
-          "People list, meetings, and prayer board match the shared room.",
-      });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Sync failed", {
-        duration: 10000,
-      });
-    } finally {
-      setGuestSyncing(false);
     }
   }
 
@@ -865,6 +833,17 @@ export function SpaceDetail() {
     spaceSync.mode === "connected" &&
     Boolean(spaceSync.roomId);
   const canAddPeople = isHost && peopleCount < maxPeople;
+  const latestSession = spaceSessions[0];
+  const latestTpl = latestSession
+    ? templates.find((t) => t.id === latestSession.templateId)
+    : undefined;
+  const latestTitle = latestSession
+    ? sessionDisplayTitle(latestSession, latestTpl)
+    : null;
+  const needsRoomOpen =
+    isHost &&
+    (spaceSync.mode !== "connected" || !spaceSync.roomId);
+  const linkStatus = getGroupLinkStatus(spaceSync, onlineMode);
 
   return (
     <div className="space-y-5">
@@ -892,31 +871,109 @@ export function SpaceDetail() {
         </div>
       </div>
 
-      {/* Title */}
-      <div>
-        <h2 className="text-2xl leading-tight">{space.name}</h2>
-        {space.description ? (
-          <p className="text-sm text-muted mt-1 line-clamp-2">
-            {space.description}
+      {/* Hero — sanctuary group surface + primary gather CTA (not sticky vs nav) */}
+      <Card
+        padding="lg"
+        className="border-primary/15 space-y-3"
+        aria-label="Group overview"
+      >
+        <div className="space-y-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
+            {spaceKindLabel(space.spaceKind)}
+            {isGuest ? " · Guest on this phone" : " · Your group"}
           </p>
-        ) : null}
-        <p className="text-sm mt-2 font-medium text-primary tabular-nums">
-          {peopleCount === 0
-            ? "No one listed yet"
-            : `${peopleCount} of ${maxPeople} people`}
-          <span className="text-muted font-normal">
-            {" "}
-            · {spaceKindLabel(space.spaceKind)}
-            {isGuest ? " · Guest" : ""}
-          </span>
-        </p>
-      </div>
+          <h2 className="text-2xl sm:text-3xl leading-tight tracking-tight">
+            {space.name}
+          </h2>
+          {space.description ? (
+            <p className="text-sm text-muted line-clamp-2">{space.description}</p>
+          ) : null}
+        </div>
 
-      {/* Guest: obvious Sync to pull host data before anything else */}
-      {isGuest && (
+        <div className="flex flex-wrap gap-2 text-xs items-center">
+          <span className="inline-flex items-center rounded-full border border-border bg-bg/80 px-2.5 py-1 font-medium text-primary tabular-nums">
+            {peopleCount === 0
+              ? "No one listed yet"
+              : `${peopleCount} of ${maxPeople} people`}
+          </span>
+          {spaceSessions.length > 0 && (
+            <span className="inline-flex items-center rounded-full border border-border bg-bg/80 px-2.5 py-1 text-muted tabular-nums">
+              {spaceSessions.length} meeting
+              {spaceSessions.length === 1 ? "" : "s"}
+            </span>
+          )}
+          {typeof prayerBoardCount === "number" && prayerBoardCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setPrayerBoardOpen(true)}
+              className="inline-flex items-center rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-medium text-primary touch-manipulation"
+            >
+              {prayerBoardCount} prayer
+              {prayerBoardCount === 1 ? "" : "s"}
+            </button>
+          )}
+          <GroupLinkBadge
+            sync={space.sync}
+            onlineMode={onlineMode}
+            size="md"
+          />
+        </div>
+
+        {latestTitle ? (
+          <button
+            type="button"
+            onClick={() => openViewSession(latestSession!)}
+            className="w-full text-left rounded-xl border border-border/80 bg-bg/70 px-3 py-2.5 touch-manipulation hover:border-primary/30 transition-colors"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Latest meeting
+            </p>
+            <p className="text-sm font-serif font-medium text-primary truncate mt-0.5">
+              {latestTitle}
+            </p>
+            <p className="text-xs text-muted mt-0.5">
+              {(() => {
+                try {
+                  return format(parseISO(latestSession!.date), "MMM d, yyyy");
+                } catch {
+                  return latestSession!.date.slice(0, 10);
+                }
+              })()}
+              {" · Open"}
+            </p>
+          </button>
+        ) : (
+          <p className="text-sm text-muted leading-relaxed">
+            When you gather, start a meeting. Scripture, notes, and prayer stay
+            with this group.
+          </p>
+        )}
+
+        <Button
+          fullWidth
+          className="!py-4 text-base shadow-md border border-primary/20"
+          onClick={() => void openCreateSession()}
+          disabled={saving}
+        >
+          <CalendarPlus className="h-5 w-5" aria-hidden />
+          {saving
+            ? "Starting…"
+            : latestSession
+              ? "Start today’s meeting"
+              : "Start your first meeting"}
+        </Button>
+        {linkStatus.kind === "offline" && (
+          <p className="text-[11px] text-amber-800 dark:text-amber-200 text-center">
+            App is Offline (header). Meetings still save on this phone.
+          </p>
+        )}
+      </Card>
+
+      {/* Guest recovery when not yet linked */}
+      {isGuest && !guestLinked && (
         <section
           className="rounded-2xl border-2 border-primary/40 bg-primary/10 px-3 py-3.5 space-y-2.5 shadow-sm"
-          aria-label="Sync group from host"
+          aria-label="Link this group"
         >
           <div className="flex items-start gap-2.5">
             <RefreshCw
@@ -925,73 +982,128 @@ export function SpaceDetail() {
             />
             <div className="min-w-0">
               <p className="text-sm font-semibold text-primary leading-tight">
-                Sync with host
+                Link with host’s room key
               </p>
               <p className="text-xs text-muted mt-0.5 leading-relaxed">
-                {guestLinked
-                  ? "Pull the latest people list, meetings, and prayer board from the shared room."
-                  : "Join once with the host’s room key, then Sync anytime to update this group."}
+                Use <strong className="text-text">Group pulse → Re-join</strong>{" "}
+                with the host’s key, then Sync anytime.
               </p>
             </div>
           </div>
-          {guestLinked ? (
-            <Button
-              fullWidth
-              className="!py-3.5 text-base font-semibold shadow-md"
-              disabled={guestSyncing}
-              onClick={() => void handleGuestSync()}
+          <div className="rounded-xl border border-border/80 bg-bg/70">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left touch-manipulation"
+              aria-expanded={hostRestoreOpen}
+              onClick={() => setHostRestoreOpen((v) => !v)}
             >
-              <RefreshCw
+              <span className="text-xs font-semibold text-muted">
+                Having trouble?
+              </span>
+              <ChevronDown
                 className={[
-                  "h-5 w-5",
-                  guestSyncing ? "animate-spin" : "",
+                  "h-4 w-4 text-muted transition-transform",
+                  hostRestoreOpen ? "rotate-180" : "",
                 ].join(" ")}
                 aria-hidden
               />
-              {guestSyncing ? "Syncing…" : "Sync"}
-            </Button>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-xs text-muted text-center rounded-lg border border-border bg-bg/80 px-2 py-2">
-                Use <strong className="text-text">Join a group</strong> with the
-                host’s room key first — then this Sync button unlocks.
-              </p>
-              <Button
-                fullWidth
-                variant="secondary"
-                className="!py-2.5 text-sm"
-                disabled={claimingHost}
-                onClick={() => {
-                  if (!space) return;
-                  setClaimingHost(true);
-                  void claimSpaceHostRole(space.id)
-                    .then(() => {
-                      toast.success("Host controls restored on this phone", {
-                        description:
-                          "You can edit the list, invite, and Open group room. Only do this if you created the group or restored your backup.",
-                        duration: 8000,
-                      });
-                    })
-                    .catch((err) =>
-                      toast.error(
-                        err instanceof Error
-                          ? err.message
-                          : "Could not restore host role",
-                      ),
-                    )
-                    .finally(() => setClaimingHost(false));
-                }}
-              >
-                {claimingHost
-                  ? "Restoring…"
-                  : "I created this group — restore host"}
-              </Button>
-            </div>
-          )}
+            </button>
+            {hostRestoreOpen && (
+              <div className="px-3 pb-3 space-y-2 border-t border-border/60 pt-2">
+                <p className="text-[11px] text-muted leading-relaxed">
+                  Only if <em>you</em> created this group or restored your own
+                  backup on this phone.
+                </p>
+                <Button
+                  fullWidth
+                  variant="secondary"
+                  className="!py-2.5 text-sm"
+                  disabled={claimingHost}
+                  onClick={() => {
+                    if (!space) return;
+                    if (
+                      !window.confirm(
+                        "Restore host controls on this phone?\n\nOnly continue if you created this group or restored your backup. Guests should Join with the host’s room key instead.",
+                      )
+                    ) {
+                      return;
+                    }
+                    setClaimingHost(true);
+                    void claimSpaceHostRole(space.id)
+                      .then(() => {
+                        toast.success("Host controls restored on this phone", {
+                          description:
+                            "You can edit the list, invite, and Open group room.",
+                          duration: 8000,
+                        });
+                      })
+                      .catch((err) =>
+                        toast.error(
+                          err instanceof Error
+                            ? err.message
+                            : "Could not restore host role",
+                        ),
+                      )
+                      .finally(() => setClaimingHost(false));
+                  }}
+                >
+                  {claimingHost
+                    ? "Restoring…"
+                    : "I created this group — restore host"}
+                </Button>
+              </div>
+            )}
+          </div>
         </section>
       )}
 
-      {/* Zone 1 — Who’s here (people + invite before connect chrome) */}
+      {/* Group pulse / Sync */}
+      <SpaceConnectionBar
+        space={space}
+        defaultExpanded={needsRoomOpen || Boolean(spaceSync.lastError)}
+      />
+
+      {/* While you meet */}
+      <section className="space-y-2" aria-label="While you meet">
+        <h3 className="text-sm font-semibold text-primary">While you meet</h3>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => openBibleForSpace()}
+            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface/95 px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
+          >
+            <BookOpen className="h-6 w-6 text-primary" aria-hidden />
+            <span className="text-xs font-medium text-primary leading-tight">
+              {spaceSessions[0] || activeSession ? "Study" : "Bible"}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPrayerBoardOpen(true)}
+            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface/95 px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
+          >
+            <HandHeart className="h-6 w-6 text-primary" aria-hidden />
+            <span className="text-xs font-medium text-primary leading-tight">
+              Prayer
+              {typeof prayerBoardCount === "number" && prayerBoardCount > 0
+                ? ` (${prayerBoardCount})`
+                : ""}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={openSpacePrivateNotes}
+            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface/95 px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
+          >
+            <Lock className="h-6 w-6 text-primary" aria-hidden />
+            <span className="text-xs font-medium text-primary leading-tight">
+              Just for me
+            </span>
+          </button>
+        </div>
+      </section>
+
+      {/* Who’s here */}
       <section className="space-y-2.5" aria-label="Who is here">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
@@ -1083,89 +1195,9 @@ export function SpaceDetail() {
             </Button>
           </form>
         )}
-
-        <p className="text-xs text-muted">
-          {isHost
-            ? "Tap a name to edit. Invite so they can open this group on their phone."
-            : "Only the host can add or remove people. Tap Sync to refresh the list."}
-        </p>
       </section>
 
-      {/* Zone 2 — Primary worship CTA (sticky in lower thumb zone) */}
-      <div className="sticky-thumb-actions -mx-1 px-1 py-1 space-y-2">
-        {guestLinked && (
-          <Button
-            fullWidth
-            variant="secondary"
-            className="!py-3.5 text-base font-semibold border-2 border-primary/35"
-            disabled={guestSyncing}
-            onClick={() => void handleGuestSync()}
-          >
-            <RefreshCw
-              className={[
-                "h-5 w-5",
-                guestSyncing ? "animate-spin" : "",
-              ].join(" ")}
-              aria-hidden
-            />
-            {guestSyncing ? "Syncing…" : "Sync"}
-          </Button>
-        )}
-        <Button
-          fullWidth
-          className="!py-4 text-base shadow-md border border-primary/20"
-          onClick={() => void openCreateSession()}
-          disabled={saving}
-        >
-          <CalendarPlus className="h-5 w-5" aria-hidden />
-          {saving ? "Starting…" : "Start today’s meeting"}
-        </Button>
-      </div>
-
-      {/* Connection / sync — after meet CTA so worship stays closer to thumbs */}
-      <SpaceConnectionBar space={space} />
-
-      {/* Zone 3 — While you meet (large tiles for thumb) */}
-      <section className="space-y-2" aria-label="While you meet">
-        <h3 className="text-sm font-semibold text-primary">While you meet</h3>
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => openBibleForSpace()}
-            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
-          >
-            <BookOpen className="h-6 w-6 text-primary" aria-hidden />
-            <span className="text-xs font-medium text-primary leading-tight">
-              {spaceSessions[0] || activeSession ? "Study" : "Bible"}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setPrayerBoardOpen(true)}
-            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
-          >
-            <HandHeart className="h-6 w-6 text-primary" aria-hidden />
-            <span className="text-xs font-medium text-primary leading-tight">
-              Prayer
-              {typeof prayerBoardCount === "number" && prayerBoardCount > 0
-                ? ` (${prayerBoardCount})`
-                : ""}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={openSpacePrivateNotes}
-            className="flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-3.5 text-center touch-manipulation active:scale-[0.98] hover:border-primary/30"
-          >
-            <Lock className="h-6 w-6 text-primary" aria-hidden />
-            <span className="text-xs font-medium text-primary leading-tight">
-              Just for me
-            </span>
-          </button>
-        </div>
-      </section>
-
-      {/* Zone 4 — Past meetings (timeline) */}
+      {/* Past meetings */}
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-lg">Past meetings</h3>
@@ -1794,7 +1826,7 @@ function BackLink() {
       className="inline-flex items-center gap-1.5 text-sm font-medium text-primary touch-manipulation tap-target -ml-1 px-1"
     >
       <ArrowLeft className="h-4 w-4" aria-hidden />
-      All spaces
+      All groups
     </Link>
   );
 }

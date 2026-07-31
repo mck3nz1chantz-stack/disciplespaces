@@ -1,0 +1,41 @@
+{
+  "schema": "ClientHubFacts.v1",
+  "version": 1,
+  "updatedAt": "2026-07-31T22:00:00.000Z",
+  "businessName": "DiscipleSpaces",
+  "projectTitle": "DiscipleSpaces — local-first discipleship spaces PWA",
+  "previewUrl": "https://disciple-spaces.pages.dev",
+  "productionDomain": "disciple-spaces.pages.dev",
+  "goalsSummary": "Local-first PWA for discipleship spaces: Bible reading (public-domain KJV/WEB), sessions, invites, and optional light room relay — data stays on-device by default.",
+  "assetsSummary": "• Brand: DiscipleSpaces cross icons + favicon (public/icons)\n• Bible data: public/data/bible (KJV/WEB)\n• Deploy: Cloudflare Pages disciple-spaces + optional space-relay Worker\n• Production: https://disciple-spaces.pages.dev",
+  "looksEstablished": true,
+  "confirmations": [
+    {
+      "id": "preview",
+      "group": "Site already built",
+      "text": "Preview/production on Cloudflare Pages (disciple-spaces.pages.dev) is the current public app shell. Correct?"
+    },
+    {
+      "id": "local-first",
+      "group": "How the site works today",
+      "text": "User spaces/sessions stay in IndexedDB on-device; optional relay is only for short join codes when configured. Still correct?"
+    },
+    {
+      "id": "bible",
+      "group": "How the site works today",
+      "text": "Bible text is public-domain KJV + WEB only (no paid translations). Still correct?"
+    },
+    {
+      "id": "golive",
+      "group": "Go-live (needs your OK)",
+      "text": "Custom domain can become canonical later (VITE_CANONICAL_ORIGIN); migrate users with Back up → Restore. Still correct?"
+    }
+  ],
+  "socials": {
+    "instagram": "",
+    "facebook": "",
+    "etsy": "",
+    "other": []
+  },
+  "notesForOperator": "First-party studio product (not client MediaLaunch site). Prefer build-state + this facts file for Hub. Stack details stay in build-state, not here."
+}

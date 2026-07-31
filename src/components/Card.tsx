@@ -22,8 +22,9 @@ export function Card({
   return (
     <Tag
       className={[
-        "rounded-[var(--radius-card)] bg-surface/95 border border-border/90",
-        "shadow-[var(--shadow-card)] backdrop-blur-sm",
+        /* Stronger glass over sanctuary cross so type stays crisp */
+        "rounded-[var(--radius-card)] bg-surface/98 border border-border/90",
+        "shadow-[var(--shadow-card)] backdrop-blur-md",
         pad[padding],
         className,
       ]

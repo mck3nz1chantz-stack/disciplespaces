@@ -9,7 +9,7 @@
  */
 /* eslint-disable no-restricted-globals */
 /** Bump when shell caching strategy or pre-cache list must force-refresh. */
-const SHELL_CACHE = "ds-shell-v4";
+const SHELL_CACHE = "ds-shell-v7";
 const BIBLE_CACHE = "bible-data-pd-v1";
 
 const SHELL_URLS = [
@@ -103,6 +103,16 @@ self.addEventListener("fetch", (event) => {
   // old JS + new HTML mismatches that look like a white-screen brick).
   if (url.pathname.startsWith("/assets/")) {
     event.respondWith(networkFirst(req, SHELL_CACHE));
+    return;
+  }
+
+  // Media (scroll-play video) — always network; never pin a stale encode
+  if (url.pathname.startsWith("/media/")) {
+    event.respondWith(
+      fetch(req, { cache: "no-store" }).catch(() => caches.match(req)).then(
+        (r) => r || Response.error(),
+      ),
+    );
     return;
   }
 

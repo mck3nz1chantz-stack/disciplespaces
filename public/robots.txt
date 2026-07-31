@@ -1,0 +1,7 @@
+# DiscipleSpaces public app shell (PWA). User data stays local (IndexedDB).
+# Allow crawlers on the static marketing shell; no private content is served from dist.
+
+User-agent: *
+Allow: /
+
+# Optional later: Sitemap: https://disciple-spaces.pages.dev/sitemap.xml

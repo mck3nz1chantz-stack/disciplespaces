@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./Button";
@@ -27,6 +27,9 @@ interface ModalProps {
   containBody?: boolean;
 }
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * Full-screen dialog. Always portaled to document.body so it stacks above the
  * fixed bottom nav (Layout creates a lower stacking context that would trap
@@ -45,21 +48,74 @@ export function Modal({
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const baseId = useId();
 
+  // Focus trap + Escape + body scroll lock
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && dismissible) onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    // Signal layout chrome (optional) that a dialog is up
     document.documentElement.dataset.modalOpen = "1";
+
+    // Move focus into dialog after paint
+    const focusTimer = window.requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const first = panel.querySelector<HTMLElement>(FOCUSABLE);
+      (first ?? titleRef.current ?? panel).focus();
+    });
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dismissible) {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const nodes = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
+      ).filter((el) => !el.hasAttribute("disabled") && el.tabIndex !== -1);
+      if (nodes.length === 0) {
+        e.preventDefault();
+        titleRef.current?.focus();
+        return;
+      }
+      const first = nodes[0]!;
+      const last = nodes[nodes.length - 1]!;
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (active === first || !panelRef.current.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKey);
     return () => {
+      window.cancelAnimationFrame(focusTimer);
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
+      document.body.style.overflow = prevOverflow;
       delete document.documentElement.dataset.modalOpen;
+      const prev = previousFocusRef.current;
+      if (prev && typeof prev.focus === "function") {
+        try {
+          prev.focus();
+        } catch {
+          // ignore
+        }
+      }
     };
   }, [open, dismissible, onClose]);
 
@@ -79,6 +135,8 @@ export function Modal({
 
   if (!open) return null;
 
+  const hasTabs = Boolean(tabs && tabs.length > 0 && onTabChange);
+
   const node = (
     <div
       className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -89,27 +147,28 @@ export function Modal({
         aria-label={dismissible ? "Close dialog" : undefined}
         className="absolute inset-0 bg-black/45"
         onClick={dismissible ? onClose : undefined}
-        tabIndex={dismissible ? 0 : -1}
+        tabIndex={-1}
       />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={`${baseId}-title`}
         className={[
-          // pb uses safe-area only — tab bar is under the scrim, not beside the sheet
           "relative z-10 w-full max-w-md rounded-t-2xl sm:rounded-2xl bg-surface border border-border shadow-xl p-5",
           "pb-[max(1.25rem,env(safe-area-inset-bottom))]",
           containBody
-            ? // Definite height required: Session dual-panes are position:absolute
-              // and contribute 0 flow height. max-h alone collapses body to ~0
-              // (regression: only max-h → empty sheet / “stuck” on phones).
-              "flex flex-col h-[min(92dvh,100%)] max-h-[92dvh] overflow-hidden min-h-0 sm:h-[min(90dvh,100%)] sm:max-h-[90dvh]"
+            ? "flex flex-col h-[min(92dvh,100%)] max-h-[92dvh] overflow-hidden min-h-0 sm:h-[min(90dvh,100%)] sm:max-h-[90dvh]"
             : "max-h-[92dvh] overflow-y-auto overscroll-contain sm:max-h-[90dvh] [-webkit-overflow-scrolling:touch]",
         ].join(" ")}
       >
         <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
-          <h2 id="modal-title" className="text-xl pr-2">
+          <h2
+            id={`${baseId}-title`}
+            ref={titleRef}
+            tabIndex={-1}
+            className="text-xl pr-2 outline-none"
+          >
             {title}
           </h2>
           {dismissible && (
@@ -124,21 +183,46 @@ export function Modal({
           )}
         </div>
 
-        {tabs && tabs.length > 0 && onTabChange && (
+        {hasTabs && (
           <div
             className="grid grid-cols-2 gap-1 rounded-xl bg-surface-muted/70 p-1 mb-3 shrink-0"
             role="tablist"
             aria-label="Modal sections"
+            onKeyDown={(e) => {
+              if (!tabs || !onTabChange) return;
+              const idx = tabs.findIndex((t) => t.id === activeTab);
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                e.preventDefault();
+                const next = tabs[(idx + 1 + tabs.length) % tabs.length];
+                if (next) onTabChange(next.id);
+              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const next = tabs[(idx - 1 + tabs.length) % tabs.length];
+                if (next) onTabChange(next.id);
+              } else if (e.key === "Home") {
+                e.preventDefault();
+                if (tabs[0]) onTabChange(tabs[0].id);
+              } else if (e.key === "End") {
+                e.preventDefault();
+                const last = tabs[tabs.length - 1];
+                if (last) onTabChange(last.id);
+              }
+            }}
           >
-            {tabs.map((tab) => {
+            {tabs!.map((tab) => {
               const selected = activeTab === tab.id;
+              const panelId = `${baseId}-panel-${tab.id}`;
+              const tabId = `${baseId}-tab-${tab.id}`;
               return (
                 <button
                   key={tab.id}
+                  id={tabId}
                   type="button"
                   role="tab"
                   aria-selected={selected}
-                  onClick={() => onTabChange(tab.id)}
+                  aria-controls={panelId}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => onTabChange!(tab.id)}
                   className={[
                     "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-xs font-semibold touch-manipulation tap-target transition-colors",
                     selected
@@ -161,20 +245,42 @@ export function Modal({
         {containBody ? (
           <div
             ref={bodyRef}
-            // flex-1 fills the definite panel height. overflow-y-auto for
-            // normal-flow content (keys); Session panes scroll themselves.
+            id={
+              hasTabs && activeTab
+                ? `${baseId}-panel-${activeTab}`
+                : undefined
+            }
+            role={hasTabs ? "tabpanel" : undefined}
+            aria-labelledby={
+              hasTabs && activeTab
+                ? `${baseId}-tab-${activeTab}`
+                : undefined
+            }
             className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
           >
             {children}
           </div>
         ) : (
-          children
+          <div
+            id={
+              hasTabs && activeTab
+                ? `${baseId}-panel-${activeTab}`
+                : undefined
+            }
+            role={hasTabs ? "tabpanel" : undefined}
+            aria-labelledby={
+              hasTabs && activeTab
+                ? `${baseId}-tab-${activeTab}`
+                : undefined
+            }
+          >
+            {children}
+          </div>
         )}
       </div>
     </div>
   );
 
-  // Portal out of Layout stacking context so z-index beats the bottom nav
   if (typeof document !== "undefined") {
     return createPortal(node, document.body);
   }

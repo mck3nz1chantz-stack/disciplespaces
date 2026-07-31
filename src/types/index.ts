@@ -161,6 +161,12 @@ export interface Space {
   createdAt: string;
   members: Member[];
   /**
+   * ISO time of last local roster edit (add/remove/rename/set).
+   * Used so pull does not revive people the host just removed before push lands.
+   * Never required — missing means “accept remote roster on replace-shared pull”.
+   */
+  membersUpdatedAt?: string;
+  /**
    * Preferred public-domain edition for this Space (KJV or WEB).
    * No paid/licensed translations.
    */

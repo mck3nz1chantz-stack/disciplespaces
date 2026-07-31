@@ -17,6 +17,10 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    // VDG-004: avoid hung “failed to load page” when esbuild prebundle stalls (Node 26)
+    warmup: {
+      clientFiles: ["./src/main.tsx", "./src/App.tsx"],
+    },
   },
   preview: {
     host: "127.0.0.1",
@@ -24,6 +28,8 @@ export default defineConfig({
     strictPort: true,
   },
   optimizeDeps: {
+    // Holding-pattern fix for intermittent Vite hang under Node 26 + lucide
+    holdUntilCrawlEnd: false,
     exclude: ["lucide-react"],
     include: [
       "sonner",
@@ -32,6 +38,9 @@ export default defineConfig({
       "zustand",
       "date-fns",
       "react-router-dom",
+      "react",
+      "react-dom",
+      "react-dom/client",
     ],
   },
   resolve: {

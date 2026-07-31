@@ -23,7 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Env & local tooling
+# Env & local tooling (do not commit secrets)
 .env
 .env.*
+!.env.example
 .wrangler

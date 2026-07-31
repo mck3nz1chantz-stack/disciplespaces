@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DiscipleSpaces — Cross scroll-play preview</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: ui-serif, Georgia, "Times New Roman", serif;
+      background: #0c0a09; color: #f5f0e8;
+      display: grid; place-items: start center;
+      padding: 2rem 1rem 4rem;
+    }
+    .note {
+      font-family: system-ui, sans-serif;
+      font-size: 12px; color: #a8a29e; max-width: 36rem;
+      margin: 0 0 1.25rem; line-height: 1.45;
+    }
+    .note strong { color: #e7e5e4; }
+    .bible-reader {
+      position: relative;
+      width: min(40rem, 100%);
+      min-height: 260vh;
+      border-radius: 1.5rem;
+      padding: 1.75rem 1.5rem 4rem;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(28, 25, 23, 0.72);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    }
+    .bible-reader-video-bg {
+      position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    }
+    .bible-reader-video-bg__media {
+      position: sticky; top: 0; display: block;
+      width: 100%; height: 100dvh; max-height: 100%;
+      object-fit: cover; object-position: center 35%;
+      opacity: 0.28; filter: saturate(0.85) contrast(1.05);
+    }
+    .bible-reader-video-bg__scrim {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(180deg, rgba(12,10,9,0.55), rgba(12,10,9,0.78)),
+        radial-gradient(ellipse at 50% 20%, rgba(0,0,0,0.1), rgba(0,0,0,0.55));
+    }
+    .content { position: relative; z-index: 1; }
+    .eyebrow {
+      font-family: system-ui, sans-serif;
+      font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: #a8a29e; text-align: center; margin: 0 0 0.5rem;
+    }
+    h1 {
+      margin: 0; text-align: center; font-weight: 600;
+      font-size: 1.75rem; letter-spacing: -0.02em;
+    }
+    .chap {
+      text-align: center; color: #a8a29e; margin: 0.35rem 0 1.25rem;
+      font-size: 1.1rem;
+    }
+    .rule {
+      width: 4rem; height: 1px; margin: 0 auto 1.5rem;
+      background: linear-gradient(90deg, transparent, rgba(212,175,106,0.7), transparent);
+    }
+    p.verse {
+      margin: 0; padding: 0.35rem 0.25rem;
+      line-height: 1.65; font-size: 1.08rem;
+    }
+    .vnum {
+      font-family: system-ui, sans-serif;
+      font-size: 0.72rem; color: #d4af6a; margin-right: 0.45rem;
+      vertical-align: super;
+    }
+    .status {
+      position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%);
+      font-family: system-ui, sans-serif; font-size: 11px;
+      background: rgba(0,0,0,0.75); color: #e7e5e4;
+      padding: 0.4rem 0.75rem; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      z-index: 20;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .bible-reader-video-bg { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <p class="note">
+    <strong>Passage-stretched scroll-play</strong> — full video maps to reading the
+    whole card (top of reader at top of view → bottom of reader at bottom of view).
+    Longer text = slower advance; last scroll should reach the woodgrain end frame.
+  </p>
+  <article class="bible-reader" aria-label="John chapter 1 sample" id="reader">
+    <div class="bible-reader-video-bg" aria-hidden="true">
+      <video
+        class="bible-reader-video-bg__media"
+        id="crossVid"
+        src="/media/crossanimation1-web.mp4"
+        muted playsinline preload="metadata"
+      ></video>
+      <div class="bible-reader-video-bg__scrim"></div>
+    </div>
+    <div class="content">
+      <p class="eyebrow">KJV</p>
+      <h1>John</h1>
+      <p class="chap">Chapter 1</p>
+      <div class="rule"></div>
+      <p class="verse"><span class="vnum">1</span>In the beginning was the Word, and the Word was with God, and the Word was God.</p>
+      <p class="verse"><span class="vnum">2</span>The same was in the beginning with God.</p>
+      <p class="verse"><span class="vnum">3</span>All things were made by him; and without him was not any thing made that was made.</p>
+      <p class="verse"><span class="vnum">4</span>In him was life; and the life was the light of men.</p>
+      <p class="verse"><span class="vnum">5</span>And the light shineth in darkness; and the darkness comprehended it not.</p>
+      <p class="verse"><span class="vnum">6</span>There was a man sent from God, whose name was John.</p>
+      <p class="verse"><span class="vnum">7</span>The same came for a witness, to bear witness of the Light, that all men through him might believe.</p>
+      <p class="verse"><span class="vnum">8</span>He was not that Light, but was sent to bear witness of that Light.</p>
+      <p class="verse"><span class="vnum">9</span>That was the true Light, which lighteth every man that cometh into the world.</p>
+      <p class="verse"><span class="vnum">10</span>He was in the world, and the world was made by him, and the world knew him not.</p>
+      <p class="verse"><span class="vnum">11</span>He came unto his own, and his own received him not.</p>
+      <p class="verse"><span class="vnum">12</span>But as many as received him, to them gave he power to become the sons of God, even to them that believe on his name.</p>
+      <p class="verse"><span class="vnum">13</span>Which were born, not of blood, nor of the will of the flesh, nor of the will of man, but of God.</p>
+      <p class="verse"><span class="vnum">14</span>And the Word was made flesh, and dwelt among us, (and we beheld his glory, the glory as of the only begotten of the Father,) full of grace and truth.</p>
+      <p class="verse" style="margin-top:2rem;opacity:.7;font-family:system-ui;font-size:12px">
+        Scroll — plate follows. Stop — freezes (no frame slip).
+      </p>
+    </div>
+  </article>
+  <div class="status" id="status">scroll to advance</div>
+  <script>
+    const v = document.getElementById('crossVid');
+    const section = document.getElementById('reader');
+    const status = document.getElementById('status');
+
+    if (v && section) {
+      v.muted = true;
+      v.defaultMuted = true;
+      v.loop = false;
+      try { v.volume = 0; v.pause(); v.playbackRate = 1; } catch (_) {}
+
+      let duration = 0;
+      let raf = 0;
+      let lastApplied = -1;
+
+      const clamp01 = (n) => (n <= 0 ? 0 : n >= 1 ? 1 : n);
+      /** Reading-range progress: stretch full video across passage scroll length. */
+      const progress = () => {
+        const rect = section.getBoundingClientRect();
+        const sectionH = Math.max(section.scrollHeight, section.offsetHeight, rect.height, 1);
+        const viewH = window.innerHeight || 1;
+        const scrollable = sectionH - viewH;
+        if (scrollable <= 8) {
+          return clamp01((viewH - rect.top) / (sectionH + viewH));
+        }
+        // 0 when section top at viewport top; 1 when section bottom at viewport bottom
+        const scrolledInto = 0 - rect.top;
+        return clamp01(scrolledInto / scrollable);
+      };
+
+      const apply = () => {
+        raf = 0;
+        if (!duration || v.readyState < 1) return;
+        if (!v.paused) try { v.pause(); } catch (_) {}
+        const p = progress();
+        const t = Math.min(p * duration, Math.max(duration - 0.001, 0));
+        if (Math.abs(t - lastApplied) < 0.008) return;
+        lastApplied = t;
+        try { v.currentTime = t; } catch (_) {}
+        status.textContent = 't=' + t.toFixed(2) + 's / ' + duration.toFixed(1) + 's · passage ' + Math.round(p * 100) + '%';
+      };
+
+      const schedule = () => {
+        if (!raf) raf = requestAnimationFrame(apply);
+      };
+
+      v.addEventListener('loadedmetadata', () => {
+        duration = v.duration || 0;
+        apply();
+      });
+      if (v.readyState >= 1) {
+        duration = v.duration || 0;
+        apply();
+      }
+      window.addEventListener('scroll', schedule, { passive: true });
+      window.addEventListener('resize', schedule, { passive: true });
+    }
+  </script>
+</body>
+</html>
