@@ -4,24 +4,26 @@
   "kind": "first-party",
   "lastUpdated": "2026-07-31",
   "gitBranch": "main",
-  "lastKnownCommit": "8d9dda5",
+  "lastKnownCommit": "f407f61",
   "deploy": {
     "pages": "https://disciple-spaces.pages.dev",
     "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
     "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
-    "notes": "Pages + relay shipped this session. Theme contrast fix may be uncommitted locally after 8d9dda5."
+    "latestDeploymentUrl": "https://ecdcd87d.disciple-spaces.pages.dev",
+    "notes": "f407f61 shipped nav P0–P2 + Gather + theme contrast to Pages (2026-07-31). Relay unchanged."
   },
-  "currentSlice": "Nav wayfinding + Gather ritual — done",
-  "nextSlice": "Commit/push/deploy nav P0–P2 + Gather + theme contrast",
+  "currentSlice": "Nav wayfinding + Gather ritual — shipped",
+  "nextSlice": "Optional code-split main chunk · device secret on Worker · product polish as needed",
   "sliceStatuses": {
     "sync-relay-harden": "done",
-    "gui-p0-p2": "done-mostly",
-    "theme-contrast": "done-local-maybe-uncommitted",
+    "gui-p0-p2": "done",
+    "theme-contrast": "done-shipped",
     "nav-p0": "done",
     "nav-p1": "done",
     "nav-p2": "done",
     "nav-suggestions": "done",
-    "gather-path": "done"
+    "gather-path": "done",
+    "deploy-nav-gather": "done"
   },
   "criticalNotes": [
     "Private notes never leave device; assertNoPrivateNotes on relay snapshots",
@@ -35,7 +37,7 @@
     "Bible cross video plate locked: docs/final/bible-reader-scroll-video-plate.md"
   ],
   "openIssues": [
-    "Commit/push/deploy: nav P0–P2 + Gather + theme contrast",
+    "Optional: code-split main JS chunk (~800KB)",
     "Commit/push/deploy ThemeToggle + FeedbackLauncher contrast if still dirty",
     "Optional: code-split main JS chunk (~800KB)",
     "Optional: device secret validation on Worker (currently not checked)"
