@@ -241,27 +241,29 @@ export function Dashboard() {
       )}
 
       {error && (
-        <Card className="border-danger/30 bg-danger/10 text-danger text-sm space-y-3">
-          <p>{error}</p>
-          <div className="flex flex-col gap-2">
-            <Button
-              variant="secondary"
-              fullWidth
-              className="!py-2.5"
+        <div
+          role="alert"
+          className="rounded-xl border border-danger/25 bg-danger/8 px-3 py-2.5 text-sm space-y-2"
+        >
+          <p className="font-medium text-danger leading-snug line-clamp-3">
+            {error}
+          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              type="button"
+              className="text-sm font-semibold text-primary underline-offset-2 hover:underline touch-manipulation"
               onClick={() => {
                 useAppStore.getState().clearError();
                 void initialize();
               }}
             >
               Try again
-            </Button>
-            <p className="text-xs text-muted leading-relaxed">
-              If this keeps failing after an app update, try Settings → Restore
-              with a backup file, or fully refresh the site (clear site cache
-              only if you have a backup).
-            </p>
+            </button>
+            <span className="text-xs text-muted">
+              Or Settings → Restore with a backup.
+            </span>
           </div>
-        </Card>
+        </div>
       )}
 
       {isLoading && spaces.length === 0 && (

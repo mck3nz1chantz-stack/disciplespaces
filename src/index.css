@@ -565,30 +565,51 @@ html:not(.dark) {
   }
 }
 
-/* Sonner toasts — readable on narrow phones / notched devices */
-[data-sonner-toaster][data-y-position="top"] {
-  top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
-}
-
+/*
+ * Sonner toasts — fixed overlay only. Never participate in document flow
+ * (that’s what made the whole site “jump” when errors appeared).
+ * Bottom stack sits above the tab bar; heights are capped so open/close
+ * doesn’t thrash the stack.
+ */
 [data-sonner-toaster] {
+  position: fixed !important;
+  z-index: 320 !important;
   --width: min(22rem, calc(100vw - 1.5rem)) !important;
   width: min(22rem, calc(100vw - 1.5rem)) !important;
   max-width: calc(100vw - 1.5rem) !important;
   box-sizing: border-box;
+  /* Don’t let the toast region steal layout from the page */
+  pointer-events: none !important;
   padding-inline: max(0.5rem, env(safe-area-inset-left, 0px))
     max(0.5rem, env(safe-area-inset-right, 0px));
 }
 
+[data-sonner-toaster][data-y-position="bottom"] {
+  /* bottom offset is set via Toaster props (above bottom nav) */
+  bottom: 0 !important;
+}
+
+[data-sonner-toaster][data-y-position="top"] {
+  top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
+}
+
 [data-sonner-toast] {
+  pointer-events: auto !important;
   max-width: 100% !important;
+  /* Hard cap — long sync/API errors used to grow and shove the stack */
+  max-height: min(9.5rem, 28vh) !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
   box-sizing: border-box !important;
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: normal !important;
   /* Room for close control on the right */
-  padding: 0.75rem 2.5rem 0.75rem 0.875rem !important;
+  padding: 0.7rem 2.35rem 0.7rem 0.8rem !important;
   font-size: 0.875rem !important;
-  line-height: 1.4 !important;
+  line-height: 1.35 !important;
+  /* Prefer transform-only feel; avoid height thrash */
+  will-change: transform, opacity;
 }
 
 [data-sonner-toast] [data-content] {
@@ -596,15 +617,32 @@ html:not(.dark) {
   flex: 1 1 auto;
 }
 
-[data-sonner-toast] [data-title],
-[data-sonner-toast] [data-description] {
+.ds-toast-title,
+[data-sonner-toast] [data-title] {
   white-space: normal !important;
-  overflow: visible !important;
-  text-overflow: unset !important;
+  overflow: hidden !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2;
   max-width: 100%;
+  font-weight: 600 !important;
 }
 
-[data-sonner-toast][data-styled="true"] [data-close-button] {
+.ds-toast-desc,
+[data-sonner-toast] [data-description] {
+  white-space: normal !important;
+  overflow: hidden !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 3;
+  text-overflow: ellipsis !important;
+  max-width: 100%;
+  opacity: 0.92;
+  margin-top: 0.15rem !important;
+}
+
+[data-sonner-toast][data-styled="true"] [data-close-button],
+.ds-toast-close {
   /* Keep X inside the toast so it doesn’t clip off-screen on mobile */
   left: unset !important;
   right: 0.25rem !important;
@@ -614,9 +652,26 @@ html:not(.dark) {
   background: var(--color-surface);
 }
 
+/* Action chips stay compact so error toasts don’t balloon */
+[data-sonner-toast] [data-button],
+.ds-toast-action {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (min-width: 640px) {
   [data-sonner-toast] {
-    font-size: 0.9375rem !important;
+    font-size: 0.9rem !important;
+    max-height: min(10rem, 26vh) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast] {
+    transition: none !important;
+    animation: none !important;
   }
 }
 

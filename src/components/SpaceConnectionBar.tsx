@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { toast } from "sonner";
+import { friendlyError, notifyError, notifyMessage, notifySuccess } from "../lib/notify";
 import { Button } from "./Button";
 import {
   ConnectSafelyHelpButton,
@@ -134,24 +135,18 @@ export function SpaceConnectionBar({
         exportFilename(payload.space.name),
         formatExportShareText(payload),
       );
-      toast.success("Group file saved on this phone", {
-        description:
-          "Your meetings are in that file (DSX1.). Private “Just for me” notes stay in the app only.",
-        duration: 6000,
+      notifySuccess("Group file saved", "Meetings in DSX1. file. Private notes stay on this phone.", {
+        duration: 5000,
       });
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Could not save group file",
-      );
+      notifyError("Could not save group file", friendlyError(err));
     }
   }
 
   async function handleSync() {
     if (!connected) return;
     if (appOffline) {
-      toast.message("App is set to Offline", {
-        description: "Tap Online in the header, then Sync.",
-      });
+      notifyMessage("App is set to Offline", "Tap Online in the header, then Sync.");
       return;
     }
     setBusy(true);
@@ -161,25 +156,30 @@ export function SpaceConnectionBar({
       setJustSynced(true);
       window.setTimeout(() => setJustSynced(false), 4200);
       noteManualSyncToast();
-      toast.success(formatSyncSuccessTitle(changes), {
-        id: SYNC_SUCCESS_TOAST_ID,
-        description: formatSyncChangeDescription(changes) ?? undefined,
-        duration: changes.hasChanges ? 5200 : 3200,
-      });
+      notifySuccess(
+        formatSyncSuccessTitle(changes),
+        formatSyncChangeDescription(changes) ?? undefined,
+        {
+          id: SYNC_SUCCESS_TOAST_ID,
+          duration: changes.hasChanges ? 4800 : 3000,
+        },
+      );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Sync failed";
-      toast.error("Sync didn’t finish", {
-        id: SYNC_FAIL_TOAST_ID,
-        duration: 14000,
-        description: `${msg} Your group is still on this phone — nothing was deleted.`,
-        action: {
-          label: "Fix link",
-          onClick: () => {
-            setExpanded(true);
-            setRelinkOpen(true);
+      notifyError(
+        "Sync didn’t finish",
+        `${friendlyError(err, "Sync failed")} Your group is still on this phone.`,
+        {
+          id: SYNC_FAIL_TOAST_ID,
+          duration: 9000,
+          action: {
+            label: "Fix link",
+            onClick: () => {
+              setExpanded(true);
+              setRelinkOpen(true);
+            },
           },
         },
-      });
+      );
     } finally {
       setBusy(false);
     }
@@ -187,24 +187,20 @@ export function SpaceConnectionBar({
 
   function openRoomFlow() {
     if (!relayReady) {
-      toast.message("Shared rooms not on this build", {
-        description: "Use Invite (QR) or a group file for now.",
-      });
+      notifyMessage("Shared rooms not on this build", "Use Invite (QR) or a group file for now.");
       return;
     }
     if (!mayOpenRoom) {
-      toast.message("Only the host opens the room", {
-        description:
-          "Ask them for the room key. On this phone use Join a group — never open a second room.",
-        duration: 6000,
-      });
+      notifyMessage(
+        "Only the host opens the room",
+        "Ask them for the room key. Guests Join — never open a second room.",
+        { duration: 5500 },
+      );
       setGuideOpen(true);
       return;
     }
     if (appOffline) {
-      toast.message("Turn Online on first", {
-        description: "Use the Online control in the header, then open the room.",
-      });
+      notifyMessage("Turn Online on first", "Use Online in the header, then open the room.");
       return;
     }
     setOpenRoomConfirm(true);
@@ -249,7 +245,7 @@ export function SpaceConnectionBar({
         });
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not open room");
+      notifyError("Could not open room", friendlyError(err));
     } finally {
       setBusy(false);
     }
@@ -258,8 +254,8 @@ export function SpaceConnectionBar({
   function copyRoomKey() {
     if (!roomKey) return;
     void navigator.clipboard.writeText(roomKey).then(
-      () => toast.success("Room key copied"),
-      () => toast.error("Could not copy"),
+      () => notifySuccess("Room key copied"),
+      () => notifyError("Could not copy"),
     );
   }
 
@@ -313,15 +309,12 @@ export function SpaceConnectionBar({
         duration: 12000,
       });
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Could not issue a new room key",
-        {
-          action: {
-            label: "Save group file",
-            onClick: () => void saveGroupFile(),
-          },
+      notifyError("Could not issue a new room key", friendlyError(err), {
+        action: {
+          label: "Save file",
+          onClick: () => void saveGroupFile(),
         },
-      );
+      });
     } finally {
       setBusy(false);
     }

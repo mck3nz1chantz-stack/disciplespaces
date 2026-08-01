@@ -114,8 +114,9 @@ export function useForegroundSpaceSync(): void {
             "Tap Sync now on the group. If it still fails, re-Join with the host’s current room key.";
           toast.message("Couldn’t sync yet", {
             id: SYNC_FAIL_TOAST_ID,
-            description: detail,
-            duration: 7000,
+            description:
+              detail.length > 140 ? `${detail.slice(0, 139).trimEnd()}…` : detail,
+            duration: 6000,
           });
         } else if (successes > 0) {
           if (shouldShowAutoSyncSuccessToast(anyNotable)) {
