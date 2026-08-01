@@ -23,16 +23,17 @@ export function FeedbackLauncher() {
         className={[
           "inline-flex items-center justify-center rounded-xl p-2.5 shrink-0",
           "touch-manipulation tap-target transition-colors",
-          "border border-border/90 bg-surface/90 text-text",
-          "hover:bg-surface-muted hover:border-primary/30",
+          /* Quiet chrome on parchment — no amber fill, no high-luminance chip */
+          "border border-border/70 bg-transparent text-muted",
+          "hover:bg-surface-muted/80 hover:text-primary hover:border-border",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
         ].join(" ")}
         aria-label="Report a problem"
         title="Report a problem"
       >
         <MessageSquareWarning
-          className="h-5 w-5 text-primary"
-          strokeWidth={2}
+          className="h-5 w-5 text-current"
+          strokeWidth={1.75}
           aria-hidden
         />
       </button>

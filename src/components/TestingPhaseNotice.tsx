@@ -167,7 +167,7 @@ export function TestingGuideCard({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Button fullWidth onClick={() => setFeedbackOpen(true)}>
+        <Button fullWidth variant="secondary" onClick={() => setFeedbackOpen(true)}>
           Report a problem
         </Button>
         <div className="flex flex-col gap-2 sm:flex-row">

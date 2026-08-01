@@ -171,10 +171,10 @@ export function Settings() {
         onBackup={() => openShare("export")}
       />
 
-      <Card className="space-y-3 border-amber-300/50">
+      <Card className="space-y-3">
         <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-950 dark:bg-amber-900 dark:text-amber-50">
-            <MessageSquareWarning className="h-6 w-6" aria-hidden />
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface-muted text-primary">
+            <MessageSquareWarning className="h-6 w-6" strokeWidth={1.75} aria-hidden />
           </div>
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-primary">
@@ -186,7 +186,7 @@ export function Settings() {
             </p>
           </div>
         </div>
-        <Button fullWidth onClick={() => setFeedbackOpen(true)}>
+        <Button fullWidth variant="secondary" onClick={() => setFeedbackOpen(true)}>
           Open report form
         </Button>
       </Card>
