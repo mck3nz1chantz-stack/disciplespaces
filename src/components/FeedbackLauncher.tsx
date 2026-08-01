@@ -20,11 +20,21 @@ export function FeedbackLauncher() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center rounded-xl p-2.5 text-amber-900 dark:text-amber-100 touch-manipulation tap-target hover:bg-amber-100/80 dark:hover:bg-amber-900/40 transition-colors"
+        className={[
+          "inline-flex items-center justify-center rounded-xl p-2.5 shrink-0",
+          "touch-manipulation tap-target transition-colors",
+          "border border-border/90 bg-surface/90 text-text",
+          "hover:bg-surface-muted hover:border-primary/30",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+        ].join(" ")}
         aria-label="Report a problem"
         title="Report a problem"
       >
-        <MessageSquareWarning className="h-5 w-5" aria-hidden />
+        <MessageSquareWarning
+          className="h-5 w-5 text-primary"
+          strokeWidth={2}
+          aria-hidden
+        />
       </button>
       <FeedbackModal open={open} onClose={() => setOpen(false)} />
     </>

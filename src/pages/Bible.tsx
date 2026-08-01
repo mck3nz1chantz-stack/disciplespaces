@@ -33,6 +33,7 @@ import {
   type PassageDraft,
 } from "../components/LogPassageModal";
 import { BibleLogContextBanner } from "../components/BibleLogContextBanner";
+import { NavBreadcrumb } from "../components/NavBreadcrumb";
 import { StudyGuideChip } from "../components/StudyGuideChip";
 import { SessionPassageTrail } from "../components/SessionPassageTrail";
 import {
@@ -881,24 +882,28 @@ export function Bible() {
   }
 
   /** Prefer URL update; store syncs via the searchParams effect. */
-  function pickSpace(id: string) {
+  function pickSpace(id: string, sessionId?: string | null) {
     const space = spaces.find((s) => s.id === id);
+    const nextSession = sessionId ?? null;
     // Optimistic update so the banner is correct before the URL effect runs
     setLogContext({
       spaceId: id,
       spaceName: space?.name ?? null,
-      sessionId: null,
+      sessionId: nextSession,
     });
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         next.set("space", id);
-        next.delete("session");
+        if (nextSession) next.set("session", nextSession);
+        else next.delete("session");
         return next;
       },
       { replace: true },
     );
-    setSpacePickerOpen(false);
+    // Keep picker open after group pick so user can choose a meeting;
+    // close only when a session was chosen or group alone is enough.
+    if (nextSession) setSpacePickerOpen(false);
   }
 
   function clearSpaceContext() {
@@ -914,6 +919,19 @@ export function Bible() {
     );
     setSpacePickerOpen(false);
   }
+
+  /** Sessions available for the group currently selected in the picker. */
+  const pickerSessions = useMemo(() => {
+    if (!logContext.spaceId) return [] as Session[];
+    const fromSpace =
+      spaces.find((s) => s.id === logContext.spaceId)?.sessions ?? [];
+    const fromStore = sessions.filter((s) => s.spaceId === logContext.spaceId);
+    const byId = new Map<string, Session>();
+    for (const s of [...fromSpace, ...fromStore]) byId.set(s.id, s);
+    return Array.from(byId.values()).sort((a, b) =>
+      b.date.localeCompare(a.date),
+    );
+  }, [logContext.spaceId, spaces, sessions]);
 
   if (loadingIndex) {
     return (
@@ -953,6 +971,19 @@ export function Bible() {
       {!focusMode && (
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
+            {logContext.spaceId && logContext.spaceName ? (
+              <NavBreadcrumb
+                className="mb-1.5"
+                items={[
+                  { label: "Groups", to: "/" },
+                  {
+                    label: logContext.spaceName,
+                    to: `/space/${logContext.spaceId}`,
+                  },
+                  { label: "Bible" },
+                ]}
+              />
+            ) : null}
             {canOneTapLog || logContext.spaceName ? (
               <>
                 <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted">
@@ -962,20 +993,7 @@ export function Bible() {
                   {sessionTitle ?? logContext.spaceName ?? "Bible"}
                 </h2>
                 <p className="text-sm text-muted mt-0.5 leading-snug">
-                  {logContext.spaceName && sessionTitle
-                    ? logContext.spaceName
-                    : sessionHint ?? "Select verses · one-tap log"}
-                  {logContext.spaceId ? (
-                    <>
-                      {" · "}
-                      <Link
-                        to={`/space/${logContext.spaceId}`}
-                        className="font-medium text-primary underline-offset-2 hover:underline"
-                      >
-                        Back to space
-                      </Link>
-                    </>
-                  ) : null}
+                  {sessionHint ?? "Select verses · one-tap log"}
                 </p>
               </>
             ) : (
@@ -984,7 +1002,7 @@ export function Bible() {
                   Bible
                 </h2>
                 <p className="text-sm text-muted mt-0.5 leading-snug">
-                  Read · select verses · log to a space
+                  Read · select verses · log to a group
                 </p>
               </>
             )}
@@ -1191,11 +1209,11 @@ export function Bible() {
         </Card>
       )}
 
-      {/* Space logging context — compact in focus mode when active */}
+      {/* Group logging context — compact in focus mode when active */}
       {!focusMode &&
         (logContext.spaceName ? (
           <BibleLogContextBanner
-            onSwitchSpace={() => setSpacePickerOpen(true)}
+            onChange={() => setSpacePickerOpen(true)}
             onClear={clearSpaceContext}
             sessionHint={sessionHint}
           />
@@ -1210,7 +1228,7 @@ export function Bible() {
               className="hover:border-primary/30 transition-colors flex items-center justify-between gap-2 bg-surface/70"
             >
               <span className="text-sm text-muted">
-                Log passages to a space
+                Studying for a group?
               </span>
               <span className="text-xs font-medium text-primary shrink-0">
                 Choose
@@ -1652,28 +1670,32 @@ export function Bible() {
         </div>
       </Modal>
 
-      {/* Space context picker */}
+      {/* Group + meeting context picker */}
       <Modal
         open={spacePickerOpen}
-        title="Log passages to…"
+        title="Studying for…"
         onClose={() => setSpacePickerOpen(false)}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <p className="text-sm text-muted -mt-1">
-            Choose which space receives passages you log from the reader.
+            Choose which group receives passages you log. Optionally pick a
+            meeting for one-tap log.
           </p>
           {spaces.length === 0 ? (
             <p className="text-sm text-muted">
-              No spaces yet.{" "}
-              <Link to="/" className="text-primary font-medium underline">
+              No groups yet.{" "}
+              <Link to="/new" className="text-primary font-medium underline">
                 Create one
               </Link>
               .
             </p>
           ) : (
-            <ul className="space-y-2 max-h-[50dvh] overflow-y-auto">
+            <ul className="space-y-2 max-h-[36dvh] overflow-y-auto">
               {spaces.map((s) => {
                 const active = s.id === logContext.spaceId;
+                const meetingCount =
+                  s.sessions?.length ??
+                  sessions.filter((sess) => sess.spaceId === s.id).length;
                 return (
                   <li key={s.id}>
                     <button
@@ -1693,10 +1715,9 @@ export function Bible() {
                           active ? "text-on-primary/80" : "text-muted",
                         ].join(" ")}
                       >
-                        {s.members.length} member
-                        {s.members.length === 1 ? "" : "s"}
-                        {s.sessions?.length != null
-                          ? ` · ${s.sessions.length} session${s.sessions.length === 1 ? "" : "s"}`
+                        {s.members.length} people
+                        {meetingCount > 0
+                          ? ` · ${meetingCount} meeting${meetingCount === 1 ? "" : "s"}`
                           : ""}
                       </p>
                     </button>
@@ -1705,9 +1726,64 @@ export function Bible() {
               })}
             </ul>
           )}
+
+          {logContext.spaceId && (
+            <div className="space-y-2 border-t border-border pt-3">
+              <p className="text-sm font-medium text-primary">
+                Meeting{" "}
+                <span className="text-muted font-normal">(optional)</span>
+              </p>
+              {pickerSessions.length === 0 ? (
+                <p className="text-xs text-muted leading-relaxed">
+                  No meetings yet for this group. You can still log passages and
+                  pick a meeting later.
+                </p>
+              ) : (
+                <ul className="space-y-1.5 max-h-[28dvh] overflow-y-auto">
+                  {pickerSessions.slice(0, 12).map((sess) => {
+                    const tpl = templates.find((t) => t.id === sess.templateId);
+                    const label = sessionDisplayTitle(sess, tpl);
+                    const active = sess.id === logContext.sessionId;
+                    return (
+                      <li key={sess.id}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            pickSpace(logContext.spaceId!, sess.id)
+                          }
+                          className={[
+                            "w-full text-left rounded-xl border px-3 py-2.5 touch-manipulation tap-target",
+                            active
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border bg-bg hover:border-primary/30",
+                          ].join(" ")}
+                        >
+                          <p className="text-sm font-medium truncate">
+                            {label}
+                          </p>
+                          <p className="text-[11px] text-muted mt-0.5 tabular-nums">
+                            {sess.date.slice(0, 10)}
+                          </p>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <Button
+                variant="secondary"
+                fullWidth
+                className="!py-2.5 text-sm"
+                onClick={() => setSpacePickerOpen(false)}
+              >
+                Done
+              </Button>
+            </div>
+          )}
+
           {logContext.spaceId && (
             <Button variant="ghost" fullWidth onClick={clearSpaceContext}>
-              Clear space context
+              Clear group context
             </Button>
           )}
         </div>

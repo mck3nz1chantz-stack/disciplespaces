@@ -304,6 +304,16 @@ export function JoinSpaceModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when opened / initialRaw changes
   }, [open, initialRaw]);
 
+  /** After successful join, land on that group (deep-link place, not home flash). */
+  useEffect(() => {
+    if (!open || step !== "done" || !resultSpaceId) return;
+    const spaceId = resultSpaceId;
+    const t = window.setTimeout(() => {
+      navigate(`/space/${spaceId}`, { replace: true });
+    }, 1600);
+    return () => window.clearTimeout(t);
+  }, [open, step, resultSpaceId, navigate]);
+
   function stopScan() {
     if (scanTimer.current != null) {
       window.clearInterval(scanTimer.current);
@@ -963,7 +973,7 @@ export function JoinSpaceModal({
             fullWidth
             onClick={() => {
               handleClose();
-              navigate(`/spaces/${resultSpaceId}`);
+              navigate(`/space/${resultSpaceId}`, { replace: true });
             }}
           >
             Open group
@@ -994,7 +1004,7 @@ export function JoinSpaceModal({
               fullWidth
               onClick={() => {
                 handleClose();
-                navigate(`/spaces/${resultSpaceId}`);
+                navigate(`/space/${resultSpaceId}`, { replace: true });
               }}
             >
               Open group

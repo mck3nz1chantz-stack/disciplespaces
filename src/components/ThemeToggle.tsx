@@ -4,32 +4,38 @@ import {
   themePreferenceLabel,
   type ThemePreference,
 } from "../lib/theme";
-import { Button } from "./Button";
 
 /**
  * Compact header control: cycles Light → Dark → System.
+ * High-contrast chip on both themes (no gold/yellow ink on light parchment).
  */
 export function ThemeCycleButton() {
   const { preference, cyclePreference, isDark } = useTheme();
   const label = themePreferenceLabel(preference);
 
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
-      className="!p-2.5 shrink-0"
       onClick={cyclePreference}
+      className={[
+        "inline-flex items-center justify-center rounded-xl p-2.5 shrink-0",
+        "touch-manipulation tap-target transition-colors",
+        "border border-border/90 bg-surface/90 text-text",
+        "hover:bg-surface-muted hover:border-primary/30",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+      ].join(" ")}
       aria-label={`Appearance: ${label}. Tap to change.`}
       title={`Appearance: ${label}`}
     >
       {preference === "system" ? (
-        <Monitor className="h-5 w-5" aria-hidden />
+        <Monitor className="h-5 w-5 text-text" strokeWidth={2} aria-hidden />
       ) : isDark ? (
-        <Moon className="h-5 w-5" aria-hidden />
+        <Moon className="h-5 w-5 text-primary" strokeWidth={2} aria-hidden />
       ) : (
-        <Sun className="h-5 w-5" aria-hidden />
+        /* Light mode: use primary forest, never accent gold (unreadable on parchment) */
+        <Sun className="h-5 w-5 text-primary" strokeWidth={2} aria-hidden />
       )}
-    </Button>
+    </button>
   );
 }
 
@@ -67,7 +73,7 @@ export function ThemePreferencePicker() {
 
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Appearance">
         {options.map((opt) => {
           const selected = preference === opt.id;
           const Icon = opt.icon;
@@ -79,13 +85,27 @@ export function ThemePreferencePicker() {
               className={[
                 "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-center touch-manipulation tap-target transition-colors",
                 selected
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border bg-bg text-muted hover:border-primary/30",
+                  ? "border-primary bg-primary text-on-primary shadow-sm"
+                  : "border-border bg-surface text-text hover:border-primary/40 hover:bg-surface-muted",
               ].join(" ")}
               aria-pressed={selected}
             >
-              <Icon className="h-5 w-5" aria-hidden />
-              <span className="text-xs font-semibold">{opt.label}</span>
+              <Icon
+                className={[
+                  "h-5 w-5",
+                  selected ? "text-on-primary" : "text-primary",
+                ].join(" ")}
+                strokeWidth={2}
+                aria-hidden
+              />
+              <span
+                className={[
+                  "text-xs font-semibold",
+                  selected ? "text-on-primary" : "text-text",
+                ].join(" ")}
+              >
+                {opt.label}
+              </span>
             </button>
           );
         })}

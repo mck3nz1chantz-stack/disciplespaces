@@ -64,7 +64,7 @@ export function SessionPrivateDrawer({
           className="!px-2.5 !py-2 shrink-0 text-xs"
           onClick={onClose}
         >
-          Session
+          Back to session
         </Button>
       </div>
 

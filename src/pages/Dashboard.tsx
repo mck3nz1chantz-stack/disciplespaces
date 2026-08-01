@@ -1,13 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
-import { BookOpen, ChevronDown, Plus, UserPlus, Users } from "lucide-react";
-import { toast } from "sonner";
+import { BookOpen, HandHeart, Plus, UserPlus, Users } from "lucide-react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
-import { Modal } from "../components/Modal";
-import { MemberEditor } from "../components/MemberEditor";
-import { JoinSpaceModal } from "../components/JoinSpaceModal";
 import { QuickStartChecklist } from "../components/QuickStartChecklist";
 import { ShareUpdateModal } from "../components/ShareUpdateModal";
 import {
@@ -16,28 +12,20 @@ import {
 } from "../components/Layout";
 import { GroupLinkBadge } from "../components/GroupLinkBadge";
 import { lastActivityIso, useAppStore } from "../stores/useAppStore";
-import { useLiveSpaces } from "../hooks/useLiveDb";
+import {
+  useLiveOpenPrayerSummary,
+  useLiveSpaces,
+} from "../hooks/useLiveDb";
 import { useOnlineMode } from "../hooks/useOnlineMode";
-import {
-  FIRST_SPACE_TIP_KEY,
-  QUICKSTART_DISMISS_KEY,
-  readFlag,
-  writeFlag,
-} from "../lib/onboarding";
-import {
-  SPACE_TEMPLATES,
-  getSpaceTemplateMeta,
-  type SpaceTemplateId,
-} from "../lib/spaceTemplates";
+import { QUICKSTART_DISMISS_KEY, readFlag } from "../lib/onboarding";
+import { getSpaceTemplateMeta } from "../lib/spaceTemplates";
 import {
   formatReadingPositionLabel,
   loadReadingPosition,
 } from "../lib/bible";
-import type { Member, Space, SpaceKind } from "../types";
-import {
-  maxMembersForSpace,
-  spaceKindLabel,
-} from "../types";
+import type { Space } from "../types";
+import { maxMembersForSpace, spaceKindLabel } from "../types";
+
 export function Dashboard() {
   const navigate = useNavigate();
   const storeSpaces = useAppStore((s) => s.spaces);
@@ -47,42 +35,39 @@ export function Dashboard() {
   const isLoading = useAppStore((s) => s.isLoading) && liveSpaces === undefined;
   const error = useAppStore((s) => s.error);
   const initialize = useAppStore((s) => s.initialize);
-  const createSpace = useAppStore((s) => s.createSpace);
   const { mode: onlineMode } = useOnlineMode();
 
-  const [open, setOpen] = useState(false);
-  const [joinOpen, setJoinOpen] = useState(false);
-  const [joinInitialRaw, setJoinInitialRaw] = useState<string | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupMode, setBackupMode] = useState<"export" | "import">("export");
-  const [spaceTemplate, setSpaceTemplate] =
-    useState<SpaceTemplateId>("guided");
-  const [spaceKind, setSpaceKind] = useState<SpaceKind>("group");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [members, setMembers] = useState<Member[]>([]);
-  const [saving, setSaving] = useState(false);
   const [showQuickStart, setShowQuickStart] = useState(
     () => !readFlag(QUICKSTART_DISMISS_KEY),
   );
-  /** Family / meeting style / description — collapsed by default (P2). */
-  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
 
   useEffect(() => {
     void initialize();
   }, [initialize]);
 
-  // Honor onboarding CTAs + deep-link invites from text messages
+  // Legacy home-action handoff → full-page routes (deep links restore a place)
   useEffect(() => {
     function openPendingFromHandoff() {
       const action = consumePendingHomeAction();
-      if (action === "create") setOpen(true);
-      if (action === "join") setJoinOpen(true);
+      if (action === "create") {
+        navigate("/new");
+        return;
+      }
+      if (action === "join") {
+        navigate("/join");
+        return;
+      }
 
       const pendingJoin = consumePendingJoinRaw();
       if (pendingJoin) {
-        setJoinInitialRaw(pendingJoin);
-        setJoinOpen(true);
+        try {
+          sessionStorage.setItem("ds-pending-join-raw", pendingJoin);
+        } catch {
+          // ignore
+        }
+        navigate("/join");
       }
     }
 
@@ -90,7 +75,7 @@ export function Dashboard() {
     window.addEventListener("ds-pending-join", openPendingFromHandoff);
     return () =>
       window.removeEventListener("ds-pending-join", openPendingFromHandoff);
-  }, []);
+  }, [navigate]);
 
   const hasAnySessions = useMemo(
     () => spaces.some((s) => (s.sessions?.length ?? 0) > 0),
@@ -106,67 +91,22 @@ export function Dashboard() {
     return formatReadingPositionLabel(pos);
   }, [spaces.length]);
 
-  function resetForm() {
-    setName("");
-    setDescription("");
-    setMembers([]);
-    setSpaceTemplate("guided");
-    setSpaceKind("group");
-    setMoreOptionsOpen(false);
-  }
+  /** Most recently active group (list is activity-sorted in store; live query may differ). */
+  const lastSpace = useMemo(() => {
+    if (spaces.length === 0) return null;
+    return [...spaces].sort((a, b) =>
+      lastActivityIso(b).localeCompare(lastActivityIso(a)),
+    )[0]!;
+  }, [spaces]);
 
-  function closeModal() {
-    if (saving) return;
-    setOpen(false);
-    resetForm();
-  }
+  const openPrayers = useLiveOpenPrayerSummary();
+  const prayerSpace =
+    openPrayers && openPrayers.count > 0
+      ? (spaces.find((s) => s.id === openPrayers.spaceId) ?? null)
+      : null;
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) {
-      toast.error("Give this group a name");
-      return;
-    }
-
-    const isFirst = spaces.length === 0;
-    setSaving(true);
-    try {
-      const space = await createSpace({
-        name,
-        description,
-        members,
-        spaceTemplate,
-        spaceKind,
-        createFirstSession: true,
-      });
-      const roomKey = space.sync?.shortCode;
-      toast.success(
-        roomKey
-          ? `Group ready · room key ${roomKey}`
-          : isFirst
-            ? "Your first group is ready"
-            : "Group created",
-        {
-          description: roomKey
-            ? "Share that key so friends can Join (they never open a second room). Open the group to Sync and meet."
-            : "Open the group → Open group room when Online to get a room key. Or join friends with their key.",
-          duration: 6500,
-        },
-      );
-      if (isFirst && !readFlag(FIRST_SPACE_TIP_KEY)) {
-        writeFlag(FIRST_SPACE_TIP_KEY, true);
-      }
-      setOpen(false);
-      resetForm();
-      navigate(`/space/${space.id}`);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Could not create group",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
+  const showNextUp =
+    Boolean(lastSpace) || Boolean(continueReading) || Boolean(prayerSpace);
 
   return (
     <div className="space-y-5">
@@ -179,7 +119,11 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <Button fullWidth className="!py-3.5" onClick={() => setOpen(true)}>
+        <Button
+          fullWidth
+          className="!py-3.5"
+          onClick={() => navigate("/new")}
+        >
           <Plus className="h-5 w-5" aria-hidden />
           New group
         </Button>
@@ -187,35 +131,102 @@ export function Dashboard() {
           variant="secondary"
           fullWidth
           className="!py-3.5"
-          onClick={() => setJoinOpen(true)}
+          onClick={() => navigate("/join")}
         >
           <UserPlus className="h-5 w-5" aria-hidden />
           Join a group
         </Button>
       </div>
 
-      {continueReading && (
-        <Link to="/bible" className="block touch-manipulation">
-          <Card
-            padding="sm"
-            className="flex items-center gap-3 hover:border-primary/30 transition-colors bg-surface/80"
-          >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <BookOpen className="h-5 w-5" aria-hidden />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-                Continue reading
-              </p>
-              <p className="text-sm font-serif font-medium text-primary truncate">
-                {continueReading}
-              </p>
-            </div>
-            <span className="text-xs font-medium text-primary shrink-0">
-              Open
-            </span>
-          </Card>
-        </Link>
+      {showNextUp && (
+        <section className="space-y-2" aria-label="Next up">
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted px-0.5">
+            Next up
+          </h3>
+          <div className="-mx-0.5 overflow-x-auto pb-0.5">
+            <ul className="flex gap-2 min-w-min px-0.5">
+              {lastSpace && (
+                <li>
+                  <Link
+                    to={`/space/${lastSpace.id}`}
+                    className={[
+                      "inline-flex items-center gap-2 rounded-2xl border border-border/90",
+                      "bg-surface/95 px-3 py-2.5 touch-manipulation",
+                      "hover:border-primary/35 hover:bg-primary/5 active:scale-[0.98]",
+                      "max-w-[14rem]",
+                    ].join(" ")}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <Users className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 text-left">
+                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                        Last group
+                      </span>
+                      <span className="block text-sm font-medium text-primary truncate">
+                        {lastSpace.name}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              )}
+              {continueReading && (
+                <li>
+                  <Link
+                    to="/bible"
+                    className={[
+                      "inline-flex items-center gap-2 rounded-2xl border border-border/90",
+                      "bg-surface/95 px-3 py-2.5 touch-manipulation",
+                      "hover:border-primary/35 hover:bg-primary/5 active:scale-[0.98]",
+                      "max-w-[14rem]",
+                    ].join(" ")}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <BookOpen className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 text-left">
+                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                        Continue Bible
+                      </span>
+                      <span className="block text-sm font-serif font-medium text-primary truncate">
+                        {continueReading}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              )}
+              {prayerSpace && openPrayers && (
+                <li>
+                  <Link
+                    to={`/space/${prayerSpace.id}`}
+                    state={{ openPrayer: true }}
+                    className={[
+                      "inline-flex items-center gap-2 rounded-2xl border border-primary/25",
+                      "bg-primary/8 px-3 py-2.5 touch-manipulation",
+                      "hover:border-primary/40 active:scale-[0.98]",
+                      "max-w-[14rem]",
+                    ].join(" ")}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                      <HandHeart className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 text-left">
+                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                        Prayer
+                      </span>
+                      <span className="block text-sm font-medium text-primary truncate">
+                        {openPrayers.count} open
+                        {prayerSpace.name
+                          ? ` · ${prayerSpace.name}`
+                          : ""}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              )}
+            </ul>
+          </div>
+        </section>
       )}
 
       {showChecklist && (
@@ -223,8 +234,8 @@ export function Dashboard() {
           hasSpaces={spaces.length > 0}
           hasSessions={hasAnySessions}
           firstSpaceId={spaces[0]?.id ?? null}
-          onCreateSpace={() => setOpen(true)}
-          onJoinSpace={() => setJoinOpen(true)}
+          onCreateSpace={() => navigate("/new")}
+          onJoinSpace={() => navigate("/join")}
           onDismiss={() => setShowQuickStart(false)}
         />
       )}
@@ -267,11 +278,11 @@ export function Dashboard() {
             </p>
           </div>
           <div className="flex flex-col gap-2 max-w-xs mx-auto w-full">
-            <Button onClick={() => setOpen(true)}>
+            <Button onClick={() => navigate("/new")}>
               <Plus className="h-5 w-5" aria-hidden />
               Start a group
             </Button>
-            <Button variant="secondary" onClick={() => setJoinOpen(true)}>
+            <Button variant="secondary" onClick={() => navigate("/join")}>
               <UserPlus className="h-5 w-5" aria-hidden />
               I was invited
             </Button>
@@ -353,204 +364,6 @@ export function Dashboard() {
         </p>
       )}
 
-      <Modal open={open} title="New group" onClose={closeModal}>
-        <form onSubmit={handleCreate} className="space-y-5">
-          <p className="text-sm text-muted -mt-1">
-            Just a name is enough. When Online, you’ll get a{" "}
-            <strong className="text-text">room key</strong> to share — friends
-            only Join with that key.
-          </p>
-
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Group name</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
-              placeholder="e.g. Thursday morning"
-              maxLength={80}
-              required
-              autoFocus
-            />
-          </label>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium">
-              Who’s in it{" "}
-              <span className="text-muted font-normal">(optional)</span>
-            </p>
-            <MemberEditor
-              members={members}
-              onChange={setMembers}
-              maxMembers={maxMembersForSpace(spaceKind)}
-              kindLabel={spaceKindLabel(spaceKind)}
-            />
-          </div>
-
-          <div className="border-t border-border pt-2 space-y-3">
-            <button
-              type="button"
-              onClick={() => setMoreOptionsOpen((v) => !v)}
-              className="flex w-full items-center justify-between gap-2 py-1 text-left touch-manipulation tap-target"
-              aria-expanded={moreOptionsOpen}
-            >
-              <span className="text-sm font-semibold text-muted">
-                More options · family, meeting style
-              </span>
-              <ChevronDown
-                className={[
-                  "h-5 w-5 text-muted transition-transform",
-                  moreOptionsOpen ? "rotate-180" : "",
-                ].join(" ")}
-                aria-hidden
-              />
-            </button>
-
-            {moreOptionsOpen && (
-              <div className="space-y-4">
-                <fieldset className="space-y-2">
-                  <legend className="text-sm font-medium">Size</legend>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        {
-                          id: "group" as const,
-                          label: "Group",
-                          description: `Up to ${maxMembersForSpace("group")} people`,
-                        },
-                        {
-                          id: "family" as const,
-                          label: "Family",
-                          description: `Up to ${maxMembersForSpace("family")} people`,
-                        },
-                      ] as const
-                    ).map((opt) => {
-                      const selected = spaceKind === opt.id;
-                      return (
-                        <label
-                          key={opt.id}
-                          className={[
-                            "rounded-xl border px-3 py-3 touch-manipulation cursor-pointer transition-colors",
-                            selected
-                              ? "border-primary bg-primary/5"
-                              : "border-border bg-bg hover:border-primary/30",
-                          ].join(" ")}
-                        >
-                          <input
-                            type="radio"
-                            name="space-kind"
-                            className="sr-only"
-                            checked={selected}
-                            onChange={() => {
-                              setSpaceKind(opt.id);
-                              const max = maxMembersForSpace(opt.id);
-                              setMembers((prev) => prev.slice(0, max));
-                            }}
-                            disabled={saving}
-                          />
-                          <span className="font-medium text-primary block text-sm">
-                            {opt.label}
-                          </span>
-                          <span className="text-[11px] text-muted block mt-0.5 leading-snug">
-                            {opt.description}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </fieldset>
-
-                <fieldset className="space-y-2">
-                  <legend className="text-sm font-medium">
-                    Meeting style
-                  </legend>
-                  <p className="text-xs text-muted -mt-0.5">
-                    Default is Guided. You can change this anytime inside the
-                    group.
-                  </p>
-                  <ul className="space-y-2">
-                    {SPACE_TEMPLATES.map((tpl) => {
-                      const selected = spaceTemplate === tpl.id;
-                      return (
-                        <li key={tpl.id}>
-                          <label
-                            className={[
-                              "flex items-start gap-3 rounded-xl border px-3 py-3 touch-manipulation tap-target cursor-pointer transition-colors",
-                              selected
-                                ? "border-primary bg-primary/5"
-                                : "border-border bg-bg hover:border-primary/30",
-                            ].join(" ")}
-                          >
-                            <input
-                              type="radio"
-                              name="space-template"
-                              value={tpl.id}
-                              checked={selected}
-                              onChange={() => setSpaceTemplate(tpl.id)}
-                              className="mt-1 h-4 w-4 accent-primary shrink-0"
-                              disabled={saving}
-                            />
-                            <span className="min-w-0">
-                              <span className="font-medium text-primary block">
-                                {tpl.name}
-                              </span>
-                              <span className="text-xs text-muted block mt-0.5">
-                                {tpl.description}
-                              </span>
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </fieldset>
-
-                <label className="block space-y-1.5">
-                  <span className="text-sm font-medium">
-                    Note{" "}
-                    <span className="text-muted font-normal">(optional)</span>
-                  </span>
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base min-h-[72px] resize-y"
-                    placeholder="What is this group about?"
-                    maxLength={280}
-                  />
-                </label>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-2 pt-1">
-            <Button
-              type="button"
-              variant="secondary"
-              fullWidth
-              onClick={closeModal}
-              disabled={saving}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" fullWidth disabled={saving}>
-              {saving
-                ? "Saving…"
-                : spaces.length === 0
-                  ? "Start first group"
-                  : "Create group"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      <JoinSpaceModal
-        open={joinOpen}
-        initialRaw={joinInitialRaw}
-        onClose={() => {
-          setJoinOpen(false);
-          setJoinInitialRaw(null);
-        }}
-      />
       <ShareUpdateModal
         open={backupOpen}
         defaultMode={backupMode}

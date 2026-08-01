@@ -1,0 +1,47 @@
+{
+  "project": "DiscipleSpaces",
+  "workspacePath": "/Users/kenzi/Desktop/ChantzMediaProjects/DiscipleSpaces",
+  "kind": "first-party",
+  "lastUpdated": "2026-07-31",
+  "gitBranch": "main",
+  "lastKnownCommit": "8d9dda5",
+  "deploy": {
+    "pages": "https://disciple-spaces.pages.dev",
+    "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
+    "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
+    "notes": "Pages + relay shipped this session. Theme contrast fix may be uncommitted locally after 8d9dda5."
+  },
+  "currentSlice": "Nav wayfinding + Gather ritual — done",
+  "nextSlice": "Commit/push/deploy nav P0–P2 + Gather + theme contrast",
+  "sliceStatuses": {
+    "sync-relay-harden": "done",
+    "gui-p0-p2": "done-mostly",
+    "theme-contrast": "done-local-maybe-uncommitted",
+    "nav-p0": "done",
+    "nav-p1": "done",
+    "nav-p2": "done",
+    "nav-suggestions": "done",
+    "gather-path": "done"
+  },
+  "criticalNotes": [
+    "Private notes never leave device; assertNoPrivateNotes on relay snapshots",
+    "Online/Offline is HEADER ONLY; group pulse shows status + Sync",
+    "Live badge = getGroupLinkStatus (Online + connected + !paused + !lastError)",
+    "Old room keys unbind on rotate (relay must stay deployed)",
+    "Host push membersAuthoritative on server; client membersUpdatedAt for roster race",
+    "autoSync re-queues pending writes after in-flight",
+    "toastCoord de-dupes manual vs foreground sync toasts",
+    "Canonical origin: https://disciple-spaces.pages.dev (IndexedDB per-origin)",
+    "Bible cross video plate locked: docs/final/bible-reader-scroll-video-plate.md"
+  ],
+  "openIssues": [
+    "Commit/push/deploy: nav P0–P2 + Gather + theme contrast",
+    "Commit/push/deploy ThemeToggle + FeedbackLauncher contrast if still dirty",
+    "Optional: code-split main JS chunk (~800KB)",
+    "Optional: device secret validation on Worker (currently not checked)"
+  ],
+  "keyReports": [
+    "docs/drafts/gui-report.md",
+    "docs/client-hub/facts.v1.json"
+  ]
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronDown,
   Cloud,
@@ -43,6 +43,11 @@ interface SpaceConnectionBarProps {
   space: Space;
   /** When true, expand Sharing tools on first paint (e.g. host needs room key). */
   defaultExpanded?: boolean;
+  /**
+   * Increment to force-expand Sharing tools (e.g. jump-chip “Sync”).
+   * 0 / undefined = no external request.
+   */
+  expandSignal?: number;
 }
 
 function lastSyncedLabel(iso?: string): string | null {
@@ -89,6 +94,7 @@ async function shareOrCopyRoomKey(
 export function SpaceConnectionBar({
   space,
   defaultExpanded = false,
+  expandSignal = 0,
 }: SpaceConnectionBarProps) {
   const connectSpaceToRelay = useAppStore((s) => s.connectSpaceToRelay);
   const syncSpaceNow = useAppStore((s) => s.syncSpaceNow);
@@ -103,6 +109,11 @@ export function SpaceConnectionBar({
   const [openRoomConfirm, setOpenRoomConfirm] = useState(false);
   const [relinkOpen, setRelinkOpen] = useState(false);
   const [expanded, setExpanded] = useState(defaultExpanded);
+
+  // Jump chips / external wayfinding can request expand without remounting
+  useEffect(() => {
+    if (expandSignal > 0) setExpanded(true);
+  }, [expandSignal]);
 
   const relayReady = isSpaceRelayConfigured();
   const sync = normalizeSpaceSync(space.sync);

@@ -25,6 +25,8 @@ interface ModalProps {
    * Prefer this over absolute-positioned panes that collapse to zero height.
    */
   containBody?: boolean;
+  /** Sticky footer under body (e.g. Done / Back to session). */
+  footer?: ReactNode;
 }
 
 const FOCUSABLE =
@@ -45,6 +47,7 @@ export function Modal({
   activeTab,
   onTabChange,
   containBody = false,
+  footer,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -277,6 +280,12 @@ export function Modal({
             {children}
           </div>
         )}
+
+        {footer ? (
+          <div className="shrink-0 border-t border-border pt-3 mt-3">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   );

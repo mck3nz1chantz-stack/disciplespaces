@@ -153,3 +153,33 @@ export function useLivePrayerBoardCount(
     return db.prayerBoard.where("spaceId").equals(spaceId).count();
   }, [spaceId]);
 }
+
+/**
+ * Open prayers across groups (home “Next up” chip).
+ * Prefers the group with the most open entries; falls back to any non-closed.
+ */
+export function useLiveOpenPrayerSummary():
+  | { spaceId: string; count: number }
+  | null
+  | undefined {
+  return useLiveQuery(async () => {
+    const all = await db.prayerBoard.toArray();
+    // “Open” = still on the board for prayer (not closed)
+    const open = all.filter((e) => e.status !== "closed");
+    if (open.length === 0) return null;
+    const bySpace = new Map<string, number>();
+    for (const e of open) {
+      bySpace.set(e.spaceId, (bySpace.get(e.spaceId) ?? 0) + 1);
+    }
+    let bestId = "";
+    let bestCount = 0;
+    for (const [id, n] of bySpace) {
+      if (n > bestCount) {
+        bestId = id;
+        bestCount = n;
+      }
+    }
+    if (!bestId) return null;
+    return { spaceId: bestId, count: bestCount };
+  }, []);
+}

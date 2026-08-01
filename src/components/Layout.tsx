@@ -26,9 +26,29 @@ const PENDING_ACTION_KEY = "ds-pending-home-action";
 const PENDING_JOIN_RAW_KEY = "ds-pending-join-raw";
 
 const tabs = [
-  { to: "/", label: "Groups", icon: Home, end: true },
-  { to: "/bible", label: "Bible", icon: BookOpen, end: false },
-  { to: "/settings", label: "Settings", icon: Settings, end: false },
+  {
+    to: "/",
+    label: "Groups",
+    icon: Home,
+    /** Parent route: home, group detail, join/create entry */
+    isActivePath: (path: string) =>
+      path === "/" ||
+      path.startsWith("/space/") ||
+      path === "/join" ||
+      path === "/new",
+  },
+  {
+    to: "/bible",
+    label: "Bible",
+    icon: BookOpen,
+    isActivePath: (path: string) => path.startsWith("/bible"),
+  },
+  {
+    to: "/settings",
+    label: "Settings",
+    icon: Settings,
+    isActivePath: (path: string) => path.startsWith("/settings"),
+  },
 ] as const;
 
 export function Layout() {
@@ -59,20 +79,19 @@ export function Layout() {
     } catch {
       // ignore
     }
-    navigate("/");
-    // Dashboard may already be mounted (same route) — notify it
+    // Full-page join restores place (not a modal flash on home only)
+    navigate("/join");
     window.dispatchEvent(new Event("ds-pending-join"));
   }, [navigate]);
 
   function handleOnboardingFinished(action?: "create" | "join" | "skip") {
     setShowOnboarding(false);
-    if (action === "create" || action === "join") {
-      try {
-        sessionStorage.setItem(PENDING_ACTION_KEY, action);
-      } catch {
-        // ignore
-      }
-      navigate("/");
+    if (action === "create") {
+      navigate("/new");
+      return;
+    }
+    if (action === "join") {
+      navigate("/join");
     }
   }
 
@@ -125,27 +144,31 @@ export function Layout() {
         aria-label="Main"
       >
         <ul className="mx-auto max-w-lg grid grid-cols-3">
-          {tabs.map(({ to, label, icon: Icon, end }) => (
-            <li key={to}>
-              <NavLink
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  [
-                    "flex flex-col items-center justify-center gap-0.5 py-3 px-2 mx-1 my-1",
-                    "text-xs font-medium touch-manipulation tap-target cursor-pointer",
-                    "transition-colors duration-150 rounded-xl",
-                    isActive
-                      ? "text-primary bg-primary/10"
-                      : "text-muted hover:text-primary hover:bg-surface-muted/80",
-                  ].join(" ")
-                }
-              >
-                <Icon className="h-6 w-6" aria-hidden />
-                <span>{label}</span>
-              </NavLink>
-            </li>
-          ))}
+          {tabs.map(({ to, label, icon: Icon, isActivePath }) => {
+            const isActive = isActivePath(location.pathname);
+            return (
+              <li key={to}>
+                <NavLink
+                  to={to}
+                  end={to === "/"}
+                  aria-current={isActive ? "page" : undefined}
+                  className={() =>
+                    [
+                      "flex flex-col items-center justify-center gap-0.5 py-3 px-2 mx-1 my-1",
+                      "text-xs font-medium touch-manipulation tap-target cursor-pointer",
+                      "transition-colors duration-150 rounded-xl",
+                      isActive
+                        ? "text-primary bg-primary/10"
+                        : "text-muted hover:text-primary hover:bg-surface-muted/80",
+                    ].join(" ")
+                  }
+                >
+                  <Icon className="h-6 w-6" aria-hidden />
+                  <span>{label}</span>
+                </NavLink>
+              </li>
+            );
+          })}
         </ul>
       </nav>
 

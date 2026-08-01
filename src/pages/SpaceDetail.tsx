@@ -7,14 +7,12 @@ import {
   type FormEvent,
 } from "react";
 import {
-  Link,
   useLocation,
   useNavigate,
   useParams,
 } from "react-router-dom";
 import { format, parseISO } from "date-fns";
 import {
-  ArrowLeft,
   BookOpen,
   CalendarPlus,
   ChevronDown,
@@ -93,6 +91,17 @@ import {
   normalizeSpaceSync,
 } from "../lib/sync";
 import { GroupLinkBadge } from "../components/GroupLinkBadge";
+import { GatherRitualBar } from "../components/GatherRitualBar";
+import { NavBreadcrumb } from "../components/NavBreadcrumb";
+import {
+  clearGather,
+  EMPTY_GATHER,
+  loadGather,
+  nextGatherStep,
+  saveGather,
+  type GatherState,
+  type GatherStepId,
+} from "../lib/gather";
 import { useOnlineMode } from "../hooks/useOnlineMode";
 import { useRoomLiveSync } from "../hooks/useRoomLiveSync";
 
@@ -184,6 +193,10 @@ export function SpaceDetail() {
   const [prayerBoardOpen, setPrayerBoardOpen] = useState(false);
   /** Collapsed power tools: modes, file share, connect/sync */
   const [moreOpen, setMoreOpen] = useState(false);
+  /** Bumped by jump chips to expand Group pulse Sharing tools. */
+  const [syncExpandSignal, setSyncExpandSignal] = useState(0);
+  /** Gather ritual: Meet → Study → Prayer (in-flow under hero). */
+  const [gather, setGather] = useState<GatherState>(EMPTY_GATHER);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickName, setQuickName] = useState("");
   const [quickAdding, setQuickAdding] = useState(false);
@@ -214,6 +227,24 @@ export function SpaceDetail() {
     setSessionVisible(SESSION_PAGE_SIZE);
   }, [id]);
 
+  // Restore gather ritual when re-entering this group (e.g. back from Bible).
+  // Gate saves until hydrated so the empty initial state never wipes storage.
+  const gatherHydratedRef = useRef(false);
+  useEffect(() => {
+    if (!id) {
+      gatherHydratedRef.current = false;
+      setGather(EMPTY_GATHER);
+      return;
+    }
+    setGather(loadGather(id));
+    gatherHydratedRef.current = true;
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || !gatherHydratedRef.current) return;
+    saveGather(id, gather);
+  }, [id, gather]);
+
   // Default lens to the space’s active mode when entering a Space
   useEffect(() => {
     if (!space) return;
@@ -221,11 +252,12 @@ export function SpaceDetail() {
     setSessionVisible(SESSION_PAGE_SIZE);
   }, [space?.id]);
 
-  // Quick Start → open create session or invite when routed with state
+  // Quick Start / Next-up → open create, invite, or prayer when routed with state
   useEffect(() => {
     const state = location.state as {
       openCreateSession?: boolean;
       openInvite?: boolean;
+      openPrayer?: boolean;
     } | null;
     if (!space || !state) return;
     if (state.openCreateSession) {
@@ -235,6 +267,11 @@ export function SpaceDetail() {
     }
     if (state.openInvite) {
       setInviteOpen(true);
+      navigate(location.pathname, { replace: true, state: {} });
+      return;
+    }
+    if (state.openPrayer) {
+      setPrayerBoardOpen(true);
       navigate(location.pathname, { replace: true, state: {} });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run when landing with flag
@@ -360,9 +397,10 @@ export function SpaceDetail() {
   /**
    * Start a meeting as a live draft in IndexedDB so Session + Private tabs
    * share one sessionId immediately (e.g. public recap + private relapse note).
+   * @returns created session when successful (for gather path).
    */
-  async function openCreateSession() {
-    if (!space) return;
+  async function openCreateSession(): Promise<Session | null> {
+    if (!space) return null;
     const mode =
       viewMode === "all"
         ? normalizeSpaceTemplate(space.spaceTemplate)
@@ -388,7 +426,7 @@ export function SpaceDetail() {
       templateList[0]?.id;
     if (!templateId) {
       toast.error("No session templates available yet");
-      return;
+      return null;
     }
 
     // Open the sheet immediately so the bottom CTA never feels “stuck”
@@ -427,6 +465,7 @@ export function SpaceDetail() {
         ...draftValues,
         templateId: createTemplateId,
       });
+      return created;
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Could not start session",
@@ -435,8 +474,108 @@ export function SpaceDetail() {
       setFormValues(null);
       setIsDraftSession(false);
       setSessionMode(null);
+      return null;
     } finally {
       setSaving(false);
+    }
+  }
+
+  function markGatherDone(step: GatherStepId) {
+    setGather((g) => {
+      if (!g.active) return g;
+      return { ...g, done: { ...g.done, [step]: true } };
+    });
+  }
+
+  function endGather() {
+    if (id) clearGather(id);
+    setGather(EMPTY_GATHER);
+  }
+
+  function goGatherStep(step: GatherStepId) {
+    setGather((g) => (g.active ? { ...g, step } : g));
+  }
+
+  function advanceGather() {
+    setGather((g) => {
+      if (!g.active) return g;
+      const next = nextGatherStep(g.step);
+      if (!next) return g;
+      return {
+        ...g,
+        step: next,
+        done: { ...g.done, [g.step]: true },
+      };
+    });
+  }
+
+  /**
+   * One hero control: start (or resume) the Meet → Study → Prayer ritual.
+   */
+  async function beginGather() {
+    if (!space) return;
+    const today = format(new Date(), "yyyy-MM-dd");
+    const todaySession =
+      spaceSessions.find((s) => s.date.slice(0, 10) === today) ?? null;
+
+    setGather({
+      active: true,
+      step: "meet",
+      sessionId: todaySession?.id ?? null,
+      done: todaySession ? { meet: true } : {},
+    });
+
+    if (todaySession) {
+      openEditSession(todaySession);
+      return;
+    }
+    const created = await openCreateSession();
+    if (created) {
+      setGather((g) => ({
+        ...g,
+        active: true,
+        step: "meet",
+        sessionId: created.id,
+      }));
+    }
+  }
+
+  async function runGatherPrimary() {
+    if (!space || !gather.active) return;
+
+    if (gather.step === "meet") {
+      const sid = gather.sessionId;
+      const session =
+        (sid && spaceSessions.find((s) => s.id === sid)) ||
+        (sid && activeSession?.id === sid ? activeSession : null) ||
+        spaceSessions.find(
+          (s) => s.date.slice(0, 10) === format(new Date(), "yyyy-MM-dd"),
+        ) ||
+        null;
+      if (session) {
+        setGather((g) => ({ ...g, sessionId: session.id }));
+        openEditSession(session);
+        return;
+      }
+      const created = await openCreateSession();
+      if (created) {
+        setGather((g) => ({
+          ...g,
+          sessionId: created.id,
+        }));
+      }
+      return;
+    }
+
+    if (gather.step === "study") {
+      markGatherDone("study");
+      openBibleForSpace(gather.sessionId ?? undefined);
+      return;
+    }
+
+    if (gather.step === "prayer") {
+      markGatherDone("prayer");
+      setPrayerBoardOpen(true);
     }
   }
 
@@ -515,10 +654,23 @@ export function SpaceDetail() {
     const params = new URLSearchParams({ space: space.id });
     const resolvedSession =
       sessionId ??
+      gather.sessionId ??
       activeSession?.id ??
       spaceSessions[0]?.id ??
       undefined;
     if (resolvedSession) params.set("session", resolvedSession);
+    if (gather.active) {
+      markGatherDone("study");
+      setGather((g) =>
+        g.active
+          ? {
+              ...g,
+              sessionId: resolvedSession ?? g.sessionId,
+              step: g.step === "meet" ? "study" : g.step,
+            }
+          : g,
+      );
+    }
     navigate(`/bible?${params.toString()}`);
   }
 
@@ -568,12 +720,15 @@ export function SpaceDetail() {
     const draft = activeSession;
     const wasDraft = isDraftSession;
     const formSnapshot = formValues;
+    const closedSessionId = draft?.id ?? null;
     setSessionMode(null);
     setActiveSession(null);
     setFormValues(null);
     setSessionPanelTab("session");
     setLockedSectionKey(PRIVATE_SECTION.notes);
     setIsDraftSession(false);
+
+    let keptSessionId: string | null = null;
     if (wasDraft && draft) {
       try {
         // Persist unsaved form into draft before emptiness check, if any content
@@ -586,12 +741,35 @@ export function SpaceDetail() {
             passagesStudied: formSnapshot.passagesStudied,
             notes: formSnapshot.notes,
           });
-          // Kept as a real session — do not delete
-          return;
+          keptSessionId = draft.id;
+        } else {
+          await discardEmptyDraftIfNeeded(draft, formSnapshot);
         }
-        await discardEmptyDraftIfNeeded(draft, formSnapshot);
       } catch {
         // ignore discard errors
+      }
+    } else if (closedSessionId) {
+      keptSessionId = closedSessionId;
+    }
+
+    // Gather ritual: leaving Meet marks step done and nudges to Study
+    if (gather.active && keptSessionId) {
+      setGather((g) => {
+        if (!g.active) return g;
+        const next =
+          g.step === "meet" ? nextGatherStep("meet") ?? "study" : g.step;
+        return {
+          ...g,
+          sessionId: keptSessionId,
+          done: { ...g.done, meet: true },
+          step: g.step === "meet" ? next : g.step,
+        };
+      });
+      if (gather.step === "meet") {
+        toast.message("Meeting ready", {
+          description: "Next: Study together in the Bible.",
+          duration: 4200,
+        });
       }
     }
   }
@@ -687,6 +865,7 @@ export function SpaceDetail() {
 
     setSaving(true);
     try {
+      let savedId: string | null = null;
       if (activeSession) {
         const updated = await updateSession(activeSession.id, {
           date: formValues.meetingDate,
@@ -703,6 +882,7 @@ export function SpaceDetail() {
         setSessionMode("view");
         setFormValues(null);
         setSessionPanelTab("session");
+        savedId = updated.id;
       } else {
         // Fallback if draft creation was skipped
         const created = await createSession({
@@ -721,6 +901,18 @@ export function SpaceDetail() {
         setSessionPanelTab("session");
         setSessionMode("view");
         toast.success("Session saved");
+        savedId = created.id;
+      }
+      if (savedId && gather.active) {
+        setGather((g) =>
+          g.active
+            ? {
+                ...g,
+                sessionId: savedId,
+                done: { ...g.done, meet: true },
+              }
+            : g,
+        );
       }
     } catch (err) {
       toast.error(
@@ -777,11 +969,13 @@ export function SpaceDetail() {
   if (notFound) {
     return (
       <div className="space-y-4">
-        <BackLink />
+        <NavBreadcrumb
+          items={[{ label: "Groups", to: "/" }, { label: "Not found" }]}
+        />
         <Card>
-          <p className="text-muted">This space was not found on this device.</p>
+          <p className="text-muted">This group was not found on this device.</p>
           <Button className="mt-4" variant="secondary" onClick={() => navigate("/")}>
-            Back to spaces
+            Back to groups
           </Button>
         </Card>
       </div>
@@ -791,8 +985,10 @@ export function SpaceDetail() {
   if (loading || !space) {
     return (
       <div className="space-y-4">
-        <BackLink />
-        <p className="text-sm text-muted">Loading space…</p>
+        <NavBreadcrumb
+          items={[{ label: "Groups", to: "/" }, { label: "Loading…" }]}
+        />
+        <p className="text-sm text-muted">Loading group…</p>
       </div>
     );
   }
@@ -848,8 +1044,14 @@ export function SpaceDetail() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
-        <BackLink />
-        <div className="flex items-center gap-1">
+        <NavBreadcrumb
+          className="flex-1"
+          items={[
+            { label: "Groups", to: "/" },
+            { label: space.name },
+          ]}
+        />
+        <div className="flex items-center gap-1 shrink-0">
           {isHost && (
             <Button
               variant="ghost"
@@ -949,25 +1151,172 @@ export function SpaceDetail() {
           </p>
         )}
 
-        <Button
-          fullWidth
-          className="!py-4 text-base shadow-md border border-primary/20"
-          onClick={() => void openCreateSession()}
-          disabled={saving}
-        >
-          <CalendarPlus className="h-5 w-5" aria-hidden />
-          {saving
-            ? "Starting…"
-            : latestSession
-              ? "Start today’s meeting"
-              : "Start your first meeting"}
-        </Button>
+        {gather.active ? (
+          <GatherRitualBar
+            gather={gather}
+            sessionHint={
+              gather.sessionId
+                ? (() => {
+                    const s =
+                      spaceSessions.find((x) => x.id === gather.sessionId) ??
+                      (activeSession?.id === gather.sessionId
+                        ? activeSession
+                        : null);
+                    if (!s) return null;
+                    const tpl = templates.find((t) => t.id === s.templateId);
+                    return sessionDisplayTitle(s, tpl);
+                  })()
+                : null
+            }
+            busy={saving}
+            onSelectStep={goGatherStep}
+            onPrimary={() => void runGatherPrimary()}
+            onAdvance={advanceGather}
+            onEnd={endGather}
+          />
+        ) : (
+          <>
+            <Button
+              fullWidth
+              className="!py-4 text-base shadow-md border border-primary/20"
+              onClick={() => void beginGather()}
+              disabled={saving}
+            >
+              <CalendarPlus className="h-5 w-5" aria-hidden />
+              {saving
+                ? "Starting…"
+                : latestSession
+                  ? "Gather tonight"
+                  : "Gather · first meeting"}
+            </Button>
+            <p className="text-[11px] text-muted text-center leading-snug">
+              One path: Meet · Study · Prayer
+            </p>
+          </>
+        )}
         {linkStatus.kind === "offline" && (
           <p className="text-[11px] text-amber-800 dark:text-amber-200 text-center">
             App is Offline (header). Meetings still save on this phone.
           </p>
         )}
       </Card>
+
+      {/* In-group jump chips — wayfinding without a 4th bottom tab */}
+      <nav
+        className="-mx-0.5 overflow-x-auto pb-0.5"
+        aria-label="Jump in this group"
+      >
+        <ul className="flex gap-1.5 min-w-min px-0.5">
+          {(
+            [
+              {
+                id: "meet",
+                label: "Meet",
+                onClick: () => {
+                  if (gather.active) {
+                    goGatherStep("meet");
+                    void (async () => {
+                      const sid = gather.sessionId;
+                      const session =
+                        (sid &&
+                          spaceSessions.find((s) => s.id === sid)) ||
+                        spaceSessions.find(
+                          (s) =>
+                            s.date.slice(0, 10) ===
+                            format(new Date(), "yyyy-MM-dd"),
+                        ) ||
+                        null;
+                      if (session) {
+                        openEditSession(session);
+                        return;
+                      }
+                      const created = await openCreateSession();
+                      if (created) {
+                        setGather((g) =>
+                          g.active
+                            ? { ...g, sessionId: created.id, step: "meet" }
+                            : g,
+                        );
+                      }
+                    })();
+                    return;
+                  }
+                  document
+                    .getElementById("group-meet")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                },
+              },
+              {
+                id: "sync",
+                label: "Sync",
+                onClick: () => {
+                  setSyncExpandSignal((n) => n + 1);
+                  document
+                    .getElementById("group-sync")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                },
+              },
+              {
+                id: "people",
+                label: "People",
+                onClick: () => {
+                  document
+                    .getElementById("group-people")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                },
+              },
+              {
+                id: "prayer",
+                label: "Prayer",
+                onClick: () => {
+                  if (gather.active) {
+                    goGatherStep("prayer");
+                    markGatherDone("prayer");
+                  }
+                  setPrayerBoardOpen(true);
+                },
+              },
+              {
+                id: "past",
+                label: "Past",
+                onClick: () => {
+                  document
+                    .getElementById("group-past")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                },
+              },
+              {
+                id: "more",
+                label: "More",
+                onClick: () => {
+                  setMoreOpen(true);
+                  window.requestAnimationFrame(() => {
+                    document
+                      .getElementById("group-more")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  });
+                },
+              },
+            ] as const
+          ).map((chip) => (
+            <li key={chip.id}>
+              <button
+                type="button"
+                onClick={chip.onClick}
+                className={[
+                  "inline-flex items-center rounded-full border border-border/90",
+                  "bg-surface/95 px-3.5 py-2 text-xs font-semibold text-primary",
+                  "touch-manipulation tap-target whitespace-nowrap",
+                  "hover:border-primary/35 hover:bg-primary/8 active:scale-[0.98]",
+                  "transition-colors",
+                ].join(" ")}
+              >
+                {chip.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
       {/* Guest recovery when not yet linked */}
       {isGuest && !guestLinked && (
@@ -1058,13 +1407,20 @@ export function SpaceDetail() {
       )}
 
       {/* Group pulse / Sync */}
-      <SpaceConnectionBar
-        space={space}
-        defaultExpanded={needsRoomOpen || Boolean(spaceSync.lastError)}
-      />
+      <div id="group-sync" className="scroll-mt-24">
+        <SpaceConnectionBar
+          space={space}
+          defaultExpanded={needsRoomOpen || Boolean(spaceSync.lastError)}
+          expandSignal={syncExpandSignal}
+        />
+      </div>
 
       {/* While you meet */}
-      <section className="space-y-2" aria-label="While you meet">
+      <section
+        id="group-meet"
+        className="space-y-2 scroll-mt-24"
+        aria-label="While you meet"
+      >
         <h3 className="text-sm font-semibold text-primary">While you meet</h3>
         <div className="grid grid-cols-3 gap-2">
           <button
@@ -1104,7 +1460,11 @@ export function SpaceDetail() {
       </section>
 
       {/* Who’s here */}
-      <section className="space-y-2.5" aria-label="Who is here">
+      <section
+        id="group-people"
+        className="space-y-2.5 scroll-mt-24"
+        aria-label="Who is here"
+      >
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
             <Users className="h-4 w-4" aria-hidden />
@@ -1198,7 +1558,7 @@ export function SpaceDetail() {
       </section>
 
       {/* Past meetings */}
-      <div className="space-y-3">
+      <div id="group-past" className="space-y-3 scroll-mt-24">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-lg">Past meetings</h3>
           {filteredSessions.length > 0 && (
@@ -1212,8 +1572,8 @@ export function SpaceDetail() {
             <div className="space-y-1">
               <p className="font-medium text-primary">No meetings yet</p>
               <p className="text-sm text-muted max-w-xs mx-auto">
-                Tap <strong className="text-text">Start today’s meeting</strong>{" "}
-                when you gather.
+                Tap <strong className="text-text">Gather</strong> when you
+                meet — Meet · Study · Prayer.
               </p>
             </div>
           </Card>
@@ -1261,7 +1621,10 @@ export function SpaceDetail() {
       </div>
 
       {/* Zone 5 — More (collapsed) */}
-      <section className="border-t border-border pt-3 space-y-3">
+      <section
+        id="group-more"
+        className="border-t border-border pt-3 space-y-3 scroll-mt-24"
+      >
         <button
           type="button"
           onClick={() => setMoreOpen((v) => !v)}
@@ -1588,7 +1951,7 @@ export function SpaceDetail() {
             closeSessionPrivateDrawer();
             return;
           }
-          closeSessionModal();
+          void closeSessionModal();
         }}
         containBody
         tabs={[
@@ -1607,6 +1970,35 @@ export function SpaceDetail() {
             closeSessionPrivateDrawer();
           }
         }}
+        footer={
+          sessionPanelTab === "private" ? (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                fullWidth
+                onClick={closeSessionPrivateDrawer}
+              >
+                Back to session
+              </Button>
+              <Button
+                type="button"
+                fullWidth
+                onClick={() => void closeSessionModal()}
+              >
+                Done
+              </Button>
+            </div>
+          ) : sessionMode === "view" ? (
+            <Button
+              type="button"
+              fullWidth
+              onClick={() => void closeSessionModal()}
+            >
+              Done
+            </Button>
+          ) : null
+        }
       >
         {/*
           Keep both panes mounted so scroll position is preserved when flipping
@@ -1718,7 +2110,10 @@ export function SpaceDetail() {
       <Modal
         open={prayerBoardOpen}
         title="Prayer board"
-        onClose={() => setPrayerBoardOpen(false)}
+        onClose={() => {
+          if (gather.active) markGatherDone("prayer");
+          setPrayerBoardOpen(false);
+        }}
       >
         <div className="space-y-3 -mt-1">
           <p className="text-sm text-muted">
@@ -1816,18 +2211,6 @@ export function SpaceDetail() {
         </div>
       </Modal>
     </div>
-  );
-}
-
-function BackLink() {
-  return (
-    <Link
-      to="/"
-      className="inline-flex items-center gap-1.5 text-sm font-medium text-primary touch-manipulation tap-target -ml-1 px-1"
-    >
-      <ArrowLeft className="h-4 w-4" aria-hidden />
-      All groups
-    </Link>
   );
 }
 
