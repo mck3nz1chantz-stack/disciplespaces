@@ -113,13 +113,26 @@ function isSkippableZipPath(path: string): boolean {
   return false;
 }
 
-/**
- * Extract the best DiscipleSpaces package text from Zip bytes.
- */
-export function extractBackupTextFromZip(
+export interface ScoredBackupEntry {
+  text: string;
+  path: string;
+  score: number;
+  kind: "dsp1" | "dsx1" | "other";
+}
+
+function backupKindFromText(text: string): ScoredBackupEntry["kind"] {
+  if (text.includes(PERSONAL_BACKUP_PREFIX) || text.includes(PERSONAL_BACKUP_KIND)) {
+    return "dsp1";
+  }
+  if (text.includes(EXPORT_PREFIX) || text.includes(EXPORT_KIND)) {
+    return "dsx1";
+  }
+  return "other";
+}
+
+function collectZipBackupEntries(
   zipBytes: Uint8Array,
-  zipName = "archive.zip",
-): ImportFileResult {
+): ScoredBackupEntry[] {
   let entries: Record<string, Uint8Array>;
   try {
     entries = unzipSync(zipBytes, {
@@ -141,13 +154,12 @@ export function extractBackupTextFromZip(
     );
   }
 
-  let best: { text: string; path: string; score: number } | null = null;
+  const found: ScoredBackupEntry[] = [];
 
   for (const path of names) {
     if (isSkippableZipPath(path)) continue;
     const data = entries[path];
     if (!data || data.length === 0) continue;
-    // Skip binary-looking payloads (high null-byte ratio)
     let nulls = 0;
     const sample = Math.min(data.length, 512);
     for (let i = 0; i < sample; i++) {
@@ -164,7 +176,6 @@ export function extractBackupTextFromZip(
     if (text.length > MAX_ENTRY_TEXT_CHARS) continue;
 
     const score = scoreBackupText(text);
-    // Filename hints
     const lower = path.toLowerCase();
     let nameBonus = 0;
     if (lower.includes("disciple") || lower.includes("dsp1") || lower.includes("dsx1")) {
@@ -173,23 +184,50 @@ export function extractBackupTextFromZip(
     if (lower.endsWith(".txt") || lower.endsWith(".json")) nameBonus += 5;
 
     const total = score + nameBonus;
-    if (total <= 0) continue;
-    if (!best || total > best.score) {
-      best = { text, path, score: total };
-    }
+    if (total < 20) continue;
+    found.push({
+      text,
+      path,
+      score: total,
+      kind: backupKindFromText(text),
+    });
   }
 
-  if (!best || best.score < 20) {
+  if (found.length === 0) {
     throw new Error(
       "This Zip has no DiscipleSpaces backup. Look inside for a text file starting with DSX1. (group) or DSP1. (personal), then Restore that file — or re-export from Settings → Back up.",
     );
   }
 
-  return {
-    text: best.text,
-    sourceLabel: `${zipName} → ${best.path}`,
+  return found.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Choose packages from a Zip:
+ * - DSP1 personal backup wins (contains every group) — one file.
+ * - Otherwise every DSX1 group file (do not silently pick one).
+ */
+export function selectBackupPackagesFromZip(
+  zipBytes: Uint8Array,
+  zipName = "archive.zip",
+): ImportFileResult[] {
+  const found = collectZipBackupEntries(zipBytes);
+  const personal = found.filter((e) => e.kind === "dsp1");
+  const chosen = personal.length > 0 ? [personal[0]!] : found.filter((e) => e.kind === "dsx1");
+  const list = chosen.length > 0 ? chosen : [found[0]!];
+  return list.map((e) => ({
+    text: e.text,
+    sourceLabel: `${zipName} → ${e.path}`,
     fromZip: true,
-  };
+  }));
+}
+
+/** Extract the best single package (legacy). Prefer selectBackupPackagesFromZip. */
+export function extractBackupTextFromZip(
+  zipBytes: Uint8Array,
+  zipName = "archive.zip",
+): ImportFileResult {
+  return selectBackupPackagesFromZip(zipBytes, zipName)[0]!;
 }
 
 function looksLikeBinaryGarbage(text: string): boolean {
@@ -227,7 +265,7 @@ export async function readBackupImportFile(file: File): Promise<ImportFileResult
         "This looks like a Zip by name, but the contents are not a standard Zip. Try renaming or re-zipping the backup .txt, or paste the DSX1./DSP1. package.",
       );
     }
-    return extractBackupTextFromZip(bytes, file.name || "backup.zip");
+    return selectBackupPackagesFromZip(bytes, file.name || "backup.zip")[0]!;
   }
 
   const text = decodeBytesAsText(bytes);
@@ -251,4 +289,35 @@ export async function readBackupImportFile(file: File): Promise<ImportFileResult
     sourceLabel: file.name || "file",
     fromZip: false,
   };
+}
+
+/** Read every restore package in a file (Zip may hold several DSX1 groups). */
+export async function readBackupImportPackages(
+  file: File,
+): Promise<ImportFileResult[]> {
+  if (!file || file.size === 0) {
+    throw new Error("That file is empty.");
+  }
+  if (file.size > MAX_ZIP_BYTES) {
+    throw new Error(
+      "This file is too large to import in the browser (max 25 MB). Use a smaller backup or unzip and import the .txt only.",
+    );
+  }
+
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  if (looksLikeZipFile(file, bytes)) {
+    if (!isZipMagic(bytes)) {
+      throw new Error(
+        "This looks like a Zip by name, but the contents are not a standard Zip. Try renaming or re-zipping the backup .txt, or paste the DSX1./DSP1. package.",
+      );
+    }
+    return selectBackupPackagesFromZip(bytes, file.name || "backup.zip");
+  }
+
+  const single = await readBackupImportFile(
+    new File([bytes], file.name || "backup.txt", { type: file.type }),
+  );
+  return [single];
 }

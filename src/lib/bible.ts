@@ -239,6 +239,12 @@ export interface SearchHit extends BibleVerse {
   matchType: SearchMatchType;
 }
 
+export interface VerseSearch {
+  hits: SearchHit[];
+  /** True when more verses matched than `limit`. */
+  truncated: boolean;
+}
+
 const STOP_WORDS = new Set([
   "a",
   "an",
@@ -325,17 +331,13 @@ export function scoreVerseMatch(
     const re = new RegExp(`\\b${escapeRegExp(t)}\\b`, "i");
     if (re.test(text)) {
       wordBoundaryHits += 1;
-      score += 14;
+      score += 14 + t.length * 6;
     } else {
       score += 5;
     }
   }
 
   if (!hasPhrase && tokenHits === 0) return null;
-  if (!hasPhrase && tokens.length > 0 && tokenHits < Math.min(tokens.length, 2) && tokens.length >= 2) {
-    // Require at least 2 tokens when multi-word (unless phrase matched)
-    if (tokenHits < 2) return null;
-  }
 
   if (tokens.length > 1 && tokenHits === tokens.length) {
     score += 45;
@@ -369,10 +371,10 @@ export function scoreVerseMatch(
 export async function searchVerses(
   query: string,
   options: SearchOptions & { version?: BibleVersionId } = {},
-): Promise<SearchHit[]> {
+): Promise<VerseSearch> {
   const qRaw = query.trim();
   const q = qRaw.toLowerCase();
-  if (q.length < 2) return [];
+  if (q.length < 2) return { hits: [], truncated: false };
 
   const version = normalizeBibleVersion(options.version ?? "kjv");
   const tokens = tokenizeQuery(qRaw);
@@ -388,7 +390,7 @@ export async function searchVerses(
     if (options.signal?.aborted) break;
     const book = await loadBook(meta.id, version);
     const bookBoost =
-      options.preferBookId && options.preferBookId === book.id ? 55 : 0;
+      options.preferBookId && options.preferBookId === book.id ? 8 : 0;
 
     for (let c = 0; c < book.chapters.length; c++) {
       const chapter = book.chapters[c];
@@ -412,15 +414,25 @@ export async function searchVerses(
     }
   }
 
+  const typeRank: Record<SearchMatchType, number> = {
+    "exact-phrase": 0,
+    "all-words": 1,
+    partial: 2,
+    reference: 3,
+  };
   hits.sort((a, b) => {
+    const byType = typeRank[a.matchType] - typeRank[b.matchType];
+    if (byType !== 0) return byType;
     if (b.score !== a.score) return b.score - a.score;
-    // Stable canonical order for ties
     if (a.bookId !== b.bookId) return a.bookName.localeCompare(b.bookName);
     if (a.chapter !== b.chapter) return a.chapter - b.chapter;
     return a.verse - b.verse;
   });
 
-  return hits.slice(0, limit);
+  return {
+    hits: hits.slice(0, limit),
+    truncated: hits.length > limit,
+  };
 }
 
 /** Parse simple refs like "John 3:16", "Gen 1", "psalm 23:1-3" (first verse). */

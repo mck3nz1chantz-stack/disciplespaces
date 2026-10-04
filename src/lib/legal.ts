@@ -144,7 +144,7 @@ export const INVITE_PRIVACY_NOTE =
   "DiscipleSpaces is a personal small-group study tool on each device. It is not a legally protected confidential space. Share invites only with people you trust.";
 
 export const INVITE_HISTORY_NOTE =
-  "A simple invite gets them into the group. Past shared meetings come with room key + Sync, or when you send a group file (under Other ways).";
+  "Join with the live room key downloads shared meetings already on the room. If the count is zero, the host needs to tap Sync while Online. A group file (DSX1.) is the offline catch-up."
 
 export const INVITE_SYNC_NOTE =
   "Host: add their name so your headcount is right, then share the room key or QR. Guests Join once, then tap Sync. Notes marked “Just for me” never leave this device.";

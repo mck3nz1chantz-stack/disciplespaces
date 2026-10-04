@@ -87,7 +87,7 @@
   "limitations": [
     "Cloudflare deploy requires wrangler login on the machine that deploys",
     "Invite is fully offline: join requires full DS1 package or QR",
-    "New members do not receive past sessions by default",
+    "Join downloads shared meetings already on the room; host must Sync first if the room was empty",
     "iOS install is manual via Safari Share → Add to Home Screen",
     "GrokLaw pre-build still pending"
   ],
@@ -100,7 +100,7 @@
     "No user accounts — device keys + room codes for MVP relay"
   ],
   "inviteBehavior": {
-    "newMembersGetPastSessions": false,
+    "newMembersGetPastSessions": true,
     "packagePrefix": "DS1.",
     "exportPrefix": "DSX1."
   },
@@ -122,6 +122,11 @@
       "name": "Space Templates + Freeform Sessions Overhaul",
       "date": "2026-07-09",
       "notes": "Templates are now a central app concept. Space-level templates: Custom, Guided, Advanced, Freeform. Create Space flow selects template and auto-creates first session. Session notes on every session. Freeform session template (notes + manual passages). Advanced Journey session template. Manual passage logging improved (book datalist, verse range, study notes). Change space template later with confirmation. Schema v4 migration for spaceTemplate/defaultSessionTemplateId + notes defaults. Existing session templates preserved (Discipleship Start, Weekly Study, Book Study)."
+    },
+    {
+      "name": "S5 PolishShip P0 join/home/pulse",
+      "date": "2026-08-27",
+      "notes": "In-page Join; home list-first; connection bar invite labels. S4 zip restore all packages + replace-shared."
     }
   ],
   "featureNotes": {

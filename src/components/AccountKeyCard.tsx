@@ -40,6 +40,7 @@ import {
   buildPersonalBackup,
   decryptPersonalNotes,
   downloadPersonalBackup,
+  mergePersonalNotes,
 } from "../lib/keys/personalBackup";
 import { useAppStore } from "../stores/useAppStore";
 import { db } from "../lib/db";
@@ -79,17 +80,13 @@ async function restorePersonalPayload(
     sessionTotal += result.addedSessions;
   }
   let notesRestored = 0;
-  if (personal.privateNotesIncluded && personal.privateNotesEnc) {
+  if (personal.privateNotes?.length) {
+    notesRestored += await mergePersonalNotes(personal.privateNotes);
+  } else if (personal.privateNotesIncluded && personal.privateNotesEnc) {
     const key = getStoredAccountKey();
     if (key) {
       const notes = await decryptPersonalNotes(personal, key);
-      for (const n of notes) {
-        const exists = await db.privateNotes.get(n.id);
-        if (!exists) {
-          await db.privateNotes.put(n);
-          notesRestored += 1;
-        }
-      }
+      notesRestored += await mergePersonalNotes(notes);
     }
   }
   await useAppStore.getState().loadSpaces();

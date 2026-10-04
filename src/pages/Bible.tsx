@@ -17,13 +17,15 @@ import {
   Focus,
   HandHeart,
   Library,
-  Lock,
   Maximize2,
+  Pencil,
   Search,
   WifiOff,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLiveChapterVerseNotes } from "../hooks/useLiveDb";
+import { makeVerseKey, noteCoveringVerse, verseAnchor } from "../lib/verseNote";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { BibleReaderVideoBg } from "../components/BibleReaderVideoBg";
@@ -91,6 +93,7 @@ export function Bible() {
   const loadTemplates = useAppStore((s) => s.loadTemplates);
   const addPassageToSession = useAppStore((s) => s.addPassageToSession);
   const addPrivateNote = useAppStore((s) => s.addPrivateNote);
+  const saveVerseNote = useAppStore((s) => s.saveVerseNote);
   const logContext = useBibleStore((s) => s.logContext);
   const setLogContext = useBibleStore((s) => s.setLogContext);
   const clearLogContext = useBibleStore((s) => s.clearLogContext);
@@ -107,6 +110,14 @@ export function Bible() {
   const [error, setError] = useState<string | null>(null);
 
   const versionMeta = bibleVersionMeta(bibleVersion);
+  const chapterNotes = useLiveChapterVerseNotes(bibleVersion, bookId, chapter);
+
+  useEffect(() => {
+    const ver = searchParams.get("ver");
+    if ((ver === "kjv" || ver === "web") && ver !== bibleVersion) {
+      setBibleVersion(ver);
+    }
+  }, [searchParams, bibleVersion]);
 
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const [chapterPickerOpen, setChapterPickerOpen] = useState(false);
@@ -114,7 +125,8 @@ export function Bible() {
   const [panel, setPanel] = useState<Panel>("read");
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchScope, setSearchScope] = useState<"book" | "all">("book");
+  const [searchScope, setSearchScope] = useState<"book" | "all">("all");
+  const [searchTruncated, setSearchTruncated] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -160,6 +172,9 @@ export function Bible() {
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(
     null,
   );
+  const openNoteOnArrivalRef = useRef(false);
+  const didRestorePlaceRef = useRef(false);
+  const prefillVerseKeyRef = useRef<string | null>(null);
   /** Skip chapter gate on the very first load of this mount. */
   const isFirstChapterLoadRef = useRef(true);
   const chapterGateTimerRef = useRef<number | null>(null);
@@ -341,16 +356,45 @@ export function Bible() {
 
   // Load index + restore position (per version)
   useEffect(() => {
+    const urlVer = searchParams.get("ver");
+    if ((urlVer === "kjv" || urlVer === "web") && urlVer !== bibleVersion) return;
+    if (didRestorePlaceRef.current) return;
+
     let cancelled = false;
     (async () => {
       setLoadingIndex(true);
       setError(null);
       try {
         const list = await getBooks(bibleVersion);
-        if (cancelled) return;
+        if (cancelled || didRestorePlaceRef.current) return;
+        didRestorePlaceRef.current = true;
         setBooks(list);
         const saved = loadReadingPosition();
-        if (saved && list.some((b) => b.id === saved.bookId)) {
+        const jumpBook = searchParams.get("b");
+        const jumpChapter = Number(searchParams.get("c"));
+        const jumpStart = Number(searchParams.get("sv"));
+        const jumpEnd = Number(searchParams.get("ev"));
+        if (jumpBook && list.some((b) => b.id === jumpBook)) {
+          const meta = list.find((b) => b.id === jumpBook)!;
+          setBookId(jumpBook);
+          setChapter(
+            Math.min(
+              Math.max(1, Number.isFinite(jumpChapter) ? jumpChapter : 1),
+              meta.chapterCount,
+            ),
+          );
+          if (Number.isFinite(jumpStart) && jumpStart > 0) {
+            const end = Number.isFinite(jumpEnd) && jumpEnd > 0 ? jumpEnd : jumpStart;
+            pendingSelectionRef.current = {
+              start: Math.min(jumpStart, end),
+              end: Math.max(jumpStart, end),
+            };
+            openNoteOnArrivalRef.current = searchParams.get("note") === "1";
+          }
+          const next = new URLSearchParams(searchParams);
+          for (const key of ["ver", "b", "c", "sv", "ev", "note"]) next.delete(key);
+          setSearchParams(next, { replace: true });
+        } else if (saved && list.some((b) => b.id === saved.bookId)) {
           const meta = list.find((b) => b.id === saved.bookId)!;
           setBookId(saved.bookId);
           setChapter(
@@ -384,7 +428,7 @@ export function Bible() {
     return () => {
       cancelled = true;
     };
-  }, [bibleVersion]);
+  }, [bibleVersion, searchParams, setSearchParams]);
 
   // Load chapter when book/chapter/version changes (+ soft handoff)
   useEffect(() => {
@@ -420,6 +464,17 @@ export function Bible() {
           pendingSelectionRef.current = null;
           setSelectStart(pending.start);
           setSelectEnd(pending.end);
+          if (openNoteOnArrivalRef.current) {
+            openNoteOnArrivalRef.current = false;
+            prefillVerseKeyRef.current = makeVerseKey({
+              version: bibleVersion,
+              bookId,
+              chapter,
+              startVerse: pending.start,
+              endVerse: pending.end,
+            });
+            setShowPrivateNote(true);
+          }
         }
 
         // Soft reveal after paint
@@ -508,7 +563,12 @@ export function Bible() {
       setChapterPickerOpen(false);
       setSelectStart(null);
       setSelectEnd(null);
-      if (verse) setHighlightVerse(verse);
+      if (verse) {
+        pendingSelectionRef.current = { start: verse, end: verse };
+        setSelectStart(verse);
+        setSelectEnd(verse);
+        setHighlightVerse(verse);
+      }
       if (opts?.enterFocus) {
         setFocusMode(true);
       }
@@ -519,6 +579,13 @@ export function Bible() {
     },
     [prefersReducedMotion],
   );
+
+  function startAtBeginning() {
+    const first = books[0];
+    if (!first) return;
+    setShowContinueHint(false);
+    goTo(first.id, 1);
+  }
 
   function selectBook(id: string) {
     const meta = books.find((b) => b.id === id);
@@ -789,41 +856,64 @@ export function Bible() {
     }
   }
 
-  /** Device-only reflection tied to the selection (optional session). */
+  useEffect(() => {
+    const key = prefillVerseKeyRef.current;
+    if (!key || !chapterNotes) return;
+    const existing = chapterNotes.find((n) => n.verseKey === key);
+    if (existing) setPrivateNoteDraft(existing.content);
+    prefillVerseKeyRef.current = null;
+  }, [chapterNotes]);
+
+  function openExistingVerseNote(verseNum: number) {
+    const note = noteCoveringVerse(chapterNotes ?? [], verseNum);
+    if (!note?.verse) return;
+    setSelectStart(note.verse.startVerse);
+    setSelectEnd(note.verse.endVerse);
+    setPrivateNoteDraft(note.content);
+    setShowPrivateNote(true);
+  }
+
+  function openNoteComposer() {
+    if (!selectionRange || !currentBook) return;
+    const key = makeVerseKey({
+      version: bibleVersion,
+      bookId: currentBook.id,
+      chapter,
+      startVerse: selectionRange.start,
+      endVerse: selectionRange.end,
+    });
+    const existing = (chapterNotes ?? []).find((n) => n.verseKey === key);
+    setPrivateNoteDraft(existing?.content ?? "");
+    setShowPrivateNote(true);
+  }
+
+  /** Note attached to the selected verse. Stays on this phone. */
   async function handleSavePrivateNoteOnly() {
     const text = privateNoteDraft.trim();
     if (!text) {
-      toast.error("Write a short reflection first");
+      toast.error("Write a note first");
       return;
     }
-    if (!logContext.spaceId) {
-      toast.error("Choose a space to keep private notes with");
-      setSpacePickerOpen(true);
-      return;
-    }
-    if (!currentBook) return;
+    if (!currentBook || !selectionRange) return;
 
     setSavingNote(true);
     try {
-      const draft = buildPassageDraft();
-      const ref =
-        draft != null
-          ? formatPassageRef(passageFromSelection(draft))
-          : `${currentBook.name} ${chapter}`;
-      await addPrivateNote({
-        spaceId: logContext.spaceId,
-        sessionId: logContext.sessionId ?? undefined,
-        sectionKey: PRIVATE_SECTION.passages,
-        content: `${ref} — ${text}`,
+      await saveVerseNote({
+        anchor: verseAnchor({
+          version: bibleVersion,
+          bookId: currentBook.id,
+          bookName: currentBook.name,
+          chapter,
+          startVerse: selectionRange.start,
+          endVerse: selectionRange.end,
+        }),
+        content: text,
       });
-      setPrivateNoteDraft("");
       setShowPrivateNote(false);
-      toast.success("Private note saved", {
-        description: "Stays on this device only — never shared in exports.",
-      });
+      toast.success("Note saved on this phone");
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Could not save private note",
+        err instanceof Error ? err.message : "Could not save note",
       );
     } finally {
       setSavingNote(false);
@@ -836,6 +926,7 @@ export function Bible() {
     if (q.length < 2) {
       setSearchError("Enter at least 2 characters");
       setSearchResults([]);
+      setSearchTruncated(false);
       return;
     }
 
@@ -849,6 +940,7 @@ export function Bible() {
       if (ref) {
         goTo(ref.bookId, ref.chapter, ref.verse);
         setSearchResults([]);
+        setSearchTruncated(false);
         setSearchError(null);
         return;
       }
@@ -864,13 +956,17 @@ export function Bible() {
         version: bibleVersion,
         bookId: searchScope === "book" ? bookId : undefined,
         preferBookId: searchScope === "all" ? bookId : undefined,
-        limit: 60,
+        limit: 50,
         signal: ac.signal,
       });
       if (ac.signal.aborted) return;
-      setSearchResults(results);
-      if (results.length === 0) {
-        setSearchError("No verses found");
+      setSearchResults(results.hits);
+      setSearchTruncated(results.truncated);
+      if (results.hits.length === 0) {
+        const other = bibleVersion === "kjv" ? "WEB" : "KJV";
+        setSearchError(
+          `Nothing matched in this translation. Try the same words in ${other}.`,
+        );
       }
     } catch {
       if (!ac.signal.aborted) {
@@ -1098,27 +1194,23 @@ export function Bible() {
         </div>
       )}
 
-      {/* Continue where you left off — free browse only */}
+      {/* Saved place — one line, no streak */}
       {!focusMode &&
         showContinueHint &&
         !canOneTapLog &&
         continueLabelRef.current && (
-          <button
-            type="button"
-            onClick={() => setShowContinueHint(false)}
-            className="w-full text-left touch-manipulation"
-          >
-            <Card
-              padding="sm"
-              className="flex items-center justify-between gap-2 bg-primary/5 border-primary/15"
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-primary">
+              Continue in {continueLabelRef.current}.
+            </p>
+            <button
+              type="button"
+              onClick={startAtBeginning}
+              className="text-sm font-medium text-primary underline-offset-2 hover:underline touch-manipulation"
             >
-              <span className="text-sm text-primary">
-                <span className="font-medium">Continue </span>
-                <span className="font-serif">{continueLabelRef.current}</span>
-              </span>
-              <span className="text-xs text-muted shrink-0">Dismiss</span>
-            </Card>
-          </button>
+              Start at the beginning
+            </button>
+          </div>
         )}
 
       {/* Compact translation + Read/Search — one quiet chrome row */}
@@ -1284,12 +1376,11 @@ export function Bible() {
           onScopeChange={setSearchScope}
           currentBookName={currentBook?.name ?? "this book"}
           results={searchResults}
+          truncated={searchTruncated}
           searching={searching}
           error={searchError}
           onSubmit={handleSearch}
-          onSelectResult={(v) =>
-            goTo(v.bookId, v.chapter, v.verse, { enterFocus: true })
-          }
+          onSelectResult={(v) => goTo(v.bookId, v.chapter, v.verse)}
           onLogResult={(v) => {
             goTo(v.bookId, v.chapter, v.verse, { enterFocus: true });
             setLogDraft({
@@ -1438,12 +1529,22 @@ export function Bible() {
                     const active = highlightVerse === v.verse;
                     const logged = loggedVersesInChapter.has(v.verse);
                     const pulsing = pulseVerse === v.verse;
+                    const covering = noteCoveringVerse(chapterNotes ?? [], v.verse);
+                    const verseNote =
+                      covering?.verse?.startVerse === v.verse ? covering : undefined;
                     return (
-                      <button
+                      <div
                         key={v.verse}
-                        type="button"
                         id={`v-${v.verse}`}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => handleVerseTap(v.verse)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleVerseTap(v.verse);
+                          }
+                        }}
                         data-selected={inSelection ? "true" : "false"}
                         data-active={active ? "true" : "false"}
                         data-logged={logged ? "true" : "false"}
@@ -1452,9 +1553,22 @@ export function Bible() {
                       >
                         <span className="bible-reader-vnum tabular-nums">
                           {v.verse}
+                          {verseNote && (
+                            <button
+                              type="button"
+                              className="ml-1 inline-flex items-center text-primary"
+                              aria-label={`Open note on verse ${v.verse}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openExistingVerseNote(v.verse);
+                              }}
+                            >
+                              <Pencil className="h-3 w-3" aria-hidden />
+                            </button>
+                          )}
                         </span>
                         {v.text}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -1480,18 +1594,18 @@ export function Bible() {
                 {!showPrivateNote ? (
                   <button
                     type="button"
-                    onClick={() => setShowPrivateNote(true)}
-                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-medium text-muted hover:text-primary hover:bg-surface-muted/60 touch-manipulation"
+                    onClick={openNoteComposer}
+                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation"
                   >
-                    <Lock className="h-3.5 w-3.5" aria-hidden />
-                    Private note (this device only)
+                    <Pencil className="h-4 w-4" aria-hidden />
+                    Note
                   </button>
                 ) : (
                   <div className="rounded-xl border border-primary/15 bg-primary/5 p-2.5 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-medium text-primary inline-flex items-center gap-1">
-                        <Lock className="h-3.5 w-3.5" aria-hidden />
-                        Private reflection
+                        <Pencil className="h-3.5 w-3.5" aria-hidden />
+                        Note on this verse
                       </p>
                       <button
                         type="button"
@@ -1519,17 +1633,9 @@ export function Bible() {
                         disabled={savingNote || !privateNoteDraft.trim()}
                         onClick={() => void handleSavePrivateNoteOnly()}
                       >
-                        {savingNote ? "Saving…" : "Note only"}
+                        {savingNote ? "Saving…" : "Save note"}
                       </Button>
-                      {!logContext.spaceId && (
-                        <Button
-                          variant="ghost"
-                          className="!py-2 !px-3 text-xs"
-                          onClick={() => setSpacePickerOpen(true)}
-                        >
-                          Choose space
-                        </Button>
-                      )}
+
                     </div>
                   </div>
                 )}
@@ -1874,6 +1980,7 @@ function SearchPanel({
   onScopeChange,
   currentBookName,
   results,
+  truncated,
   searching,
   error,
   onSubmit,
@@ -1886,12 +1993,14 @@ function SearchPanel({
   onScopeChange: (s: "book" | "all") => void;
   currentBookName: string;
   results: SearchHit[];
+  truncated: boolean;
   searching: boolean;
   error: string | null;
   onSubmit: (e?: FormEvent) => void;
   onSelectResult: (v: SearchHit) => void;
   onLogResult: (v: SearchHit) => void;
 }) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       <form onSubmit={(e) => onSubmit(e)} className="space-y-3">
@@ -1923,18 +2032,6 @@ function SearchPanel({
         <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-muted p-1">
           <button
             type="button"
-            onClick={() => onScopeChange("book")}
-            className={[
-              "rounded-lg py-2 text-xs font-medium touch-manipulation tap-target",
-              scope === "book"
-                ? "bg-surface text-primary shadow-sm"
-                : "text-muted",
-            ].join(" ")}
-          >
-            In {currentBookName}
-          </button>
-          <button
-            type="button"
             onClick={() => onScopeChange("all")}
             className={[
               "rounded-lg py-2 text-xs font-medium touch-manipulation tap-target",
@@ -1944,6 +2041,18 @@ function SearchPanel({
             ].join(" ")}
           >
             Whole Bible
+          </button>
+          <button
+            type="button"
+            onClick={() => onScopeChange("book")}
+            className={[
+              "rounded-lg py-2 text-xs font-medium touch-manipulation tap-target",
+              scope === "book"
+                ? "bg-surface text-primary shadow-sm"
+                : "text-muted",
+            ].join(" ")}
+          >
+            This book
           </button>
         </div>
 
@@ -1956,10 +2065,10 @@ function SearchPanel({
             : "Search"}
         </Button>
         <p className="text-xs text-muted text-center">
-          Results are ranked by relevance. Phrase matches appear first.
-          {scope === "all"
-            ? ` Hits in ${currentBookName} are boosted.`
-            : null}
+          {scope === "book"
+            ? `Searching ${currentBookName} in this translation.`
+            : "Searching the whole Bible in this translation."}{" "}
+          Phrase matches come first.
         </p>
       </form>
 
@@ -1968,62 +2077,72 @@ function SearchPanel({
       )}
 
       {results.length > 0 && (
-        <ul className="space-y-2" aria-label="Search results">
-          {results.map((v, index) => (
-            <li key={`${v.bookId}-${v.chapter}-${v.verse}`}>
-              <Card
-                padding="sm"
-                className="hover:border-primary/30 transition-colors space-y-2"
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelectResult(v)}
-                  className="w-full text-left touch-manipulation"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-xs font-semibold text-primary">
-                      {formatReference(v)}
-                    </p>
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted shrink-0">
-                      {matchLabel(v.matchType)}
-                      {index === 0 ? " · top" : ""}
-                    </span>
-                  </div>
-                  <p className="text-[0.95rem] font-serif leading-[1.7] line-clamp-3 mt-1.5 text-text">
-                    {splitHighlight(v.text, query).map((part, i) =>
-                      part.match ? (
-                        <mark
-                          key={i}
-                          className="bg-accent/35 text-inherit rounded-sm px-0.5 not-italic"
-                        >
-                          {part.text}
-                        </mark>
-                      ) : (
-                        <span key={i}>{part.text}</span>
-                      ),
+        <div className="space-y-2">
+          {truncated && (
+            <p className="text-xs text-muted text-center">Showing 50</p>
+          )}
+          <ul className="space-y-2" aria-label="Search results">
+            {results.map((v) => {
+              const key = `${v.bookId}-${v.chapter}-${v.verse}`;
+              const open = openKey === key;
+              return (
+                <li key={key}>
+                  <Card padding="sm" className="space-y-2">
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      onClick={() => setOpenKey(open ? null : key)}
+                      className="w-full text-left touch-manipulation min-h-11"
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-primary">
+                          {formatReference(v)}
+                        </span>
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted shrink-0">
+                          {matchLabel(v.matchType)}
+                        </span>
+                      </span>
+                    </button>
+                    {open && (
+                      <div className="space-y-2 border-t border-border/70 pt-2">
+                        <p className="text-[0.95rem] font-serif leading-[1.7] text-text">
+                          {splitHighlight(v.text, query).map((part, i) =>
+                            part.match ? (
+                              <mark
+                                key={i}
+                                className="bg-accent/35 text-inherit rounded-sm px-0.5 not-italic"
+                              >
+                                {part.text}
+                              </mark>
+                            ) : (
+                              <span key={i}>{part.text}</span>
+                            ),
+                          )}
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            className="!py-2 !px-3 text-sm flex-1"
+                            onClick={() => onSelectResult(v)}
+                          >
+                            Go to verse
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            className="!py-2 !px-3 text-sm flex-1"
+                            onClick={() => onLogResult(v)}
+                          >
+                            <BookMarked className="h-4 w-4" aria-hidden />
+                            Log to group
+                          </Button>
+                        </div>
+                      </div>
                     )}
-                  </p>
-                </button>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    className="!py-2 !px-3 text-sm flex-1"
-                    onClick={() => onSelectResult(v)}
-                  >
-                    Open
-                  </Button>
-                  <Button
-                    className="!py-2 !px-3 text-sm flex-1"
-                    onClick={() => onLogResult(v)}
-                  >
-                    <BookMarked className="h-4 w-4" aria-hidden />
-                    Log
-                  </Button>
-                </div>
-              </Card>
-            </li>
-          ))}
-        </ul>
+                  </Card>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -2038,6 +2157,6 @@ function matchLabel(type: SearchHit["matchType"]): string {
     case "reference":
       return "Reference";
     default:
-      return "Partial";
+      return "Some words";
   }
 }

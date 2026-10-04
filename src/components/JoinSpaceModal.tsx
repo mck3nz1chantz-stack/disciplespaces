@@ -4,6 +4,7 @@ import { Camera, CheckCircle2, Copy, Share2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
+import { Card } from "./Card";
 import { useAppStore } from "../stores/useAppStore";
 import {
   buildMemberJoinPayload,
@@ -29,6 +30,8 @@ interface JoinSpaceModalProps {
   onClose: () => void;
   /** Prefill from deep link / parent. */
   initialRaw?: string | null;
+  /** Render in the page (no overlay). Use on /join. */
+  embedded?: boolean;
 }
 
 type Step = "input" | "confirm" | "done" | "host-confirm-done";
@@ -202,6 +205,7 @@ export function JoinSpaceModal({
   open,
   onClose,
   initialRaw = null,
+  embedded = false,
 }: JoinSpaceModalProps) {
   const navigate = useNavigate();
   const joinFromInvite = useAppStore((s) => s.joinFromInvite);
@@ -280,6 +284,7 @@ export function JoinSpaceModal({
     setHostAddedName(null);
     setRestoreAsHost(false);
     setPreviewGroupName(null);
+    setPreviewSessionCount(null);
     resetIdentity([]);
   }
 
@@ -438,19 +443,10 @@ export function JoinSpaceModal({
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Could not find group";
         toast.error(msg, { duration: 12000 });
-        // Wrong key type (Account Key / garbage) — stay on paste step
-        if (
-          /Account Key|personal backup|Couldn.?t recognize|Invalid Group Key/i.test(
-            msg,
-          )
-        ) {
-          return;
-        }
-        // Unknown/expired code: still let them try Join (host may open room next)
+        // Stay on paste — 404 / wrong key should not look like a successful confirm
         setPreviewGroupName(null);
         setPreviewSessionCount(null);
         resetIdentity([]);
-        setStep("confirm");
       } finally {
         setPreviewLoading(false);
       }
@@ -480,6 +476,8 @@ export function JoinSpaceModal({
           alreadyHad: had,
           sessionCount: roomSessions,
           addedSessions,
+          pushFailed,
+          pushError,
         } = await joinSpaceViaRelay({
           shortCode: raw.trim(),
           displayName: name,
@@ -492,10 +490,15 @@ export function JoinSpaceModal({
         setJoiner(null);
         setConfirmPayload(null);
         setStep("done");
-        if (roomSessions === 0) {
+        if (pushFailed) {
+          toast.error("Joined this phone — upload to the room didn’t finish", {
+            description: `${pushError ?? "Tap Sync on the group card to retry."} Nothing was deleted.`,
+            duration: 12000,
+          });
+        } else if (roomSessions === 0) {
           toast.message(had ? "Linked — no shared meetings yet" : "Joined — no shared meetings yet", {
             description:
-              "Ask the host to open this group and tap Sync now so past meetings upload. Then you tap Sync.",
+              "Ask the host to open this group and tap Sync so past meetings upload. Then you tap Sync.",
             duration: 10000,
           });
         } else {
@@ -660,13 +663,20 @@ export function JoinSpaceModal({
     parsed?.kind === "invite" ||
     parsed?.kind === "export";
 
-  return (
-    <Modal open={open} title="Join a group" onClose={handleClose}>
+  const form = (
+    <>
       {step === "input" && (
         <form onSubmit={(e) => void handleContinue(e)} className="space-y-4">
+          {!embedded && (
           <p className="text-sm text-muted -mt-1">
-            Enter the code your host shared, open their invite link, or scan
-            their QR. Same website they use — usually disciple-spaces.pages.dev.
+            Paste the <strong className="text-text">room key</strong> (like
+            ABCD-EF) or open the host’s join link. Same site they use —
+            disciple-spaces.pages.dev.
+          </p>
+          )}
+          <p className="text-xs text-muted leading-relaxed">
+            Join without internet: paste the full invite that starts with DS1.
+            (or scan their QR). That is not the same as the short room key.
           </p>
 
           <ConnectSafelyDisclosure
@@ -675,12 +685,12 @@ export function JoinSpaceModal({
           />
 
           <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Code or invite</span>
+            <span className="text-sm font-medium">Room key or invite</span>
             <textarea
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-sm min-h-[120px] resize-y font-mono"
-              placeholder="Join code, or paste the invite they sent"
+              placeholder="ABCD-EF  ·  or full DS1. invite if you’re offline"
               autoFocus
             />
           </label>
@@ -744,7 +754,7 @@ export function JoinSpaceModal({
                   <p className="text-sm text-muted">
                     {previewSessionCount > 0
                       ? `${previewSessionCount} shared meeting${previewSessionCount === 1 ? "" : "s"} ready to download`
-                      : "No shared meetings on the room yet — host should Sync first"}
+                      : "Host hasn’t Synced meetings yet."}
                   </p>
                 )}
                 <p className="text-sm text-muted">
@@ -896,7 +906,7 @@ export function JoinSpaceModal({
               {shortCodeJoin
                 ? sessionCount > 0
                   ? `This room has ${sessionCount} shared meeting${sessionCount === 1 ? "" : "s"}${sessionsAdded > 0 ? ` (${sessionsAdded} new on this phone)` : ""}. Tap Sync later to stay up to date.`
-                  : "You’re linked, but the room had no shared meetings yet."
+                  : "Host hasn’t Synced meetings yet. Ask them to open the group and tap Sync, then tap Sync here."
                 : historyImported
                   ? sessionsAdded > 0
                     ? `Imported ${sessionsAdded} session${sessionsAdded === 1 ? "" : "s"}. You can take part going forward on this device.`
@@ -1015,6 +1025,19 @@ export function JoinSpaceModal({
           </Button>
         </div>
       )}
+    </>
+  );
+
+  if (!open && !embedded) return null;
+
+  if (embedded) {
+    if (!open) return null;
+    return <Card padding="lg">{form}</Card>;
+  }
+
+  return (
+    <Modal open={open} title="Join a group" onClose={handleClose}>
+      {form}
     </Modal>
   );
 }

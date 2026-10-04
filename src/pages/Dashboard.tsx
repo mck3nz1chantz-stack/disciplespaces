@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
-import { BookOpen, HandHeart, Plus, UserPlus, Users } from "lucide-react";
+import { HandHeart, Plus, UserPlus, Users } from "lucide-react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
-import { QuickStartChecklist } from "../components/QuickStartChecklist";
-import { ShareUpdateModal } from "../components/ShareUpdateModal";
 import {
   consumePendingHomeAction,
   consumePendingJoinRaw,
@@ -17,7 +15,6 @@ import {
   useLiveSpaces,
 } from "../hooks/useLiveDb";
 import { useOnlineMode } from "../hooks/useOnlineMode";
-import { QUICKSTART_DISMISS_KEY, readFlag } from "../lib/onboarding";
 import { getSpaceTemplateMeta } from "../lib/spaceTemplates";
 import {
   formatReadingPositionLabel,
@@ -25,6 +22,8 @@ import {
 } from "../lib/bible";
 import type { Space } from "../types";
 import { maxMembersForSpace, spaceKindLabel } from "../types";
+import { formatMeetingWhen, soonestUpcoming } from "../lib/meetingCalendar";
+import { MonthCalendar } from "../components/MonthCalendar";
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -36,12 +35,6 @@ export function Dashboard() {
   const error = useAppStore((s) => s.error);
   const initialize = useAppStore((s) => s.initialize);
   const { mode: onlineMode } = useOnlineMode();
-
-  const [backupOpen, setBackupOpen] = useState(false);
-  const [backupMode, setBackupMode] = useState<"export" | "import">("export");
-  const [showQuickStart, setShowQuickStart] = useState(
-    () => !readFlag(QUICKSTART_DISMISS_KEY),
-  );
 
   useEffect(() => {
     void initialize();
@@ -77,19 +70,11 @@ export function Dashboard() {
       window.removeEventListener("ds-pending-join", openPendingFromHandoff);
   }, [navigate]);
 
-  const hasAnySessions = useMemo(
-    () => spaces.some((s) => (s.sessions?.length ?? 0) > 0),
-    [spaces],
-  );
-
-  const showChecklist =
-    showQuickStart && !isLoading && (spaces.length === 0 || !hasAnySessions);
-
-  const continueReading = useMemo(() => {
+  const continueReading = (() => {
     const pos = loadReadingPosition();
     if (!pos) return null;
     return formatReadingPositionLabel(pos);
-  }, [spaces.length]);
+  })();
 
   /** Most recently active group (list is activity-sorted in store; live query may differ). */
   const lastSpace = useMemo(() => {
@@ -105,19 +90,56 @@ export function Dashboard() {
       ? (spaces.find((s) => s.id === openPrayers.spaceId) ?? null)
       : null;
 
-  const showNextUp =
-    Boolean(lastSpace) || Boolean(continueReading) || Boolean(prayerSpace);
+  const showNextUp = Boolean(lastSpace) || Boolean(prayerSpace);
 
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-2xl">Your groups</h2>
         <p className="text-sm text-muted mt-1">
-          Create a group to get a room key, or Join with a friend’s key. Sync
-          keeps you together; private notes stay on this phone.
+          New group, or join one you were invited to. Notes stay on this phone.
         </p>
       </div>
 
+      {spaces.length > 0 && <MonthCalendar groups={spaces} />}
+
+      {(() => {
+        const next = spaces.length > 0 ? soonestUpcoming(spaces) : null;
+        if (!next && !continueReading) return null;
+        return (
+          <div className="space-y-2">
+            {next && (
+              <Link
+                to={`/space/${next.spaceId}`}
+                className="block touch-manipulation"
+              >
+                <Card className="border-primary/30 bg-primary/5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                    Next meeting
+                  </p>
+                  <p className="text-base font-medium text-primary mt-1">
+                    {formatMeetingWhen(next.face.day, next.face.startTime)}
+                  </p>
+                  <p className="text-sm text-muted mt-0.5">
+                    {next.spaceName}
+                    {next.place ? ` · ${next.place}` : ""}
+                  </p>
+                </Card>
+              </Link>
+            )}
+            {continueReading && (
+              <Link
+                to="/bible"
+                className="block text-sm text-primary touch-manipulation underline-offset-2 hover:underline"
+              >
+                Continue in {continueReading}.
+              </Link>
+            )}
+          </div>
+        );
+      })()}
+
+      {spaces.length > 0 && (
       <div className="grid grid-cols-2 gap-2">
         <Button
           fullWidth
@@ -137,8 +159,9 @@ export function Dashboard() {
           Join a group
         </Button>
       </div>
+      )}
 
-      {showNextUp && (
+      {spaces.length > 0 && showNextUp && (
         <section className="space-y-2" aria-label="Next up">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted px-0.5">
             Next up
@@ -165,31 +188,6 @@ export function Dashboard() {
                       </span>
                       <span className="block text-sm font-medium text-primary truncate">
                         {lastSpace.name}
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              )}
-              {continueReading && (
-                <li>
-                  <Link
-                    to="/bible"
-                    className={[
-                      "inline-flex items-center gap-2 rounded-2xl border border-border/90",
-                      "bg-surface/95 px-3 py-2.5 touch-manipulation",
-                      "hover:border-primary/35 hover:bg-primary/5 active:scale-[0.98]",
-                      "max-w-[14rem]",
-                    ].join(" ")}
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <BookOpen className="h-4 w-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 text-left">
-                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                        Continue Bible
-                      </span>
-                      <span className="block text-sm font-serif font-medium text-primary truncate">
-                        {continueReading}
                       </span>
                     </span>
                   </Link>
@@ -229,17 +227,6 @@ export function Dashboard() {
         </section>
       )}
 
-      {showChecklist && (
-        <QuickStartChecklist
-          hasSpaces={spaces.length > 0}
-          hasSessions={hasAnySessions}
-          firstSpaceId={spaces[0]?.id ?? null}
-          onCreateSpace={() => navigate("/new")}
-          onJoinSpace={() => navigate("/join")}
-          onDismiss={() => setShowQuickStart(false)}
-        />
-      )}
-
       {error && (
         <div
           role="alert"
@@ -260,7 +247,7 @@ export function Dashboard() {
               Try again
             </button>
             <span className="text-xs text-muted">
-              Or Settings → Restore with a backup.
+              Or More → Open a copy.
             </span>
           </div>
         </div>
@@ -270,7 +257,7 @@ export function Dashboard() {
         <p className="text-sm text-muted">Loading…</p>
       )}
 
-      {!isLoading && spaces.length === 0 && !showChecklist && (
+      {!isLoading && spaces.length === 0 && (
         <Card className="text-center py-10 space-y-4">
           <Users className="h-10 w-10 mx-auto text-muted" aria-hidden />
           <div className="space-y-1">
@@ -282,11 +269,11 @@ export function Dashboard() {
           <div className="flex flex-col gap-2 max-w-xs mx-auto w-full">
             <Button onClick={() => navigate("/new")}>
               <Plus className="h-5 w-5" aria-hidden />
-              Start a group
+              New group
             </Button>
             <Button variant="secondary" onClick={() => navigate("/join")}>
               <UserPlus className="h-5 w-5" aria-hidden />
-              I was invited
+              Join a group
             </Button>
           </div>
         </Card>
@@ -346,31 +333,15 @@ export function Dashboard() {
 
       {spaces.length > 0 && (
         <p className="text-center text-xs text-muted pb-1">
-          <button
-            type="button"
-            className="text-primary font-medium underline-offset-2 hover:underline touch-manipulation"
-            onClick={() => {
-              setBackupMode("export");
-              setBackupOpen(true);
-            }}
-          >
-            Save a copy of a group
-          </button>
-          <span className="mx-1.5">·</span>
           <Link
             to="/settings"
             className="text-primary font-medium underline-offset-2 hover:underline"
           >
-            Settings
+            Save a copy is under More
           </Link>
         </p>
       )}
 
-      <ShareUpdateModal
-        open={backupOpen}
-        defaultMode={backupMode}
-        onClose={() => setBackupOpen(false)}
-      />
     </div>
   );
 }

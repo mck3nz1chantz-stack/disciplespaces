@@ -4,6 +4,7 @@ import { ToastHost } from "./components/Toast";
 import { Dashboard } from "./pages/Dashboard";
 import { SpaceDetail } from "./pages/SpaceDetail";
 import { Bible } from "./pages/Bible";
+import { Notes } from "./pages/Notes";
 import { Settings } from "./pages/Settings";
 import { Help } from "./pages/Help";
 import { Offline } from "./pages/Offline";
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="join" element={<JoinGroup />} />
           <Route path="new" element={<NewGroup />} />
           <Route path="bible" element={<Bible />} />
+          <Route path="notes" element={<Notes />} />
           <Route path="settings" element={<Settings />} />
           <Route path="help" element={<Help />} />
           <Route path="offline" element={<Offline />} />

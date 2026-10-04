@@ -9,12 +9,14 @@ import type {
   PrayerBoardStatus,
   PrivateNote,
   Session,
+  VerseAnchor,
   SessionResponses,
   Space,
   SpaceKind,
   SpaceSyncState,
   SpaceTemplateId,
   Template,
+  WeekReading,
 } from "../types";
 import { maxMembersForSpace, normalizeSpaceKind } from "../types";
 import {
@@ -27,6 +29,7 @@ import {
   type SpaceRow,
 } from "../lib/db";
 import { FIRST_LAUNCH_ACK_KEY } from "../lib/legal";
+import { makeVerseKey } from "../lib/verseNote";
 import {
   applyRemoteTombstonesLocally,
   buildSharedSnapshotWithTombstones,
@@ -88,16 +91,23 @@ import {
 import { emptyResponses } from "../lib/sessionResponses";
 import { suggestTitleFromPassages } from "../lib/sessionTitle";
 import { isOnlineModeEnabled } from "../lib/onlineMode";
+import { normalizeStartTime, rollSession } from "../lib/meetingCalendar";
 
 interface SessionInput {
   spaceId: string;
   date?: string;
+  startTime?: string;
+  weekly?: boolean;
+  repeat?: "week" | "biweek" | "month";
+  repeatDay?: number;
   templateId: string;
   /** Optional meeting title (e.g. primary passage / lesson name). */
   title?: string;
   attendees: string[];
   responses?: SessionResponses;
   passagesStudied?: Passage[];
+  weekPassage?: WeekReading | null;
+  weekQuestion?: string | null;
   notes?: string;
   sharedNotes?: string;
   keyTakeaways?: string;
@@ -142,6 +152,7 @@ interface AppState {
       spaceTemplate?: SpaceTemplateId;
       spaceKind?: SpaceKind;
       defaultSessionTemplateId?: string | null;
+      place?: string | null;
     },
   ) => Promise<Space>;
 
@@ -164,11 +175,19 @@ interface AppState {
       Pick<
         Session,
         | "date"
+        | "startTime"
+        | "weekly"
+        | "repeat"
+        | "repeatDay"
+        | "heldDates"
         | "templateId"
         | "title"
         | "attendees"
         | "responses"
         | "notes"
+        | "weekPassage"
+        | "weekQuestion"
+        | "coming"
         | "sharedNotes"
         | "keyTakeaways"
         | "actionItems"
@@ -247,11 +266,16 @@ interface AppState {
     skippedPrayers: number;
   }>;
 
-  /** Device-local only — never exported. */
+  /** Device-local only — never sent to a group room. */
   addPrivateNote: (input: {
-    spaceId: string;
+    spaceId?: string;
     sessionId?: string;
     sectionKey?: string;
+    content: string;
+  }) => Promise<PrivateNote>;
+  /** Create or replace the single note for this exact verse reference. */
+  saveVerseNote: (input: {
+    anchor: VerseAnchor;
     content: string;
   }) => Promise<PrivateNote>;
   updatePrivateNote: (
@@ -332,6 +356,9 @@ interface AppState {
     sessionCount: number;
     /** Newly added sessions this join imported. */
     addedSessions: number;
+    /** True when Join linked but the follow-up push did not finish. */
+    pushFailed?: boolean;
+    pushError?: string;
   }>;
   /**
    * Repair path: re-link THIS local Space to the host’s current room key.
@@ -675,7 +702,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         patch.spaceKind !== undefined &&
         normalizeSpaceKind(patch.spaceKind) !==
           normalizeSpaceKind(row.spaceKind);
-      if (triesName || triesDescription || triesKind) {
+      const triesPlace =
+        patch.place !== undefined &&
+        (patch.place?.trim() || undefined) !== row.place;
+      if (triesName || triesDescription || triesKind || triesPlace) {
         throw new Error(HOST_ONLY_TITLE_MESSAGE);
       }
     }
@@ -692,6 +722,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           : patch.description !== undefined
             ? patch.description.trim() || undefined
             : row.description,
+      place:
+        patch.place === null
+          ? undefined
+          : patch.place !== undefined
+            ? patch.place.trim() || undefined
+            : row.place,
     };
 
     if (patch.spaceTemplate !== undefined) {
@@ -860,11 +896,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   createSession: async ({
     spaceId,
     date,
+    startTime,
+    weekly,
+    repeat,
+    repeatDay,
     templateId,
     title,
     attendees,
     responses,
     passagesStudied,
+    weekPassage,
+    weekQuestion,
     notes,
     sharedNotes,
     keyTakeaways,
@@ -883,10 +925,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       id: crypto.randomUUID(),
       spaceId,
       date: toIsoDate(date),
+      startTime: normalizeStartTime(startTime),
+      weekly: weekly ? true : undefined,
+      repeat:
+        repeat === "week" || repeat === "biweek" || repeat === "month"
+          ? repeat
+          : undefined,
+      repeatDay:
+        repeat === "month" && repeatDay && repeatDay >= 1 && repeatDay <= 31
+          ? repeatDay
+          : undefined,
       templateId,
       title: title?.trim() || undefined,
       attendees: validAttendees,
       passagesStudied: passagesStudied ?? [],
+      weekPassage: weekPassage ?? undefined,
+      weekQuestion: weekQuestion?.trim() || undefined,
       responses: responses ?? {},
       notes: notes?.trim() || undefined,
       sharedNotes: sharedNotes?.trim() || undefined,
@@ -916,8 +970,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     const row = await db.spaces.get(existing.spaceId);
     if (!row) throw new Error("Space not found");
 
+    const rolled = rollSession(existing);
     const date =
-      patch.date !== undefined ? toIsoDate(patch.date) : existing.date;
+      patch.date !== undefined ? toIsoDate(patch.date) : rolled.date;
+    const startTime =
+      patch.startTime !== undefined
+        ? normalizeStartTime(patch.startTime) 
+        : rolled.startTime;
+    const weekly =
+      patch.weekly !== undefined ? Boolean(patch.weekly) : Boolean(rolled.weekly);
+    const heldDates =
+      patch.heldDates !== undefined ? patch.heldDates : rolled.heldDates;
 
     const attendees = (
       patch.attendees !== undefined ? patch.attendees : existing.attendees
@@ -927,6 +990,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...existing,
       ...patch,
       date,
+      startTime,
+      weekly: weekly ? true : undefined,
+      repeat:
+        "repeat" in patch
+          ? patch.repeat === "week" ||
+            patch.repeat === "biweek" ||
+            patch.repeat === "month"
+            ? patch.repeat
+            : undefined
+          : existing.repeat,
+      repeatDay:
+        "repeatDay" in patch
+          ? patch.repeatDay && patch.repeatDay >= 1 && patch.repeatDay <= 31
+            ? patch.repeatDay
+            : undefined
+          : existing.repeatDay,
+      heldDates: heldDates && heldDates.length > 0 ? heldDates : undefined,
       attendees,
       title:
         patch.title !== undefined
@@ -940,6 +1020,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         patch.notes !== undefined
           ? patch.notes.trim() || undefined
           : existing.notes,
+      weekPassage:
+        "weekPassage" in patch
+          ? patch.weekPassage || undefined
+          : existing.weekPassage,
+      weekQuestion:
+        "weekQuestion" in patch
+          ? patch.weekQuestion?.trim() || undefined
+          : existing.weekQuestion,
+      coming:
+        "coming" in patch
+          ? patch.coming?.length
+            ? patch.coming
+            : undefined
+          : existing.coming,
       updatedAt: nowUpdatedAt(),
     };
 
@@ -1251,6 +1345,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         id: payload.space.id,
         name: payload.space.name,
         description: payload.space.description,
+        place: payload.space.place?.trim() || undefined,
         createdAt: payload.space.createdAt || new Date().toISOString(),
         members: normalizeMembers(payload.space.members ?? [], max),
         preferredBibleVersion: "KJV",
@@ -1309,6 +1404,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...existing,
         name: payload.space.name || existing.name,
         description: payload.space.description ?? existing.description,
+        place:
+          mergeStrategy === "replace-shared"
+            ? payload.space.place?.trim() || undefined
+            : payload.space.place?.trim() || existing.place,
         inviteCode: existing.inviteCode || payload.space.inviteCode,
         spaceTemplate:
           existing.spaceTemplate ||
@@ -1577,7 +1676,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { space } = await get().syncSpaceNow(spaceId);
       return space;
     } catch {
-      // Linked with the snapshot from create/reuse; Sync can retry later
+      // Linked; lastError already stored by syncSpaceNow — keep it visible
       const rowAfter = await db.spaces.get(spaceId);
       if (!rowAfter) throw new Error("Space not found");
       return hydrateSpace(rowAfter);
@@ -1834,7 +1933,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const friendly =
         /404|not found/i.test(message)
-          ? "Room link is out of date. Host: open the group and share the current room key. Guest: Join a group again with that key (you keep local notes)."
+          ? sync.deviceRole === "guest"
+            ? "The room key changed or expired. Ask the host to share the new key from their group card (or the /join?code= link), then Join again. Meetings on this phone stay here."
+            : "Room link is out of date. Open the group and share the current room key. Guests Join again with that key (they keep local notes)."
           : message;
       await get().patchSpaceSync(spaceId, { lastError: friendly });
       throw new Error(friendly);
@@ -2025,6 +2126,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     // Immediately push merged local snapshot so host sees you without waiting
+    let pushFailed = false;
+    let pushError: string | undefined;
     try {
       const fresh = await db.spaces.get(snap.spaceId);
       if (fresh) {
@@ -2054,8 +2157,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastError: undefined,
         });
       }
-    } catch {
-      // Join already succeeded; guest can Sync later
+    } catch (pushErr) {
+      pushFailed = true;
+      pushError =
+        pushErr instanceof Error
+          ? pushErr.message
+          : "Could not upload your name to the room yet.";
+      space = await get().patchSpaceSync(snap.spaceId, {
+        lastError: `${pushError} You are joined on this phone — tap Sync to retry. Nothing was deleted.`,
+      });
     }
 
     const sessionCount = Array.isArray(snap.sessions) ? snap.sessions.length : 0;
@@ -2064,6 +2174,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       alreadyHad: had,
       sessionCount,
       addedSessions: imported.addedSessions,
+      pushFailed,
+      pushError,
     };
   },
 
@@ -2171,12 +2283,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addPrivateNote: async ({ spaceId, sessionId, sectionKey, content }) => {
     const trimmed = content.trim();
-    if (!trimmed) throw new Error("Write a private note first");
-    const row = await db.spaces.get(spaceId);
-    if (!row) throw new Error("Space not found");
+    if (!trimmed) throw new Error("Write a note first");
+    if (spaceId) {
+      const row = await db.spaces.get(spaceId);
+      if (!row) throw new Error("Space not found");
+    }
     if (sessionId) {
       const session = await db.sessions.get(sessionId);
-      if (!session || session.spaceId !== spaceId) {
+      if (!session || (spaceId && session.spaceId !== spaceId)) {
         throw new Error("Session not found in this space");
       }
     }
@@ -2184,7 +2298,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const now = new Date().toISOString();
     const note: PrivateNote = {
       id: crypto.randomUUID(),
-      spaceId,
+      spaceId: spaceId || undefined,
       sessionId: sessionId || undefined,
       sectionKey: sectionKey?.trim() || undefined,
       content: trimmed,
@@ -2193,6 +2307,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     await db.privateNotes.add(note);
     // Private notes never go to the room — only optional Account Key vault
+    scheduleAccountVaultUpload();
+    return note;
+  },
+
+  saveVerseNote: async ({ anchor, content }) => {
+    const trimmed = content.trim();
+    if (!trimmed) throw new Error("Write a note first");
+    const start = Math.min(anchor.startVerse, anchor.endVerse);
+    const end = Math.max(anchor.startVerse, anchor.endVerse);
+    const verse: VerseAnchor = { ...anchor, startVerse: start, endVerse: end };
+    const verseKey = makeVerseKey(verse);
+    const now = new Date().toISOString();
+    const existing = await db.privateNotes.where("verseKey").equals(verseKey).first();
+    const note: PrivateNote = existing
+      ? {
+          ...existing,
+          content: trimmed,
+          verse,
+          verseKey,
+          updatedAt: now,
+        }
+      : {
+          id: crypto.randomUUID(),
+          content: trimmed,
+          verse,
+          verseKey,
+          createdAt: now,
+          updatedAt: now,
+        };
+    await db.privateNotes.put(note);
     scheduleAccountVaultUpload();
     return note;
   },

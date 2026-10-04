@@ -7,6 +7,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  Link,
   useLocation,
   useNavigate,
   useParams,
@@ -34,7 +35,6 @@ import { Button } from "../components/Button";
 import { Modal } from "../components/Modal";
 import { MemberEditor } from "../components/MemberEditor";
 import { InviteModal } from "../components/InviteModal";
-import { ShareUpdateModal } from "../components/ShareUpdateModal";
 import { YourDataBundle } from "../components/YourDataBundle";
 import { SpaceConnectionBar } from "../components/SpaceConnectionBar";
 import { PrayerBoard } from "../components/PrayerBoard";
@@ -68,7 +68,9 @@ import {
   normalizeSectionKey,
   SECTION_GENERAL,
 } from "../lib/sessionSections";
-import type { Member, Session, SpaceKind, Template } from "../types";
+import type { ComingMark, Member, Session, SpaceKind, Template, WeekReading } from "../types";
+import { formatWeekReading, parseWeekPassage } from "../lib/passages";
+import { MonthCalendar } from "../components/MonthCalendar";
 import {
   maxMembersForSpace,
   normalizeSpaceKind,
@@ -103,6 +105,15 @@ import {
   type GatherStepId,
 } from "../lib/gather";
 import { useOnlineMode } from "../hooks/useOnlineMode";
+import {
+  comingForFace,
+  formatMeetingWhen,
+  repeatLabel,
+  repeatOf,
+  meetingScheduleChanged,
+  rollSession,
+  splitMeetings,
+} from "../lib/meetingCalendar";
 import { useRoomLiveSync } from "../hooks/useRoomLiveSync";
 
 /** Session list lens: one mode, or all modes in this Space. */
@@ -153,7 +164,7 @@ export function SpaceDetail() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
+
   const [templateChangeOpen, setTemplateChangeOpen] = useState(false);
   const [draftSpaceTemplate, setDraftSpaceTemplate] =
     useState<SpaceTemplateId>("custom");
@@ -172,6 +183,7 @@ export function SpaceDetail() {
 
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editPlace, setEditPlace] = useState("");
   const [draftSpaceKind, setDraftSpaceKind] = useState<SpaceKind>("group");
   const [draftMembers, setDraftMembers] = useState<Member[]>([]);
   const [saving, setSaving] = useState(false);
@@ -320,11 +332,37 @@ export function SpaceDetail() {
     [filteredSessions],
   );
 
-  const visibleSessions = useMemo(
-    () => filteredSessions.slice(0, sessionVisible),
-    [filteredSessions, sessionVisible],
+  const meetingLists = useMemo(
+    () => splitMeetings(filteredSessions),
+    [filteredSessions],
   );
-  const hasMoreSessions = filteredSessions.length > sessionVisible;
+  const visiblePast = meetingLists.past.slice(0, sessionVisible);
+  const hasMorePast = meetingLists.past.length > sessionVisible;
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      for (const session of spaceSessions) {
+        const next = rollSession(session);
+        if (!meetingScheduleChanged(session, next)) continue;
+        if (cancelled) return;
+        try {
+          await updateSession(session.id, {
+            date: next.date,
+            startTime: next.startTime ?? "",
+            weekly: Boolean(next.weekly),
+            heldDates: next.heldDates ?? [],
+            coming: next.coming,
+          });
+        } catch {
+          // The list still shows the next date from the projection.
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [spaceSessions, updateSession]);
 
   function openEdit() {
     if (!space) return;
@@ -336,6 +374,7 @@ export function SpaceDetail() {
     }
     setEditName(space.name);
     setEditDescription(space.description ?? "");
+    setEditPlace(space.place ?? "");
     setDraftSpaceKind(normalizeSpaceKind(space.spaceKind));
     setEditOpen(true);
   }
@@ -443,6 +482,8 @@ export function SpaceDetail() {
         templates: templateList,
         members: space.members,
         meetingDate: format(new Date(), "yyyy-MM-dd"),
+        startTime: "",
+        weekly: false,
         preferredTemplateId: templateId,
         templateId,
       });
@@ -454,6 +495,8 @@ export function SpaceDetail() {
       const created = await createSession({
         spaceId: space.id,
         date: draftValues.meetingDate,
+        startTime: draftValues.startTime,
+        weekly: draftValues.weekly,
         templateId: createTemplateId,
         attendees: draftValues.attendees,
         responses: draftValues.responses,
@@ -627,18 +670,24 @@ export function SpaceDetail() {
     setSessionPanelTab("session");
     const tpl = templates.find((t) => t.id === s.templateId);
     setLockedSectionKey(tpl?.steps[0]?.id ?? PRIVATE_SECTION.notes);
+    const planned = rollSession(s);
     setFormValues(
       buildSessionFormValues({
         mode: "edit",
         templates,
         members: space.members,
-        meetingDate: toDateInputValue(s.date),
+        meetingDate: toDateInputValue(planned.date),
+        startTime: planned.startTime ?? "",
+        weekly: Boolean(planned.weekly),
+        repeat: repeatOf(planned),
         templateId: s.templateId,
         title: s.title ?? "",
         attendees: s.attendees,
         responses: s.responses,
         passagesStudied: s.passagesStudied ?? [],
         notes: s.notes ?? s.sharedNotes ?? "",
+        weekPassageText: s.weekPassage ? formatWeekReading(s.weekPassage) : "",
+        weekQuestion: s.weekQuestion ?? "",
       }),
     );
     setSessionMode("edit");
@@ -735,6 +784,13 @@ export function SpaceDetail() {
         if (formSnapshot && formOrSessionHasSharedContent(draft, formSnapshot)) {
           await updateSession(draft.id, {
             date: formSnapshot.meetingDate,
+            startTime: formSnapshot.startTime,
+            weekly: formSnapshot.repeat === "week",
+            repeat: formSnapshot.repeat === "once" ? undefined : formSnapshot.repeat,
+            repeatDay:
+              formSnapshot.repeat === "month"
+                ? Number(formSnapshot.meetingDate.slice(8, 10))
+                : undefined,
             templateId: formSnapshot.templateId,
             attendees: formSnapshot.attendees,
             responses: formSnapshot.responses,
@@ -785,6 +841,7 @@ export function SpaceDetail() {
       await updateSpace(space.id, {
         name: editName,
         description: editDescription,
+        place: editPlace,
         spaceKind: draftSpaceKind,
       });
       toast.success("Space updated");
@@ -857,6 +914,17 @@ export function SpaceDetail() {
       return;
     }
 
+    const weekText = formValues.weekPassageText.trim();
+    let weekPassage: WeekReading | null = null;
+    if (weekText) {
+      weekPassage = await parseWeekPassage(weekText);
+      if (!weekPassage) {
+        toast.error("Use a passage like John 3:16–18");
+        return;
+      }
+    }
+    const weekQuestion = formValues.weekQuestion.trim();
+
     // Prefer typed title; if blank, store passage suggestion so Past meetings stays clear
     const titleToSave =
       formValues.title.trim() ||
@@ -869,12 +937,21 @@ export function SpaceDetail() {
       if (activeSession) {
         const updated = await updateSession(activeSession.id, {
           date: formValues.meetingDate,
+          startTime: formValues.startTime,
+          weekly: formValues.repeat === "week",
+          repeat: formValues.repeat === "once" ? undefined : formValues.repeat,
+          repeatDay:
+            formValues.repeat === "month"
+              ? Number(formValues.meetingDate.slice(8, 10))
+              : undefined,
           templateId: formValues.templateId,
           title: titleToSave ?? "",
           attendees: formValues.attendees,
           responses: formValues.responses,
           passagesStudied,
           notes: formValues.notes,
+          weekPassage: weekPassage ?? undefined,
+          weekQuestion: weekQuestion || undefined,
         });
         setActiveSession(updated);
         setIsDraftSession(false);
@@ -888,12 +965,21 @@ export function SpaceDetail() {
         const created = await createSession({
           spaceId: space.id,
           date: formValues.meetingDate,
+          startTime: formValues.startTime,
+          weekly: formValues.repeat === "week",
+          repeat: formValues.repeat === "once" ? undefined : formValues.repeat,
+          repeatDay:
+            formValues.repeat === "month"
+              ? Number(formValues.meetingDate.slice(8, 10))
+              : undefined,
           templateId: formValues.templateId,
           title: titleToSave,
           attendees: formValues.attendees,
           responses: formValues.responses,
           passagesStudied,
           notes: formValues.notes,
+          weekPassage: weekPassage ?? undefined,
+          weekQuestion: weekQuestion || undefined,
         });
         setActiveSession(created);
         setIsDraftSession(false);
@@ -1030,12 +1116,6 @@ export function SpaceDetail() {
     Boolean(spaceSync.roomId);
   const canAddPeople = isHost && peopleCount < maxPeople;
   const latestSession = spaceSessions[0];
-  const latestTpl = latestSession
-    ? templates.find((t) => t.id === latestSession.templateId)
-    : undefined;
-  const latestTitle = latestSession
-    ? sessionDisplayTitle(latestSession, latestTpl)
-    : null;
   const needsRoomOpen =
     isHost &&
     (spaceSync.mode !== "connected" || !spaceSync.roomId);
@@ -1120,86 +1200,184 @@ export function SpaceDetail() {
             size="md"
           />
         </div>
+      </Card>
 
-        {latestTitle ? (
+      {meetingLists.upcoming[0] && (
+        <Card className="border-primary/30 bg-primary/5 space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Next meeting
+          </p>
           <button
             type="button"
-            onClick={() => openViewSession(latestSession!)}
-            className="w-full text-left rounded-xl border border-border/80 bg-bg/70 px-3 py-2.5 touch-manipulation hover:border-primary/30 transition-colors"
+            onClick={() => openViewSession(meetingLists.upcoming[0].session)}
+            className="block w-full text-left touch-manipulation"
           >
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Latest meeting
+            <p className="text-base font-medium text-primary">
+              {formatMeetingWhen(
+                meetingLists.upcoming[0].day,
+                meetingLists.upcoming[0].startTime,
+              )}
+              {repeatLabel(meetingLists.upcoming[0].session)
+                ? ` · ${repeatLabel(meetingLists.upcoming[0].session)}`
+                : ""}
             </p>
-            <p className="text-sm font-serif font-medium text-primary truncate mt-0.5">
-              {latestTitle}
-            </p>
-            <p className="text-xs text-muted mt-0.5">
-              {(() => {
-                try {
-                  return format(parseISO(latestSession!.date), "MMM d, yyyy");
-                } catch {
-                  return latestSession!.date.slice(0, 10);
-                }
-              })()}
-              {" · Open"}
-            </p>
+            {space.place ? (
+              <p className="text-sm text-primary mt-0.5">{space.place}</p>
+            ) : null}
           </button>
-        ) : (
-          <p className="text-sm text-muted leading-relaxed">
-            When you gather, start a meeting. Scripture, notes, and prayer stay
-            with this group.
-          </p>
-        )}
-
-        {gather.active ? (
-          <GatherRitualBar
-            gather={gather}
-            sessionHint={
-              gather.sessionId
-                ? (() => {
-                    const s =
-                      spaceSessions.find((x) => x.id === gather.sessionId) ??
-                      (activeSession?.id === gather.sessionId
-                        ? activeSession
-                        : null);
-                    if (!s) return null;
-                    const tpl = templates.find((t) => t.id === s.templateId);
-                    return sessionDisplayTitle(s, tpl);
-                  })()
-                : null
-            }
-            busy={saving}
-            onSelectStep={goGatherStep}
-            onPrimary={() => void runGatherPrimary()}
-            onAdvance={advanceGather}
-            onEnd={endGather}
-          />
-        ) : (
-          <>
-            <Button
-              fullWidth
-              className="!py-4 text-base shadow-md border border-primary/20"
-              onClick={() => void beginGather()}
-              disabled={saving}
-            >
-              <CalendarPlus className="h-5 w-5" aria-hidden />
-              {saving
-                ? "Starting…"
-                : latestSession
-                  ? "Gather tonight"
-                  : "Gather · first meeting"}
-            </Button>
-            <p className="text-[11px] text-muted text-center leading-snug">
-              One path: Meet · Study · Prayer
+          {meetingLists.upcoming[0].session.weekPassage ? (
+            <p className="text-sm">
+              <Link
+                to={(() => {
+                  const week = meetingLists.upcoming[0].session.weekPassage!;
+                  const params = new URLSearchParams({
+                    b: week.bookId,
+                    c: String(week.chapter),
+                  });
+                  if (week.startVerse) {
+                    params.set("sv", String(week.startVerse));
+                    params.set(
+                      "ev",
+                      String(week.endVerse ?? week.startVerse),
+                    );
+                  }
+                  return `/bible?${params.toString()}`;
+                })()}
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                {formatWeekReading(meetingLists.upcoming[0].session.weekPassage)}
+              </Link>
             </p>
-          </>
+          ) : null}
+          {meetingLists.upcoming[0].session.weekQuestion ? (
+            <p className="text-sm text-primary">
+              {meetingLists.upcoming[0].session.weekQuestion}
+            </p>
+          ) : null}
+        </Card>
+      )}
+
+      <div className="space-y-2">
+        <p className="text-sm text-primary">
+          {isHost
+            ? needsRoomOpen
+              ? "Share this group when you are ready."
+              : "People join with the room key."
+            : "Ask the host for the room key."}
+        </p>
+        {isHost && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              if (needsRoomOpen) {
+                setSyncExpandSignal((n) => n + 1);
+                document
+                  .getElementById("group-sync")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                return;
+              }
+              setInviteOpen(true);
+            }}
+          >
+            {needsRoomOpen ? "Open group room" : "Share the group"}
+          </Button>
         )}
-        {linkStatus.kind === "offline" && (
-          <p className="text-[11px] text-amber-800 dark:text-amber-200 text-center">
-            App is Offline (header). Meetings still save on this phone.
-          </p>
+      </div>
+
+      {/* This group's month */}
+      <MonthCalendar groups={[{ id: space.id, name: space.name, sessions: spaceSessions }]} />
+
+      {/* Upcoming, then Past */}
+      <div id="group-past" className="space-y-5 scroll-mt-24">
+        <section className="space-y-2.5" aria-label="Upcoming">
+          <h3 className="text-lg">Upcoming</h3>
+          {spaceSessions.length > 0 && filteredSessions.length === 0 ? (
+            <Card className="text-center py-6 space-y-3">
+              <Layers className="h-9 w-9 mx-auto text-muted" aria-hidden />
+              <p className="font-medium text-primary">Nothing in this filter</p>
+              <Button variant="secondary" onClick={() => void switchMode("all")}>
+                Show all meetings
+              </Button>
+            </Card>
+          ) : meetingLists.upcoming.length === 0 ? (
+            <Card className="text-center py-6 space-y-3">
+              <p className="text-sm text-muted">No meeting planned</p>
+              <Button onClick={() => void openCreateSession()} disabled={saving}>
+                <CalendarPlus className="h-5 w-5" aria-hidden />
+                Plan a meeting
+              </Button>
+            </Card>
+          ) : (
+            <ul className="space-y-2.5">
+              {meetingLists.upcoming.map((face, index) => (
+                <SessionRow
+                  key={`${face.session.id}-up`}
+                  session={face.session}
+                  whenLabel={formatMeetingWhen(face.day, face.startTime)}
+                  repeatNote={repeatLabel(face.session) ?? undefined}
+                  template={templates.find((t) => t.id === face.session.templateId)}
+                  onOpen={() => openViewSession(face.session)}
+                  showWeek
+                  place={index === 0 ? space.place : undefined}
+                  coming={comingForFace(face)}
+                  members={isHost ? space.members : undefined}
+                  onMark={
+                    isHost
+                      ? (memberId, name, mark) => {
+                          const current = face.session.coming ?? [];
+                          const without = current.filter(
+                            (row) => row.memberId !== memberId,
+                          );
+                          const already = current.find(
+                            (row) => row.memberId === memberId,
+                          );
+                          const coming =
+                            already?.mark === mark
+                              ? without
+                              : [...without, { memberId, name, mark }];
+                          void updateSession(face.session.id, { coming });
+                        }
+                      : undefined
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {meetingLists.past.length > 0 && (
+          <section className="space-y-2.5" aria-label="Past">
+            <h3 className="text-lg">Past</h3>
+            <ul className="space-y-2.5">
+              {visiblePast.map((face) => (
+                <SessionRow
+                  key={`${face.session.id}-${face.day}-${face.startTime ?? ""}-${face.held ? "h" : "p"}`}
+                  session={face.session}
+                  whenLabel={formatMeetingWhen(face.day, face.startTime)}
+                  template={templates.find((t) => t.id === face.session.templateId)}
+                  onOpen={() => openViewSession(face.session)}
+                  coming={comingForFace(face)}
+                />
+              ))}
+            </ul>
+            {hasMorePast && (
+              <Button
+                variant="secondary"
+                fullWidth
+                onClick={() =>
+                  setSessionVisible((n) => n + SESSION_PAGE_SIZE)
+                }
+              >
+                Load more
+                <span className="text-xs text-muted font-normal">
+                  ({meetingLists.past.length - sessionVisible} left)
+                </span>
+              </Button>
+            )}
+          </section>
         )}
-      </Card>
+      </div>
+
 
       {/* In-group jump chips — wayfinding without a 4th bottom tab */}
       <nav
@@ -1415,6 +1593,55 @@ export function SpaceDetail() {
         />
       </div>
 
+      {gather.active ? (
+        <GatherRitualBar
+          gather={gather}
+          sessionHint={
+            gather.sessionId
+              ? (() => {
+                  const s =
+                    spaceSessions.find((x) => x.id === gather.sessionId) ??
+                    (activeSession?.id === gather.sessionId
+                      ? activeSession
+                      : null);
+                  if (!s) return null;
+                  const tpl = templates.find((t) => t.id === s.templateId);
+                  return sessionDisplayTitle(s, tpl);
+                })()
+              : null
+          }
+          busy={saving}
+          onSelectStep={goGatherStep}
+          onPrimary={() => void runGatherPrimary()}
+          onAdvance={advanceGather}
+          onEnd={endGather}
+        />
+      ) : (
+        <div className="space-y-2">
+          <Button
+            fullWidth
+            className="!py-4 text-base shadow-md border border-primary/20"
+            onClick={() => void beginGather()}
+            disabled={saving}
+          >
+            <CalendarPlus className="h-5 w-5" aria-hidden />
+            {saving
+              ? "Starting…"
+              : latestSession
+                ? "Gather tonight"
+                : "Gather · first meeting"}
+          </Button>
+          <p className="text-[11px] text-muted text-center leading-snug">
+            One path: Meet · Study · Prayer
+          </p>
+        </div>
+      )}
+      {linkStatus.kind === "offline" && (
+        <p className="text-[11px] text-amber-800 dark:text-amber-200 text-center">
+          App is Offline (header). Meetings still save on this phone.
+        </p>
+      )}
+
       {/* While you meet */}
       <section
         id="group-meet"
@@ -1518,14 +1745,14 @@ export function SpaceDetail() {
               Add
             </button>
           )}
-          {isHost && (
+          {isHost && !needsRoomOpen && (
             <button
               type="button"
               onClick={() => setInviteOpen(true)}
               className="inline-flex min-h-11 items-center gap-1 rounded-full border border-primary/30 bg-primary text-on-primary px-3.5 py-2.5 text-sm font-medium touch-manipulation active:scale-[0.98]"
             >
               <UserPlus className="h-4 w-4" aria-hidden />
-              Invite
+              Share the group
             </button>
           )}
         </div>
@@ -1556,69 +1783,6 @@ export function SpaceDetail() {
           </form>
         )}
       </section>
-
-      {/* Past meetings */}
-      <div id="group-past" className="space-y-3 scroll-mt-24">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-lg">Past meetings</h3>
-          {filteredSessions.length > 0 && (
-            <span className="text-xs text-muted">Newest first</span>
-          )}
-        </div>
-
-        {spaceSessions.length === 0 ? (
-          <Card className="text-center py-8 space-y-3">
-            <BookOpen className="h-9 w-9 mx-auto text-muted" aria-hidden />
-            <div className="space-y-1">
-              <p className="font-medium text-primary">No meetings yet</p>
-              <p className="text-sm text-muted max-w-xs mx-auto">
-                Tap <strong className="text-text">Gather</strong> when you
-                meet — Meet · Study · Prayer.
-              </p>
-            </div>
-          </Card>
-        ) : filteredSessions.length === 0 ? (
-          <Card className="text-center py-8 space-y-3">
-            <Layers className="h-9 w-9 mx-auto text-muted" aria-hidden />
-            <div className="space-y-1">
-              <p className="font-medium text-primary">Nothing in this filter</p>
-              <p className="text-sm text-muted max-w-xs mx-auto">
-                Clear the filter under More, or start a new meeting.
-              </p>
-            </div>
-            <Button variant="secondary" onClick={() => void switchMode("all")}>
-              Show all meetings
-            </Button>
-          </Card>
-        ) : (
-          <>
-            <ul className="space-y-2.5">
-              {visibleSessions.map((session) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  template={templates.find((t) => t.id === session.templateId)}
-                  onOpen={() => openViewSession(session)}
-                />
-              ))}
-            </ul>
-            {hasMoreSessions && (
-              <Button
-                variant="secondary"
-                fullWidth
-                onClick={() =>
-                  setSessionVisible((n) => n + SESSION_PAGE_SIZE)
-                }
-              >
-                Load more
-                <span className="text-xs text-muted font-normal">
-                  ({filteredSessions.length - sessionVisible} left)
-                </span>
-              </Button>
-            )}
-          </>
-        )}
-      </div>
 
       {/* Zone 5 — More (collapsed) */}
       <section
@@ -1696,17 +1860,17 @@ export function SpaceDetail() {
             <Button
               variant="secondary"
               fullWidth
-              onClick={() => setShareOpen(true)}
+              onClick={() => navigate("/settings")}
             >
               <Share2 className="h-4 w-4" aria-hidden />
-              Save or send a group file
+              Save a copy is under More
             </Button>
 
             <YourDataBundle
               focusSpaceId={space.id}
               spaceCount={1}
-              onBackup={() => setShareOpen(true)}
-              onImport={() => setShareOpen(true)}
+              onBackup={() => navigate("/settings")}
+              onImport={() => navigate("/settings")}
             />
           </div>
         )}
@@ -1738,6 +1902,16 @@ export function SpaceDetail() {
               className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base min-h-[72px] resize-y"
               maxLength={280}
               placeholder="What is this group about?"
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium">Place (optional)</span>
+            <input
+              value={editPlace}
+              onChange={(e) => setEditPlace(e.target.value)}
+              className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+              maxLength={60}
+              placeholder="Room 2"
             />
           </label>
           <fieldset className="space-y-2">
@@ -2170,12 +2344,6 @@ export function SpaceDetail() {
         spaceId={space.id}
         onClose={() => setInviteOpen(false)}
       />
-      <ShareUpdateModal
-        open={shareOpen}
-        spaceId={space.id}
-        onClose={() => setShareOpen(false)}
-      />
-
       {/* Delete space */}
       <Modal
         open={deleteOpen}
@@ -2257,12 +2425,26 @@ function SessionRow({
   session,
   template,
   onOpen,
+  whenLabel,
+  repeatNote,
+  showWeek = false,
+  place,
+  coming = [],
+  members,
+  onMark,
 }: {
   session: Session;
   template?: Template;
   onOpen: () => void;
+  whenLabel: string;
+  repeatNote?: string;
+  showWeek?: boolean;
+  place?: string;
+  coming?: { memberId: string; name: string; mark: ComingMark }[];
+  members?: Member[];
+  onMark?: (memberId: string, name: string, mark: ComingMark) => void;
 }) {
-  const dateLabel = formatSessionDate(session.date);
+  const dateLabel = repeatNote ? `${whenLabel} · ${repeatNote}` : whenLabel;
   const attendeeCount = session.attendees?.length ?? 0;
   const preview = sessionPreview(session, template);
   const progress = template
@@ -2270,18 +2452,33 @@ function SessionRow({
     : null;
   const heading = sessionDisplayTitle(session, template);
   const subtitle = sessionTitleSubtitle(session, template);
+  const week = showWeek ? session.weekPassage : undefined;
+  const question = showWeek ? session.weekQuestion?.trim() : "";
+  const passageHref = week
+    ? (() => {
+        const params = new URLSearchParams({
+          b: week.bookId,
+          c: String(week.chapter),
+        });
+        if (week.startVerse) {
+          params.set("sv", String(week.startVerse));
+          params.set("ev", String(week.endVerse ?? week.startVerse));
+        }
+        return `/bible?${params.toString()}`;
+      })()
+    : null;
 
   return (
     <li>
+      <Card
+        padding="sm"
+        className="hover:border-primary/30 transition-colors"
+      >
       <button
         type="button"
         onClick={onOpen}
         className="w-full text-left touch-manipulation active:scale-[0.99] transition-transform"
       >
-        <Card
-          padding="sm"
-          className="hover:border-primary/30 transition-colors"
-        >
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-start justify-between gap-2">
@@ -2291,6 +2488,7 @@ function SessionRow({
                   </p>
                   <p className="text-xs text-muted">
                     {dateLabel}
+                    {place ? ` · ${place}` : ""}
                     {subtitle ? ` · ${subtitle}` : ""}
                   </p>
                 </div>
@@ -2316,25 +2514,84 @@ function SessionRow({
                 <p className="text-sm text-muted line-clamp-2 pt-0.5">
                   {preview}
                 </p>
-              ) : (
+              ) : !week && !question ? (
                 <p className="text-sm text-muted/70 italic pt-0.5">
                   No notes yet — tap to open
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
-        </Card>
-      </button>
+        </button>
+        {week && passageHref && (
+          <p className="text-sm pt-1">
+            <Link
+              to={passageHref}
+              className="font-medium text-primary underline-offset-2 hover:underline touch-manipulation"
+            >
+              {formatWeekReading(week)}
+            </Link>
+          </p>
+        )}
+        {question ? (
+          <p className="text-sm text-primary pt-0.5">{question}</p>
+        ) : null}
+        {members && members.length > 0 && onMark ? (
+          <ul className="space-y-1.5 pt-2">
+            {members.map((member) => {
+              const mark = coming.find((row) => row.memberId === member.id)?.mark;
+              return (
+                <li
+                  key={member.id}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="text-sm text-primary truncate">
+                    {member.name}
+                  </span>
+                  <span className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onMark(member.id, member.name, "coming")}
+                      className={[
+                        "rounded-full px-2.5 py-1 text-xs font-medium touch-manipulation",
+                        mark === "coming"
+                          ? "bg-primary text-on-primary"
+                          : "border border-border text-muted",
+                      ].join(" ")}
+                      aria-pressed={mark === "coming"}
+                    >
+                      Coming
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onMark(member.id, member.name, "cant")}
+                      className={[
+                        "rounded-full px-2.5 py-1 text-xs font-medium touch-manipulation",
+                        mark === "cant"
+                          ? "bg-primary text-on-primary"
+                          : "border border-border text-muted",
+                      ].join(" ")}
+                      aria-pressed={mark === "cant"}
+                    >
+                      Can’t
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : coming.length > 0 ? (
+          <p className="text-sm text-muted pt-1">
+            {coming
+              .map(
+                (row) =>
+                  `${row.name} · ${row.mark === "cant" ? "Can’t" : "Coming"}`,
+              )
+              .join(", ")}
+          </p>
+        ) : null}
+      </Card>
     </li>
   );
-}
-
-function formatSessionDate(iso: string): string {
-  try {
-    return format(parseISO(iso), "EEE, MMM d, yyyy");
-  } catch {
-    return iso.slice(0, 10);
-  }
 }
 
 function toDateInputValue(iso: string): string {

@@ -23,6 +23,7 @@ export interface SharedSpaceSnapshot {
   spaceId: string;
   name: string;
   description?: string;
+  place?: string;
   createdAt: string;
   members: Member[];
   preferredBibleVersion: "KJV";
@@ -50,6 +51,14 @@ export function buildSharedSnapshot(
       id: s.id,
       spaceId: s.spaceId,
       date: s.date,
+      startTime: s.startTime,
+      weekly: s.weekly,
+      repeat: s.repeat,
+      repeatDay: s.repeatDay,
+      heldDates: s.heldDates,
+      weekPassage: s.weekPassage,
+      weekQuestion: s.weekQuestion,
+      coming: s.coming,
       templateId: s.templateId,
       title: s.title,
       attendees: s.attendees ?? [],
@@ -92,6 +101,7 @@ export function buildSharedSnapshot(
     spaceId: space.id,
     name: space.name,
     description: space.description,
+    place: space.place?.trim() || undefined,
     createdAt: space.createdAt,
     members: space.members.map((m) => ({
       id: m.id,

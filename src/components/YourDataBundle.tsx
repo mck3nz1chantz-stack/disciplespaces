@@ -28,7 +28,6 @@ import {
   SYNC_SUCCESS_TOAST_ID,
 } from "../lib/sync";
 import {
-  DATA_CONFIDENCE_BODY,
   DATA_CONFIDENCE_HEADLINE,
   DATA_CONFIDENCE_STEPS,
   PRIVATE_NOTES_PILL,
@@ -155,7 +154,7 @@ export function YourDataBundle({
             disabled={spaceCount === 0}
           >
             <Download className="h-4 w-4" aria-hidden />
-            Back up
+            Save a copy
           </Button>
           <Button
             variant="secondary"
@@ -164,7 +163,7 @@ export function YourDataBundle({
             onClick={onImport}
           >
             <Upload className="h-4 w-4" aria-hidden />
-            Restore
+            Open a copy
           </Button>
         </div>
       </Card>
@@ -179,10 +178,10 @@ export function YourDataBundle({
         </div>
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-primary">
-            Your Spaces &amp; data
+            Your copy
           </h3>
           <p className="text-sm text-muted mt-1 leading-relaxed">
-            {DATA_CONFIDENCE_BODY}
+            Save a copy keeps every group, its meetings, and your notes in one file on this phone. Open a copy brings them back. A note already here is left as it is. Sharing a group does not include notes.
           </p>
           <p className="text-xs font-medium text-primary mt-2">
             {PRIVATE_NOTES_PILL}
@@ -219,11 +218,11 @@ export function YourDataBundle({
           disabled={spaces.length === 0}
         >
           <Download className="h-4 w-4" aria-hidden />
-          Back up
+          Save a copy
         </Button>
         <Button variant="secondary" fullWidth onClick={onImport}>
           <Upload className="h-4 w-4" aria-hidden />
-          Restore
+          Open a copy
         </Button>
       </div>
 

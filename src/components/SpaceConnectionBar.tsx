@@ -38,6 +38,7 @@ import {
   exportFilename,
   formatExportShareText,
 } from "../lib/share";
+import { formatRoomKeyShareText } from "../lib/invite";
 import type { Space } from "../types";
 
 interface SpaceConnectionBarProps {
@@ -64,7 +65,7 @@ async function shareOrCopyRoomKey(
   roomKey: string,
   groupName: string,
 ): Promise<"shared" | "copied" | "failed"> {
-  const text = `Join my DiscipleSpaces group “${groupName}” with room key: ${roomKey}\nhttps://disciple-spaces.pages.dev/`;
+  const text = formatRoomKeyShareText(groupName, roomKey);
   try {
     if (typeof navigator !== "undefined" && navigator.share) {
       await navigator.share({
@@ -80,7 +81,7 @@ async function shareOrCopyRoomKey(
     }
   }
   try {
-    await navigator.clipboard.writeText(roomKey);
+    await navigator.clipboard.writeText(text);
     return "copied";
   } catch {
     return "failed";
@@ -146,7 +147,10 @@ export function SpaceConnectionBar({
   async function handleSync() {
     if (!connected) return;
     if (appOffline) {
-      notifyMessage("App is set to Offline", "Tap Online in the header, then Sync.");
+      notifyMessage(
+        "Turn Online in the header to share",
+        "Meetings still save on this phone. Sync is paused until you tap Online.",
+      );
       return;
     }
     setBusy(true);
@@ -210,11 +214,19 @@ export function SpaceConnectionBar({
     setBusy(true);
     try {
       const updated = await connectSpaceToRelay(space.id);
-      setJustSynced(true);
       setOpenRoomConfirm(false);
       setExpanded(true);
-      const code = normalizeSpaceSync(updated.sync).shortCode;
+      const openedSync = normalizeSpaceSync(updated.sync);
+      const code = openedSync.shortCode;
       const meetingCount = updated.sessions?.length ?? 0;
+      if (openedSync.lastError) {
+        notifyError(
+          "Room opened — first Sync didn’t finish",
+          `${openedSync.lastError} Share the key anyway, then tap Sync so meetings upload.`,
+        );
+      } else {
+        setJustSynced(true);
+      }
       if (code) {
         const shareResult = await shareOrCopyRoomKey(code, space.name);
         if (shareResult === "shared") {
@@ -253,8 +265,10 @@ export function SpaceConnectionBar({
 
   function copyRoomKey() {
     if (!roomKey) return;
-    void navigator.clipboard.writeText(roomKey).then(
-      () => notifySuccess("Room key copied"),
+    const text = formatRoomKeyShareText(space.name, roomKey);
+    void navigator.clipboard.writeText(text).then(
+      () =>
+        notifySuccess("Join link copied", "Paste it in a message. It opens Join with the code filled in."),
       () => notifyError("Could not copy"),
     );
   }
@@ -265,8 +279,8 @@ export function SpaceConnectionBar({
     if (result === "shared") {
       toast.success("Share sheet opened");
     } else if (result === "copied") {
-      toast.success("Room key copied", {
-        description: "This device has no share sheet — key is on the clipboard.",
+      toast.success("Join link copied", {
+        description: "Paste it in a message. The link opens Join with the code filled in.",
       });
     } else {
       toast.message("Could not share", {
@@ -322,7 +336,7 @@ export function SpaceConnectionBar({
 
   const pulseLabel = (() => {
     if (justSynced) return "Just synced";
-    if (appOffline) return "App Offline — Online is in the header";
+    if (appOffline) return "Turn Online in the header to share. Nothing on this phone is deleted.";
     if (!relayReady) return "Local only";
     if (hasError) return sync.lastError || "Link needs attention";
     if (guest && !connected) return "Join with room key";
@@ -434,7 +448,12 @@ export function SpaceConnectionBar({
             className={
               guest ? "!py-3.5 text-base font-semibold shadow-sm" : "!py-3"
             }
-            disabled={busy}
+            disabled={busy || appOffline}
+            title={
+              appOffline
+                ? "Turn Online in the header to share"
+                : undefined
+            }
             onClick={() => void handleSync()}
           >
             {busy ? (
@@ -446,11 +465,13 @@ export function SpaceConnectionBar({
             )}
             {busy
               ? "Syncing…"
-              : justSynced
-                ? "Synced ✓"
-                : guest
-                  ? "Sync"
-                  : "Sync now"}
+              : appOffline
+                ? "Turn Online in the header to share"
+                : justSynced
+                  ? "Synced ✓"
+                  : guest
+                    ? "Sync"
+                    : "Sync now"}
           </Button>
         ) : guest ? (
           <Button
@@ -519,7 +540,7 @@ export function SpaceConnectionBar({
             }}
           >
             <Link2 className="h-4 w-4" aria-hidden />
-            Fix link — keep my data
+            Fix link
           </Button>
         </div>
       )}
@@ -531,7 +552,7 @@ export function SpaceConnectionBar({
         aria-expanded={expanded}
       >
         <span className="text-xs font-semibold text-muted">
-          {expanded ? "Hide sharing tools" : "Sharing tools · key, backup, help"}
+          {expanded ? "Hide invite & backup" : "Share invite · save file"}
         </span>
         <ChevronDown
           className={[
@@ -548,7 +569,7 @@ export function SpaceConnectionBar({
             <div className="rounded-xl border border-border bg-bg px-3 py-3 space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted flex items-center gap-1.5">
                 <KeyRound className="h-3.5 w-3.5" aria-hidden />
-                Room key · invite code
+                Invite
               </p>
               <p
                 className="font-mono text-xl font-semibold tracking-wider text-primary text-center"
@@ -563,7 +584,7 @@ export function SpaceConnectionBar({
                   onClick={() => void handleShareRoomKey()}
                 >
                   <Share2 className="h-4 w-4" aria-hidden />
-                  Share
+                  Share invite
                 </Button>
                 <Button
                   variant="secondary"
@@ -575,8 +596,7 @@ export function SpaceConnectionBar({
                 </Button>
               </div>
               <p className="text-[11px] text-muted leading-relaxed text-center">
-                Friends: Join a group → paste this key. After they join, you both
-                tap Sync.
+                Send the join link or this key. Friends open Join, then Sync.
               </p>
               <Button
                 variant="secondary"
@@ -620,7 +640,7 @@ export function SpaceConnectionBar({
               className="!py-2 !text-xs"
               onClick={() => void saveGroupFile()}
             >
-              Save group file (backup)
+              Save file
             </Button>
             <ConnectSafelyHelpButton onClick={() => setGuideOpen(true)}>
               {connected ? "How room keys & Sync work" : "How sharing works"}

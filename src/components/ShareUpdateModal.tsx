@@ -20,13 +20,14 @@ import {
 } from "../lib/share";
 import {
   decryptPersonalNotes,
+  mergePersonalNotes,
   parsePersonalBackupInput,
 } from "../lib/keys/personalBackup";
 import { getStoredAccountKey } from "../lib/keys/accountKey";
-import { db } from "../lib/db";
 import {
   IMPORT_FILE_ACCEPT,
-  readBackupImportFile,
+  readBackupImportPackages,
+  type ImportFileResult,
 } from "../lib/importFile";
 
 interface ShareUpdateModalProps {
@@ -54,6 +55,7 @@ export function ShareUpdateModal({
   const [payload, setPayload] = useState<SpaceExportPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [importText, setImportText] = useState("");
+  const [importPackages, setImportPackages] = useState<ImportFileResult[]>([]);
   const [importSourceLabel, setImportSourceLabel] = useState<string | null>(
     null,
   );
@@ -66,6 +68,7 @@ export function ShareUpdateModal({
     if (!open) {
       setPayload(null);
       setImportText("");
+      setImportPackages([]);
       setImportSourceLabel(null);
       setDragOver(false);
       setLoadingFile(false);
@@ -136,88 +139,89 @@ export function ShareUpdateModal({
     await copyExport();
   }
 
+  async function restoreFromText(text: string): Promise<{
+    groups: number;
+    meetings: number;
+    lastSpaceId: string | null;
+  }> {
+    const trimmed = text.trim();
+    if (trimmed.includes("DSP1.") || trimmed.includes("ds-personal-backup")) {
+      const personal = parsePersonalBackupInput(trimmed);
+      let sessionTotal = 0;
+      let lastSpaceId: string | null = null;
+      for (const pack of personal.spaces) {
+        const result = await importSpaceExport(pack, {
+          mergeStrategy: "replace-shared",
+        });
+        sessionTotal += pack.sessions?.length ?? result.addedSessions;
+        lastSpaceId = result.space.id;
+      }
+      if (personal.privateNotes?.length) {
+        await mergePersonalNotes(personal.privateNotes);
+      } else if (personal.privateNotesIncluded && personal.privateNotesEnc) {
+        const key = getStoredAccountKey();
+        if (!key) {
+          toast.message("Private notes still encrypted", {
+            description:
+              "Link your Account Key under More, then open this copy again to unlock notes.",
+          });
+        } else {
+          const notes = await decryptPersonalNotes(personal, key);
+          await mergePersonalNotes(notes);
+        }
+      }
+      return {
+        groups: personal.spaces.length,
+        meetings: sessionTotal,
+        lastSpaceId,
+      };
+    }
+
+    const parsed = parseExportInput(trimmed);
+    const result = await importSpaceExport(parsed, {
+      mergeStrategy: "replace-shared",
+    });
+    return {
+      groups: 1,
+      meetings: parsed.sessions?.length ?? result.addedSessions,
+      lastSpaceId: result.space.id,
+    };
+  }
+
   async function handleImport(e: FormEvent) {
     e.preventDefault();
     setImporting(true);
     try {
-      const text = importText.trim();
-
-      // Personal backup (DSP1.) — multi-space + optional encrypted notes
-      if (text.includes("DSP1.") || text.includes("ds-personal-backup")) {
-        const personal = parsePersonalBackupInput(text);
-        let sessionTotal = 0;
-        let lastSpaceId: string | null = null;
-        for (const pack of personal.spaces) {
-          const result = await importSpaceExport(pack);
-          sessionTotal += result.addedSessions;
-          lastSpaceId = result.space.id;
-        }
-        let notesRestored = 0;
-        if (personal.privateNotesIncluded && personal.privateNotesEnc) {
-          const key = getStoredAccountKey();
-          if (!key) {
-            toast.message("Spaces restored", {
-              description:
-                "Encrypted private notes need your Account Key on this device (Settings → Account Key → link key), then import again.",
-            });
-          } else {
-            const notes = await decryptPersonalNotes(personal, key);
-            for (const n of notes) {
-              const exists = await db.privateNotes.get(n.id);
-              if (!exists) {
-                await db.privateNotes.put(n);
-                notesRestored += 1;
-              }
-            }
-          }
-        }
-        toast.success(
-          `Restored ${personal.spaces.length} space${personal.spaces.length === 1 ? "" : "s"}`,
-          {
-            description: [
-              `${sessionTotal} new session${sessionTotal === 1 ? "" : "s"}`,
-              notesRestored > 0
-                ? `${notesRestored} private note${notesRestored === 1 ? "" : "s"}`
-                : personal.privateNotesIncluded
-                  ? "private notes encrypted in file"
-                  : "private notes not in this file",
-            ].join(" · "),
-          },
-        );
-        onClose();
-        if (lastSpaceId) navigate(`/space/${lastSpaceId}`);
+      const texts =
+        importPackages.length > 0
+          ? importPackages.map((p) => p.text)
+          : importText.trim()
+            ? [importText]
+            : [];
+      if (texts.length === 0) {
+        toast.error("Paste a backup or choose a file first.");
         return;
       }
 
-      const parsed = parseExportInput(importText);
-      const result = await importSpaceExport(parsed);
-      const prayerBits: string[] = [];
-      if (result.addedPrayers > 0) {
-        prayerBits.push(
-          `${result.addedPrayers} prayer board entr${result.addedPrayers === 1 ? "y" : "ies"}`,
-        );
+      let groups = 0;
+      let meetings = 0;
+      let lastSpaceId: string | null = null;
+      for (const text of texts) {
+        const r = await restoreFromText(text);
+        groups += r.groups;
+        meetings += r.meetings;
+        lastSpaceId = r.lastSpaceId ?? lastSpaceId;
       }
-      if (result.skippedPrayers > 0) {
-        prayerBits.push(
-          `${result.skippedPrayers} prayer entr${result.skippedPrayers === 1 ? "y" : "ies"} already here`,
-        );
-      }
+
       toast.success(
-        `Imported ${result.addedSessions} session${result.addedSessions === 1 ? "" : "s"}`,
+        `Restored ${groups} group${groups === 1 ? "" : "s"}, ${meetings} meeting${meetings === 1 ? "" : "s"}.`,
         {
-          description: [
-            result.skippedSessions > 0
-              ? `${result.skippedSessions} sessions already on this device (skipped)`
-              : null,
-            prayerBits.length > 0 ? prayerBits.join(" · ") : null,
-            "Private notes are never in DSX1. group files.",
-          ]
-            .filter(Boolean)
-            .join(". "),
+          description: "Private notes stay local unless this was a DSP1. file with your Account Key.",
+          duration: 7000,
         },
       );
       onClose();
-      navigate(`/space/${result.space.id}`);
+      if (lastSpaceId) navigate(`/space/${lastSpaceId}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed");
     } finally {
@@ -229,17 +233,22 @@ export function ShareUpdateModal({
     if (!file) return;
     setLoadingFile(true);
     try {
-      const result = await readBackupImportFile(file);
-      setImportText(result.text);
-      setImportSourceLabel(result.sourceLabel);
+      const packages = await readBackupImportPackages(file);
+      setImportPackages(packages);
+      setImportText(packages[0]?.text ?? "");
+      const label =
+        packages.length > 1
+          ? `${packages.length} group backups in ${file.name}`
+          : packages[0]?.sourceLabel ?? file.name;
+      setImportSourceLabel(label);
       toast.message(
-        result.fromZip
-          ? "Zip opened — backup package loaded"
-          : "File loaded — review and import",
+        packages.length > 1
+          ? `Zip has ${packages.length} group files — Import restores all`
+          : packages[0]?.fromZip
+            ? "Zip opened — backup package loaded"
+            : "File loaded — review and import",
         {
-          description: result.fromZip
-            ? result.sourceLabel
-            : "Tap Import when ready",
+          description: "Tap Import when ready",
         },
       );
     } catch (err) {
@@ -460,6 +469,7 @@ export function ShareUpdateModal({
                 value={importText}
                 onChange={(e) => {
                   setImportText(e.target.value);
+                  setImportPackages([]);
                   if (importSourceLabel) setImportSourceLabel(null);
                 }}
                 className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-sm min-h-[120px] resize-y font-mono"

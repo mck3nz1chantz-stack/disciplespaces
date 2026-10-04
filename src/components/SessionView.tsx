@@ -1,4 +1,3 @@
-import { format, parseISO } from "date-fns";
 import { Check, Square } from "lucide-react";
 import type {
   ChecklistItem,
@@ -14,6 +13,7 @@ import {
   sessionDisplayTitle,
   sessionTitleSubtitle,
 } from "../lib/sessionTitle";
+import { formatMeetingWhen, repeatLabel } from "../lib/meetingCalendar";
 import { PassageList } from "./PassageList";
 import { Button } from "./Button";
 import { PrayerBoard } from "./PrayerBoard";
@@ -48,7 +48,10 @@ export function SessionView({
   privateNoteCount,
   spaceId,
 }: SessionViewProps) {
-  const dateLabel = formatSessionDate(session.date);
+  const dateLabel = formatMeetingWhen(
+    session.date,
+    session.startTime,
+  );
   const attendeeNames = members
     .filter((m) => session.attendees.includes(m.id))
     .map((m) => m.name);
@@ -68,7 +71,10 @@ export function SessionView({
   return (
     <div className="space-y-5">
       <div className="space-y-1">
-        <p className="text-sm text-muted">{dateLabel}</p>
+        <p className="text-sm text-muted">
+          {dateLabel}
+          {repeatLabel(session) ? ` · ${repeatLabel(session)}` : ""}
+        </p>
         <p className="font-medium text-primary text-lg leading-snug">
           {heading}
         </p>
@@ -293,10 +299,4 @@ function ChecklistAnswer({ items }: { items: ChecklistItem[] }) {
   );
 }
 
-function formatSessionDate(iso: string): string {
-  try {
-    return format(parseISO(iso), "EEEE, MMM d, yyyy");
-  } catch {
-    return iso.slice(0, 10);
-  }
-}
+

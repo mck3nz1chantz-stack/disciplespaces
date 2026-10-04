@@ -26,6 +26,12 @@ import { PrivateNotesButton } from "./PrivateNotesModal";
 
 export interface SessionFormValues {
   meetingDate: string; // yyyy-MM-dd
+  /** "HH:mm" or empty when the day has no time. */
+  startTime: string;
+  /** Same weekday and time each week. Kept in step with `repeat === "week"`. */
+  weekly: boolean;
+  /** once, every week, every two weeks, or once a month. */
+  repeat: "once" | "week" | "biweek" | "month";
   templateId: string;
   /**
    * Optional custom meeting title (e.g. "Romans 13").
@@ -37,6 +43,10 @@ export interface SessionFormValues {
   passagesStudied: Passage[];
   /** Free-form shared notes for every session template (exportable). */
   notes: string;
+  /** Plain reference, e.g. John 3:16–18. Empty means no passage. */
+  weekPassageText: string;
+  /** One short question. Empty means none. */
+  weekQuestion: string;
 }
 
 interface SessionFormProps {
@@ -143,6 +153,69 @@ export function SessionForm({
             onChange={(e) => patch({ meetingDate: e.target.value })}
             className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
             required
+            disabled={saving}
+          />
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">Time</span>
+          <input
+            type="time"
+            value={values.startTime}
+            onChange={(e) => patch({ startTime: e.target.value })}
+            className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+            disabled={saving}
+          />
+          <span className="text-xs text-muted">
+            Leave blank to keep the day with no time.
+          </span>
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">Repeat</span>
+          <select
+            value={values.repeat}
+            disabled={saving}
+            onChange={(e) => {
+              const repeat = e.target.value as SessionFormValues["repeat"];
+              patch({ repeat, weekly: repeat === "week" });
+            }}
+            className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+          >
+            <option value="once">Once</option>
+            <option value="week">Every week</option>
+            <option value="biweek">Every two weeks</option>
+            <option value="month">Once a month</option>
+          </select>
+          <span className="text-xs text-muted">
+            One meeting. The next date stays here. Passed dates move to Past.
+          </span>
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">This week’s passage</span>
+          <input
+            type="text"
+            value={values.weekPassageText}
+            onChange={(e) => patch({ weekPassageText: e.target.value })}
+            placeholder="John 3:16–18"
+            className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+            disabled={saving}
+            autoComplete="off"
+          />
+          <span className="text-xs text-muted">
+            Optional. Book and chapter, and verses if you want them.
+          </span>
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">One question</span>
+          <input
+            type="text"
+            value={values.weekQuestion}
+            onChange={(e) => patch({ weekQuestion: e.target.value })}
+            maxLength={160}
+            className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
             disabled={saving}
           />
         </label>
@@ -603,12 +676,17 @@ export function buildSessionFormValues(opts: {
   templates: Template[];
   members: Member[];
   meetingDate: string;
+  startTime?: string;
+  weekly?: boolean;
+  repeat?: "once" | "week" | "biweek" | "month";
   templateId?: string;
   title?: string;
   attendees?: string[];
   responses?: SessionResponses;
   passagesStudied?: Passage[];
   notes?: string;
+  weekPassageText?: string;
+  weekQuestion?: string;
   /** Preferred template when creating (space default). */
   preferredTemplateId?: string;
 }): SessionFormValues {
@@ -635,6 +713,11 @@ export function buildSessionFormValues(opts: {
 
   return {
     meetingDate: opts.meetingDate,
+    startTime: opts.startTime ?? "",
+    weekly: Boolean(opts.weekly) || opts.repeat === "week",
+    repeat:
+      opts.repeat ??
+      (opts.weekly ? "week" : "once"),
     templateId,
     title,
     attendees:
@@ -643,5 +726,7 @@ export function buildSessionFormValues(opts: {
     responses,
     passagesStudied: passages,
     notes: opts.notes ?? "",
+    weekPassageText: opts.weekPassageText ?? "",
+    weekQuestion: opts.weekQuestion ?? "",
   };
 }

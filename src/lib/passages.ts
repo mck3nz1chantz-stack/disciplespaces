@@ -1,5 +1,70 @@
-import type { Passage } from "../types";
-import type { BibleVerse } from "./bible";
+import type { Passage, WeekReading } from "../types";
+import { getBooks, type BibleVerse } from "./bible";
+
+/** Plain label, e.g. "John 3:16–18" or "John 3". */
+export function formatWeekReading(r: WeekReading): string {
+  const book = r.book.trim();
+  const ch = r.chapter;
+  const sv = r.startVerse;
+  const ev = r.endVerse;
+  if (sv != null && ev != null && sv !== ev) return `${book} ${ch}:${sv}–${ev}`;
+  if (sv != null) return `${book} ${ch}:${sv}`;
+  return `${book} ${ch}`;
+}
+
+/**
+ * One passage: "John 3", "John 3:16", or "John 3:16-18" (hyphen or en dash).
+ * Empty input is null. Unrecognized text is null.
+ */
+export async function parseWeekPassage(
+  input: string,
+): Promise<WeekReading | null> {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(
+    /^(\d?\s*[A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(\d+)(?::(\d+)(?:\s*[–-]\s*(\d+))?)?$/,
+  );
+  if (!match) return null;
+
+  const bookPart = match[1].replace(/\s+/g, " ").trim().toLowerCase();
+  const chapter = parseInt(match[2], 10);
+  const startVerse = match[3] ? parseInt(match[3], 10) : undefined;
+  let endVerse = match[4] ? parseInt(match[4], 10) : startVerse;
+  if (!Number.isFinite(chapter) || chapter < 1) return null;
+
+  const books = await getBooks();
+  const book = books.find((b) => {
+    const name = b.name.toLowerCase();
+    const abbrev = b.abbrev.toLowerCase();
+    const id = b.id.replace(/-/g, " ");
+    return (
+      name === bookPart ||
+      abbrev === bookPart ||
+      id === bookPart ||
+      name.startsWith(bookPart) ||
+      abbrev.startsWith(bookPart)
+    );
+  });
+  if (!book || chapter > book.chapterCount) return null;
+
+  let sv = startVerse;
+  let ev = endVerse;
+  if (sv != null && (!Number.isFinite(sv) || sv < 1)) return null;
+  if (ev != null && (!Number.isFinite(ev) || ev < 1)) return null;
+  if (sv != null && ev != null && ev < sv) {
+    const swap = sv;
+    sv = ev;
+    ev = swap;
+  }
+
+  return {
+    book: book.name,
+    bookId: book.id,
+    chapter,
+    startVerse: sv,
+    endVerse: sv != null ? ev : undefined,
+  };
+}
 
 /** Human-readable scripture reference for a Passage. */
 export function formatPassageRef(p: Passage): string {

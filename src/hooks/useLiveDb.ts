@@ -110,6 +110,31 @@ export function useLivePrivateNotes(opts: {
   }, [spaceId, sessionId, sectionKey, includeSpaceLevel]);
 }
 
+/** Every personal note on this device, newest edit first. */
+export function useLiveAllPrivateNotes(): PrivateNote[] | undefined {
+  return useLiveQuery(async () => {
+    const list = await db.privateNotes.toArray();
+    return [...list].sort((a, b) =>
+      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt),
+    );
+  }, []);
+}
+
+/** Verse notes in one chapter. */
+export function useLiveChapterVerseNotes(
+  version: string | undefined,
+  bookId: string | undefined,
+  chapter: number | undefined,
+): PrivateNote[] | undefined {
+  return useLiveQuery(async () => {
+    if (!version || !bookId || !chapter) return [];
+    const prefix = `${version}|${bookId}|${chapter}|`;
+    return db.privateNotes
+      .filter((n) => typeof n.verseKey === "string" && n.verseKey.startsWith(prefix))
+      .toArray();
+  }, [version, bookId, chapter]);
+}
+
 /** Count of private notes for a session (badge), optional section. */
 export function useLivePrivateNoteCount(
   spaceId: string | undefined,

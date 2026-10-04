@@ -121,7 +121,7 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
     body: [
       "On Home, Quick Start is a short path for new users. Each row is tappable.",
       "Start or join a group → Start today’s meeting → Share the room key with friends.",
-      "Dismiss anytime — this Help guide stays under the header ? icon or Settings.",
+      "Dismiss anytime — this Help guide stays under More.",
     ],
   },
   {
@@ -129,8 +129,7 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
     title: "Light & dark appearance",
     summary: "Easier on the eyes, day or night.",
     body: [
-      "Tap the sun / moon / monitor icon in the header to cycle Light → Dark → System.",
-      "Or open Settings → Appearance and choose Light, Dark, or System (match your device).",
+      "Open More and choose Light, Dark, or System (match your device).",
       "Your choice is saved on this device only and works offline.",
     ],
   },
@@ -139,9 +138,10 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
     title: "Inviting others (host)",
     summary: "Room key, Invite, QR, and group files.",
     body: [
-      "Host: after Open group room, copy the room key and send it. Friends Join a group with that key — easiest path when Online.",
-      "On a Space, host can also tap Invite for QR / share message. Add their name when inviting so your people list is ready (host only).",
-      "Offline or extra history: send a group file (DSX1.) from Share / Save group file so they import past sessions and the prayer board.",
+      "Host: after Open group room, share the join link (/join?code=…) or the room key. Friends open that link — easiest path when Online.",
+      "Shared meetings already on the room download with Join. If the room is empty, the message is: Host hasn’t Synced meetings yet. Host taps Sync while Online, then the guest taps Sync.",
+      "On a Space, host can also tap Invite for QR. Add their name when inviting so your people list is ready (host only).",
+      "Offline catch-up: send a group file (DSX1.) from Save group file.",
       "Guests do not Invite or edit the people list. After they join, they tap Sync to stay current.",
     ],
   },
@@ -162,10 +162,10 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
     summary: "Your safety net between devices.",
     body: [
       "1. Bookmark https://disciple-spaces.pages.dev — not one-off preview links.",
-      "2. Settings → Your Spaces & data → back up each Space (files start with DSX1.) or use Account Key → Upload my Spaces.",
+      "2. More → Save a copy (files start with DSX1.) or use Account Key → Upload my Spaces.",
       "3. Keep group files in Files, email, or Drive.",
-      "4. To restore a file: Settings → Export / Import → paste or open the file. Personal multi-space files start with DSP1.",
-      "Imports add missing sessions and prayer board entries; matching IDs already on the device are skipped. Private notes are never in DSX1. group files. Cloudflare hosts the app — it cannot recover a wiped phone without your key vault or backup files.",
+      "4. To bring a file back: More → Open a copy. Personal multi-space files start with DSP1.",
+      "Group files add shared meetings. Prefer Join + Sync when both phones are Online. Private notes are never in DSX1. files. Cloudflare cannot recover a wiped phone without your key vault or backup files.",
     ],
   },
   {

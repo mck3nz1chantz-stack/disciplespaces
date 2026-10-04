@@ -19,14 +19,19 @@ import {
   BIBLE_EDITIONS_NOTICE,
   BIBLE_OFFLINE_TIP,
   INVITE_PRIVACY_NOTE,
-  PRIVACY_SUMMARY,
 } from "../lib/legal";
 import { isSpaceRelayConfigured } from "../lib/sync";
+import { db } from "../lib/db";
+import {
+  buildPersonalBackup,
+  downloadPersonalBackup,
+} from "../lib/keys/personalBackup";
+import { toast } from "sonner";
 
 const SETTINGS_TOC = [
   { id: "settings-appearance", label: "Appearance" },
   { id: "settings-groups", label: "Groups" },
-  { id: "settings-backup", label: "Backup" },
+  { id: "settings-backup", label: "Your copy" },
   { id: "settings-account", label: "Account Key" },
   { id: "settings-install", label: "Install" },
   { id: "settings-about", label: "About" },
@@ -83,12 +88,82 @@ export function Settings() {
     setShareOpen(true);
   }
 
+  async function saveYourCopy() {
+    try {
+      const sessions = await db.sessions.toArray();
+      const prayers = await db.prayerBoard.toArray();
+      const notes = await db.privateNotes.toArray();
+      const sessionsBySpace = new Map<string, typeof sessions>();
+      const prayerBySpace = new Map<string, typeof prayers>();
+      for (const session of sessions) {
+        const list = sessionsBySpace.get(session.spaceId) ?? [];
+        list.push(session);
+        sessionsBySpace.set(session.spaceId, list);
+      }
+      for (const prayer of prayers) {
+        const list = prayerBySpace.get(prayer.spaceId) ?? [];
+        list.push(prayer);
+        prayerBySpace.set(prayer.spaceId, list);
+      }
+      const payload = await buildPersonalBackup({
+        spaces,
+        sessionsBySpace,
+        prayerBySpace,
+        privateNotes: notes,
+        includePlainNotes: true,
+      });
+      downloadPersonalBackup(payload);
+      const meetings = payload.spaces.reduce(
+        (n, space) => n + (space.sessions?.length ?? 0),
+        0,
+      );
+      toast.success(
+        `Saved ${payload.spaces.length} group${payload.spaces.length === 1 ? "" : "s"}, ${meetings} meeting${meetings === 1 ? "" : "s"}.`,
+        {
+          description: `${notes.length} note${notes.length === 1 ? "" : "s"} included in this file. A group share does not include them.`,
+        },
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save a copy");
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-2xl">Settings</h2>
-        <p className="text-sm text-muted mt-1">{PRIVACY_SUMMARY}</p>
+        <h2 className="text-2xl">More</h2>
+        <p className="text-sm text-muted mt-1">
+          Save a copy, appearance, install, and help.
+        </p>
       </div>
+
+      <section
+        id="settings-backup"
+        className="scroll-mt-24 space-y-3"
+        aria-labelledby="settings-backup-title"
+      >
+        <h3 id="settings-backup-title" className="sr-only">
+          Your copy
+        </h3>
+        <YourDataBundle
+          spaceCount={spaces.length}
+          onBackup={() => void saveYourCopy()}
+          onImport={() => openShare("import")}
+        />
+      </section>
+
+      <details className="rounded-2xl border border-border bg-surface px-3 py-2">
+        <summary className="cursor-pointer py-2 text-sm font-medium text-primary">
+          Getting started
+        </summary>
+        <p className="text-sm text-muted pb-2">
+          New group and Join a group are on the Groups tab. The full walkthrough
+          is in Help.
+        </p>
+        <Link to="/help" className="inline-block pb-2 text-sm font-medium text-primary">
+          Open help
+        </Link>
+      </details>
 
       <nav
         className="-mx-0.5 overflow-x-auto pb-0.5"
@@ -168,7 +243,7 @@ export function Settings() {
 
       <TestingGuideCard
         variant="full"
-        onBackup={() => openShare("export")}
+        onBackup={() => void saveYourCopy()}
       />
 
       <Card className="space-y-3">
@@ -190,21 +265,6 @@ export function Settings() {
           Open report form
         </Button>
       </Card>
-
-      <section
-        id="settings-backup"
-        className="scroll-mt-24 space-y-3"
-        aria-labelledby="settings-backup-title"
-      >
-        <h3 id="settings-backup-title" className="sr-only">
-          Backup
-        </h3>
-        <YourDataBundle
-          spaceCount={spaces.length}
-          onBackup={() => openShare("export")}
-          onImport={() => openShare("import")}
-        />
-      </section>
 
       <section
         id="settings-account"

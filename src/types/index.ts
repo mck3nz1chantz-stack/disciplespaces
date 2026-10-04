@@ -55,10 +55,76 @@ export type StepResponseValue = string | ChecklistItem[];
 /** Map of template step id → user response. */
 export type SessionResponses = Record<string, StepResponseValue>;
 
+/**
+ * A date this meeting already used.
+ * Frozen so a later time change does not rewrite the past.
+ */
+/**
+ * This week’s reading on a meeting. Not a private note.
+ * Missing on older meetings — do not invent one.
+ */
+export interface WeekReading {
+  book: string;
+  bookId: string;
+  chapter: number;
+  startVerse?: number;
+  endVerse?: number;
+}
+
+/** Who is coming to one meeting date. Names already in the group only. */
+export type ComingMark = "coming" | "cant";
+
+export interface ComingReply {
+  memberId: string;
+  name: string;
+  mark: ComingMark;
+}
+
+export interface HeldMeetingDate {
+  /** yyyy-MM-dd */
+  date: string;
+  /** Local "HH:mm". Omitted when that day had no time. */
+  startTime?: string;
+  /** Marks for this date. Left as they were when the date moved to Past. */
+  coming?: ComingReply[];
+}
+
 export interface Session {
   id: string;
   spaceId: string;
   date: string; // ISO string (calendar day or full ISO)
+  /**
+   * Local start time "HH:mm". Missing = that day with no time.
+   * Not inferred from `date` (older rows are stored at noon).
+   */
+  startTime?: string;
+  /**
+   * Same weekday and time each week. One row.
+   * `date` is the next upcoming day. Passed weeks live in `heldDates`.
+   * Older rows use this alone. Newer rows also set `repeat`.
+   */
+  weekly?: boolean;
+  /**
+   * How this one row repeats. Missing + weekly means every week.
+   * Missing without weekly means once.
+   */
+  repeat?: "week" | "biweek" | "month";
+  /**
+   * Day-of-month for `repeat: "month"` (1–31).
+   * Short months use the last day, then the next month returns to this day.
+   */
+  repeatDay?: number;
+  /** Dates already held. Capped when the week rolls forward. */
+  heldDates?: HeldMeetingDate[];
+  /** One passage for this meeting. Optional. */
+  weekPassage?: WeekReading;
+  /** One short question for this meeting. Optional. */
+  weekQuestion?: string;
+  /**
+   * Coming / Can’t for the date still ahead.
+   * When a week rolls forward, that date’s marks move onto `heldDates`.
+   */
+  coming?: ComingReply[];
   templateId: string;
   /**
    * Optional human label for this meeting (e.g. "Romans 13 – Submission").
@@ -158,6 +224,8 @@ export interface Space {
   id: string;
   name: string;
   description?: string;
+  /** Where the group meets. One short line. Optional. */
+  place?: string;
   createdAt: string;
   members: Member[];
   /**
@@ -231,13 +299,27 @@ export interface Template {
 }
 
 /**
- * Device-local personal notes — never included in export / invite packages.
- * Multiple timestamped entries per space or session (prayer log, reflections).
+ * Scripture a personal note is attached to. One note per exact reference.
+ * Stays on this device; never part of a group room.
+ */
+export interface VerseAnchor {
+  version: "kjv" | "web";
+  bookId: string;
+  bookName: string;
+  chapter: number;
+  startVerse: number;
+  endVerse: number;
+}
+
+/**
+ * Device-local personal notes — never included in group invite packages.
+ * A note may belong to a space, a session, a verse, or stand alone.
  */
 export interface PrivateNote {
   id: string;
-  spaceId: string;
-  /** When set, note belongs to a session; when omitted, space-level note. */
+  /** Omitted for a personal note that is not filed under a group. */
+  spaceId?: string;
+  /** When set, note belongs to a session; when omitted, space-level or personal. */
   sessionId?: string;
   /**
    * Optional template step id (or well-known section like "notes" / "passages")
@@ -245,6 +327,10 @@ export interface PrivateNote {
    */
   sectionKey?: string;
   content: string;
+  /** Set when this note belongs to one verse or a verse range. */
+  verse?: VerseAnchor;
+  /** Lookup key for verse: version|bookId|chapter|start|end */
+  verseKey?: string;
   createdAt: string;
   updatedAt?: string;
 }

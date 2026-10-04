@@ -1,19 +1,16 @@
 import { useEffect, useState } from "react";
 import {
-  Link,
   NavLink,
   Outlet,
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { BookOpen, CircleHelp, Home, Settings } from "lucide-react";
+import { BookOpen, Menu, NotebookPen, Users } from "lucide-react";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { OfflineBanner } from "./OfflineBanner";
 import { TestingPhaseRibbon } from "./TestingPhaseNotice";
-import { FeedbackLauncher } from "./FeedbackLauncher";
 import { LegalDisclaimerModal } from "./LegalDisclaimer";
 import { Onboarding } from "./Onboarding";
-import { ThemeCycleButton } from "./ThemeToggle";
 import { useAppStore } from "../stores/useAppStore";
 import { consumeInviteFromLocation } from "../lib/invite";
 import {
@@ -29,7 +26,7 @@ const tabs = [
   {
     to: "/",
     label: "Groups",
-    icon: Home,
+    icon: Users,
     /** Parent route: home, group detail, join/create entry */
     isActivePath: (path: string) =>
       path === "/" ||
@@ -39,15 +36,22 @@ const tabs = [
   },
   {
     to: "/bible",
-    label: "Bible",
+    label: "Read",
     icon: BookOpen,
     isActivePath: (path: string) => path.startsWith("/bible"),
   },
   {
+    to: "/notes",
+    label: "Notes",
+    icon: NotebookPen,
+    isActivePath: (path: string) => path.startsWith("/notes"),
+  },
+  {
     to: "/settings",
-    label: "Settings",
-    icon: Settings,
-    isActivePath: (path: string) => path.startsWith("/settings"),
+    label: "More",
+    icon: Menu,
+    isActivePath: (path: string) =>
+      path.startsWith("/settings") || path.startsWith("/help"),
   },
 ] as const;
 
@@ -103,24 +107,9 @@ export function Layout() {
             <h1 className="text-lg leading-tight tracking-tight font-serif text-primary">
               DiscipleSpaces
             </h1>
-            <p className="text-[11px] font-medium text-muted flex items-center gap-1.5 flex-wrap mt-0.5">
-              <span className="tracking-[0.06em] uppercase">ChantzMedia</span>
-            </p>
           </div>
-          {/* Header is weak thumb zone — keep controls compact, ≥44px hits.
-              Online/Offline lives only here (group cards show status, not a second toggle). */}
-          <div className="flex items-center gap-0.5 shrink-0 -mr-1">
+          <div className="flex items-center shrink-0">
             <OfflineIndicator />
-            <FeedbackLauncher />
-            <ThemeCycleButton />
-            <Link
-              to="/help"
-              className="inline-flex items-center justify-center rounded-xl p-2.5 text-primary touch-manipulation tap-target hover:bg-surface-muted transition-colors"
-              aria-label="Help and tutorial"
-              title="Help"
-            >
-              <CircleHelp className="h-5 w-5" aria-hidden />
-            </Link>
           </div>
         </div>
       </header>
@@ -143,7 +132,7 @@ export function Layout() {
         className="fixed bottom-0 inset-x-0 z-20 border-t border-border/80 bg-surface/80 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/65 safe-bottom safe-x"
         aria-label="Main"
       >
-        <ul className="mx-auto max-w-lg grid grid-cols-3">
+        <ul className="mx-auto max-w-lg grid grid-cols-4">
           {tabs.map(({ to, label, icon: Icon, isActivePath }) => {
             const isActive = isActivePath(location.pathname);
             return (

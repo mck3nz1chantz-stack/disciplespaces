@@ -14,7 +14,7 @@
 
 import type { Transaction } from "dexie";
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 export interface SchemaMigration {
   /** Dexie version number (monotonic). */
@@ -265,6 +265,20 @@ export const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       sessions: "id, spaceId, date, templateId",
       templates: "id, name",
       privateNotes: "id, spaceId, sessionId, createdAt",
+      prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
+      syncQueue: "id, spaceId, status, createdAt",
+      sharedTombstones: "key, spaceId, kind, id, deletedAt",
+    },
+  },
+  {
+    version: 9,
+    notes:
+      "Personal notes may omit spaceId and store a verseKey for one note per scripture reference",
+    stores: {
+      spaces: "id, name, createdAt, inviteCode, spaceTemplate, spaceKind",
+      sessions: "id, spaceId, date, templateId",
+      templates: "id, name",
+      privateNotes: "id, spaceId, sessionId, createdAt, verseKey",
       prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
       syncQueue: "id, spaceId, status, createdAt",
       sharedTombstones: "key, spaceId, kind, id, deletedAt",

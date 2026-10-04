@@ -1,49 +1,65 @@
 {
   "project": "DiscipleSpaces",
-  "workspacePath": "/Users/kenzi/Desktop/ChantzMediaProjects/DiscipleSpaces",
+  "projectName": "DiscipleSpaces",
+  "workspacePath": "/Users/kenzi/ChantzMedia/ChantzMediaProjects/DiscipleSpaces",
   "kind": "first-party",
-  "lastUpdated": "2026-07-31",
+  "lastUpdated": "2026-10-04",
   "gitBranch": "main",
-  "lastKnownCommit": "f407f61",
+  "lastKnownCommit": "2208c6c",
   "deploy": {
     "pages": "https://disciple-spaces.pages.dev",
     "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
     "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
-    "latestDeploymentUrl": "https://ecdcd87d.disciple-spaces.pages.dev",
-    "notes": "f407f61 shipped nav P0–P2 + Gather + theme contrast to Pages (2026-07-31). Relay unchanged."
+    "latestDeploymentUrl": "https://ee8f8a17.disciple-spaces.pages.dev",
+    "notes": "Pages deployed 2026-08-27 (S1–S5 local working tree; git not pushed). Relay unchanged. Canonical https://disciple-spaces.pages.dev"
   },
-  "currentSlice": "Nav wayfinding + Gather ritual — shipped",
-  "nextSlice": "Optional code-split main chunk · device secret on Worker · product polish as needed",
+  "currentSlice": "R5 group screen order coded locally. Reader-and-group R1–R5 are in the tree. Two-phone sync accept still open.",
+  "nextSlice": "Two-phone share accept is still open. Do not call it done without a live test. No further reader-and-group slice.",
   "sliceStatuses": {
-    "sync-relay-harden": "done",
+    "sync-relay-harden": "done-partial — field reports still fail to sync live",
     "gui-p0-p2": "done",
     "theme-contrast": "done-shipped",
     "nav-p0": "done",
     "nav-p1": "done",
     "nav-p2": "done",
-    "nav-suggestions": "done",
     "gather-path": "done",
-    "deploy-nav-gather": "done"
+    "sync-reliability-spec": "done-s0",
+    "ux-polish-spec": "done-s0",
+    "s1-sync-reliability": "landed-local",
+    "s2-join-share": "landed-local",
+    "s3-history-copy": "done",
+    "s4-zip-restore": "landed-local",
+    "s5-polish-p0": "landed-local"
   },
   "criticalNotes": [
     "Private notes never leave device; assertNoPrivateNotes on relay snapshots",
     "Online/Offline is HEADER ONLY; group pulse shows status + Sync",
     "Live badge = getGroupLinkStatus (Online + connected + !paused + !lastError)",
-    "Old room keys unbind on rotate (relay must stay deployed)",
-    "Host push membersAuthoritative on server; client membersUpdatedAt for roster race",
-    "autoSync re-queues pending writes after in-flight",
-    "toastCoord de-dupes manual vs foreground sync toasts",
     "Canonical origin: https://disciple-spaces.pages.dev (IndexedDB per-origin)",
-    "Bible cross video plate locked: docs/final/bible-reader-scroll-video-plate.md"
+    "inviteBehavior.newMembersGetPastSessions is true — joiners get whatever is already on the room",
+    "ZIP restore is still the fallback users actually use when live sync fails",
+    "Taste bar: quiet sanctuary phone group — no SaaS dual status strips",
+    "Real repo path is ~/ChantzMedia/ChantzMediaProjects/DiscipleSpaces (Desktop copy may be missing)",
+    "2026-10-04 refinement: Notes tab, verse notes, Read search S1b, More tab (Save a copy / Open a copy), join link /join?code=, personal DSP1 includes plain notes and does not overwrite notes already on the phone",
+    "Bottom bar is four items only: Groups, Read, Notes, More. Do not add a fifth tab for calendar",
+    "Session.date is an ISO string (day or full). Shared meetings sync through the room. Private notes never go on the room"
   ],
   "openIssues": [
-    "Optional: code-split main JS chunk (~800KB)",
-    "Commit/push/deploy ThemeToggle + FeedbackLauncher contrast if still dirty",
-    "Optional: code-split main JS chunk (~800KB)",
-    "Optional: device secret validation on Worker (currently not checked)"
+    "BUG-002: live host sync still fails; ZIP restore is the only path that works",
+    "BUG-003 / product: new members do not receive past sessions over relay",
+    "BUG-004 / BUG-005: join/sync fault codes (yad-35, PPH4-QJ) — likely wrong code type vs room key",
+    "BUG-006: group sync error on iPhone",
+    "BUG-009: ZIP restore only restored one group; past sessions missing",
+    "SMS invite link may not open join (BUG-002)",
+    "Optional: code-split main JS (~800KB)",
+    "Optional: device secret validation on Worker",
+    "User wants another UX/UI polish pass beyond nav/GUI already shipped"
   ],
   "keyReports": [
     "docs/drafts/gui-report.md",
-    "docs/client-hub/facts.v1.json"
+    "docs/drafts/debug-report.md",
+    "docs/drafts/sync-and-polish-spec.md",
+    "docs/client-hub/facts.v1.json",
+    "$LAUNCHER/products/apphub/shell/bugs/disciple-spaces.v1.json"
   ]
 }

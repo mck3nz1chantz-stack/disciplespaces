@@ -4,6 +4,7 @@
  */
 
 import type { PrivateNote, Session, Space } from "../../types";
+import { db } from "../db";
 import type { SpaceExportPayload } from "../share";
 import { buildSpaceExport, downloadTextFile } from "../share";
 import {
@@ -36,6 +37,11 @@ export interface PersonalBackupPayload {
    * Ciphertext of PrivateNote[] — never plain.
    */
   privateNotesEnc?: EncryptedBlob;
+  /**
+   * Notes saved with Your copy (this file only). Never sent to a group room.
+   * On open, a note already on the phone is left as-is.
+   */
+  privateNotes?: PrivateNote[];
   /** true when notes were intentionally omitted (default). */
   privateNotesIncluded: boolean;
 }
@@ -100,6 +106,8 @@ export async function buildPersonalBackup(input: {
   privateNotes: PrivateNote[];
   /** Override prefs / force include notes. Requires Account Key. */
   includePrivateNotes?: boolean;
+  /** Put notes in this file in the clear. Your copy uses this. Not for the group room. */
+  includePlainNotes?: boolean;
   accountKeySecret?: string | null;
 }): Promise<PersonalBackupPayload> {
   const prefs = getAccountKeyPrefs();
@@ -127,7 +135,10 @@ export async function buildPersonalBackup(input: {
     privateNotesIncluded: false,
   };
 
-  if (include) {
+  if (input.includePlainNotes) {
+    payload.privateNotes = input.privateNotes;
+    payload.privateNotesIncluded = true;
+  } else if (include) {
     if (!secret) {
       throw new Error(
         "Create or link an Account Key before including private notes in a backup.",
@@ -142,6 +153,19 @@ export async function buildPersonalBackup(input: {
   }
 
   return payload;
+}
+
+/** Add notes from a file. A note already on this phone is left unchanged. */
+export async function mergePersonalNotes(notes: PrivateNote[]): Promise<number> {
+  let added = 0;
+  for (const note of notes) {
+    if (!note?.id) continue;
+    const exists = await db.privateNotes.get(note.id);
+    if (exists) continue;
+    await db.privateNotes.put(note);
+    added += 1;
+  }
+  return added;
 }
 
 export async function decryptPersonalNotes(
@@ -166,14 +190,16 @@ export function formatPersonalBackupShareText(
     "DiscipleSpaces personal backup",
     `Spaces: ${payload.spaces.length}`,
     `Saved: ${payload.exportedAt.slice(0, 10)}`,
-    payload.privateNotesIncluded
-      ? "Private notes: included (encrypted with your Account Key)"
-      : "Private notes: not included (device-only)",
+    payload.privateNotes?.length
+      ? "Private notes: included in this file (not in a group share)"
+      : payload.privateNotesIncluded
+        ? "Private notes: included (encrypted with your Account Key)"
+        : "Private notes: not included (device-only)",
     payload.accountKeyFingerprint
       ? `Account Key fingerprint: ${payload.accountKeyFingerprint}`
       : null,
     "",
-    "Restore: Settings → Your Spaces & data → Restore, or paste below.",
+    "Restore: More → Open a copy, or paste below.",
     "Shared group files still use DSX1. packages.",
     "",
     pack,

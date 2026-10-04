@@ -17,6 +17,7 @@ export interface SpaceExportPayload {
     id: string;
     name: string;
     description?: string;
+    place?: string;
     createdAt: string;
     members: Space["members"];
     preferredBibleVersion: "KJV" | "WEB";
@@ -44,6 +45,7 @@ export function buildSpaceExport(
       id: space.id,
       name: space.name,
       description: space.description,
+      place: space.place?.trim() || undefined,
       createdAt: space.createdAt,
       members: space.members,
       preferredBibleVersion: "KJV",

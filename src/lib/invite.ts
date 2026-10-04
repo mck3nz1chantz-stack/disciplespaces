@@ -138,6 +138,29 @@ export function buildInviteDeepLink(pack: string): string {
   return `${base}/#invite=${encodeURIComponent(pack)}`;
 }
 
+/** Canonical Join URL for SMS / share (query, not hash — survives Messages). */
+export function buildRoomJoinUrl(shortCode: string): string {
+  const code = shortCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const formatted =
+    code.length === 6 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+  return `${PRODUCTION_URL}/join?code=${encodeURIComponent(formatted)}`;
+}
+
+export function formatRoomKeyShareText(
+  groupName: string,
+  shortCode: string,
+): string {
+  const url = buildRoomJoinUrl(shortCode);
+  return [
+    `Join my DiscipleSpaces group: ${groupName}`,
+    "",
+    `Room key: ${shortCode}`,
+    url,
+    "",
+    "Open that link, pick your name, and join. Stay on disciple-spaces.pages.dev.",
+  ].join("\n");
+}
+
 export function buildMemberJoinDeepLink(pack: string): string {
   const base =
     typeof window !== "undefined" && window.location?.origin
@@ -160,17 +183,7 @@ export function formatInviteShareText(
     (opts?.connected ? payload.code : undefined);
 
   if (short && opts?.connected) {
-    return [
-      `Join my DiscipleSpaces group: ${payload.name}`,
-      "",
-      `Code: ${short}`,
-      "",
-      "1. Open https://disciple-spaces.pages.dev",
-      "2. Tap Join a group",
-      "3. Enter this code and your name",
-      "",
-      "(Testing pilot — use that same website address.)",
-    ].join("\n");
+    return formatRoomKeyShareText(payload.name, short);
   }
 
   const pack = encodeInvitePackage(payload);

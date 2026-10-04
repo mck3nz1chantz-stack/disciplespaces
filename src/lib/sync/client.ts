@@ -93,22 +93,25 @@ async function relayFetch(
   }
 }
 
+const JOIN_404_HELP =
+  "Couldn’t join that room. That code is not a live room key (or the host issued a new one). Ask the host to open the group, then send the key on their group card — or the join link that looks like /join?code=ABCD-EF. Offline invite codes and Account Keys will not work here.";
+
 async function readError(res: Response): Promise<string> {
   try {
     const data = (await res.json()) as { error?: string };
     if (data.error) {
-      // Never surface bare short codes as "fault codes" — wrap clearly
       const err = data.error.trim();
       if (/^[A-Z0-9]{4}[-–—\s]?[A-Z0-9]{2,4}$/i.test(err)) {
         return `Could not complete sync. If you see a room key like ${err.toUpperCase()}, that is an invite code — not an error. Ask the host to Sync, then try Sync now again.`;
       }
+      if (res.status === 404) return JOIN_404_HELP;
       return err;
     }
   } catch {
     // ignore
   }
   if (res.status === 404) {
-    return "Couldn’t join that room. Use the host’s short room key (like ABCD-EF) from their group card — not Group Key (DS-GRP-…) unless they registered one, and not Account Key. Host: Online → open the group → share the room key, then you Join again.";
+    return JOIN_404_HELP;
   }
   if (res.status === 409) {
     return "Group changed on another device. Sync again to merge the latest shared meetings.";

@@ -25,6 +25,7 @@ Applied in `src/lib/db.ts` via `this.version(n).stores(...).upgrade(...)`.
 | 6 | Shared `prayerBoard` table (individual/group scopes; included in Space Update export) |
 | 7 | `space.sync` metadata (default `local-only`) + `syncQueue` table for opportunistic shared-layer push; **privateNotes never queued** |
 | 8 | `sharedTombstones` table — deleted sessions/prayer rows propagate via room + vault (LWW vs entity `updatedAt`) |
+| 9 | `privateNotes.verseKey` index. `spaceId` may be omitted for a personal note. No row rewrite. |
 
 ### Account Key / Group Key (no Dexie bump)
 
@@ -33,6 +34,11 @@ fields on `space.sync` (`groupKeyFingerprint`, `groupKeyRotation`, …) are
 written when used; missing fields mean “no key yet.” **No table drops, no wipe
 of spaces/sessions/privateNotes.** Personal backup format `DSP1.` is separate
 from `DSX1.` Space Updates.
+
+### Meeting time and weekly plan (no Dexie bump)
+
+Optional `startTime` (`HH:mm`), `weekly`, and `heldDates` on session rows.
+Older sessions without them stay a calendar day with no time. No index change.
 
 ### Session title (no Dexie bump)
 
