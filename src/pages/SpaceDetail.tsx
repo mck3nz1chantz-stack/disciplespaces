@@ -37,6 +37,7 @@ import { MemberEditor } from "../components/MemberEditor";
 import { InviteModal } from "../components/InviteModal";
 import { YourDataBundle } from "../components/YourDataBundle";
 import { SpaceConnectionBar } from "../components/SpaceConnectionBar";
+import { GroupShareActions } from "../components/GroupShareActions";
 import { PrayerBoard } from "../components/PrayerBoard";
 import { PrivateNotesModal } from "../components/PrivateNotesModal";
 import { SessionPrivateDrawer } from "../components/SessionPrivateDrawer";
@@ -1257,32 +1258,7 @@ export function SpaceDetail() {
         </Card>
       )}
 
-      <div className="space-y-2">
-        <p className="text-sm text-primary">
-          {isHost
-            ? needsRoomOpen
-              ? "Share this group when you are ready."
-              : "People join with the room key."
-            : "Ask the host for the room key."}
-        </p>
-        {isHost && (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              if (needsRoomOpen) {
-                setSyncExpandSignal((n) => n + 1);
-                document
-                  .getElementById("group-sync")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                return;
-              }
-              setInviteOpen(true);
-            }}
-          >
-            {needsRoomOpen ? "Open group room" : "Share the group"}
-          </Button>
-        )}
-      </div>
+      <GroupShareActions space={space} isHost={isHost} />
 
       {/* This group's month */}
       <MonthCalendar groups={[{ id: space.id, name: space.name, sessions: spaceSessions }]} />

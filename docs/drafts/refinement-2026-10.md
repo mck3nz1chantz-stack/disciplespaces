@@ -14,6 +14,15 @@ Two equal uses, one app:
 
 Private notes stay on this phone. They never ride the group room.
 
+## Share simplify (named 2026-10-04)
+
+On the group screen, the host gets two actions:
+
+1. **Send the group file.** Same group file as a group backup: meetings and prayer, no private notes. Share sheet when the phone allows a file, otherwise a download. Works with the header Offline.
+2. **Share a live link.** One button. If the header is Offline, it says so and points at the file. If Online, it opens the room when needed, uploads meetings, and only then shares or copies `https://disciple-spaces.pages.dev/join?code=…`. A failed upload does not hand out the link.
+
+Guests see: ask the host to send the group file or a live link. Room tools stay further down. Do not call this done without two phones accepting the same group.
+
 ## Sync — keep the model, fix the path
 
 **Do not replace sync with accounts, email login, or a second cloud database.**
@@ -159,6 +168,7 @@ Language rules: short sentences, no “relay,” “snapshot,” “LWW,” or �
 | **S2 Find it** | Four-tab bar with icons and words; More holds theme, help, install; group page order above | Shipped 2026-10-04 |
 | **S3 Share** | August S1+S2: visible failures, `/join?code=`, room history, Offline explains itself | Coded 2026-10-04. Two-phone accept on the live site is still open. |
 | **S4 Your copy** | Save a copy / Open a copy labels; multi-group ZIP; same-group update keeps local notes | Coded 2026-10-04. Save a copy writes every group and notes into one file. Open a copy restores each group and says the counts. |
+| **Share simplify** | On the group screen: **Send the group file** (meetings, no notes) and **Share a live link** (uploads meetings first, then copies one join link). Header Online / Offline stays the off switch. No new sync protocol. | Coded 2026-10-04. Two-phone accept is still required before calling share done. |
 
 S1, S1b, and S2 are shipped. S3 is still required before calling group sharing fixed. S4 can follow, because export format already exists. The Save a copy and Open a copy labels are on More; multi-group file behavior stays S4.
 
