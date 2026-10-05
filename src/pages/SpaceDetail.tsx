@@ -12,7 +12,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, subDays } from "date-fns";
 import {
   BookOpen,
   CalendarPlus,
@@ -180,6 +180,10 @@ export function SpaceDetail() {
    * Empty drafts are discarded on cancel/close.
    */
   const [isDraftSession, setIsDraftSession] = useState(false);
+  /** Held date this draft is replacing, so Past does not list it twice. */
+  const [heldLog, setHeldLog] = useState<{ sessionId: string; day: string } | null>(
+    null,
+  );
   const [deleteSessionOpen, setDeleteSessionOpen] = useState(false);
 
   const [editName, setEditName] = useState("");
@@ -439,7 +443,11 @@ export function SpaceDetail() {
    * share one sessionId immediately (e.g. public recap + private relapse note).
    * @returns created session when successful (for gather path).
    */
-  async function openCreateSession(): Promise<Session | null> {
+  async function openCreateSession(opts?: {
+    meetingDate?: string;
+    startTime?: string;
+    heldFrom?: { sessionId: string; day: string } | null;
+  }): Promise<Session | null> {
     if (!space) return null;
     const mode =
       viewMode === "all"
@@ -474,6 +482,7 @@ export function SpaceDetail() {
     setLockedSectionKey(PRIVATE_SECTION.notes);
     setActiveSession(null);
     setFormValues(null);
+    setHeldLog(opts?.heldFrom ?? null);
     setIsDraftSession(true);
     setSessionMode("edit");
     setSaving(true);
@@ -482,8 +491,8 @@ export function SpaceDetail() {
         mode: "create",
         templates: templateList,
         members: space.members,
-        meetingDate: format(new Date(), "yyyy-MM-dd"),
-        startTime: "",
+        meetingDate: opts?.meetingDate ?? format(new Date(), "yyyy-MM-dd"),
+        startTime: opts?.startTime ?? "",
         weekly: false,
         preferredTemplateId: templateId,
         templateId,
@@ -871,11 +880,60 @@ export function SpaceDetail() {
     }
   }
 
-  async function handleSaveSession(e: FormEvent) {
+  function previousDayForLog(): { day: string; startTime: string } {
+    const face = meetingLists.upcoming[0];
+    const today = format(new Date(), "yyyy-MM-dd");
+    if (face && repeatOf(face.session) !== "once") {
+      const kind = repeatOf(face.session);
+      const step = kind === "biweek" ? 14 : kind === "month" ? 28 : 7;
+      const prev = format(subDays(parseISO(face.day), step), "yyyy-MM-dd");
+      if (prev < today) {
+        return { day: prev, startTime: face.startTime ?? "" };
+      }
+    }
+    return { day: format(subDays(new Date(), 7), "yyyy-MM-dd"), startTime: "" };
+  }
+
+  function openLogPrevious(
+    day?: string,
+    startTime?: string,
+    heldFrom?: { sessionId: string; day: string },
+  ) {
+    const suggested = previousDayForLog();
+    void openCreateSession({
+      meetingDate: day ?? suggested.day,
+      startTime: startTime ?? (day ? "" : suggested.startTime),
+      heldFrom: heldFrom ?? null,
+    });
+  }
+
+  async function dropHeldDay(sessionId: string, day: string) {
+    const session = spaceSessions.find((row) => row.id === sessionId);
+    if (!session?.heldDates?.some((row) => row.date === day)) return;
+    await updateSession(sessionId, {
+      heldDates: session.heldDates.filter((row) => row.date !== day),
+    });
+  }
+
+  async function handleSaveSession(e: FormEvent, confirmPrevious = false) {
     e.preventDefault();
     if (!space || !formValues) return;
     if (!formValues.meetingDate) {
       toast.error("Pick a meeting date");
+      return;
+    }
+    const today = format(new Date(), "yyyy-MM-dd");
+    const dateIsPast = formValues.meetingDate < today;
+    const seriesRepeats = Boolean(
+      activeSession &&
+        !isDraftSession &&
+        repeatOf(rollSession(activeSession)) !== "once",
+    );
+    if (dateIsPast && seriesRepeats && !confirmPrevious) {
+      toast.message("That date already passed", {
+        description:
+          "Confirm previous date to keep this study in Past. The weekly plan stays on the next meeting.",
+      });
       return;
     }
     if (!formValues.templateId) {
@@ -932,17 +990,45 @@ export function SpaceDetail() {
       suggestTitleFromPassages(passagesStudied) ||
       undefined;
 
+    const forceOnce = confirmPrevious || (dateIsPast && !seriesRepeats && formValues.repeat !== "once");
+    const repeat = forceOnce ? "once" : formValues.repeat;
+    const keepSeries = confirmPrevious && seriesRepeats;
+
     setSaving(true);
     try {
       let savedId: string | null = null;
-      if (activeSession) {
+      if (activeSession && keepSeries) {
+        const created = await createSession({
+          spaceId: space.id,
+          date: formValues.meetingDate,
+          startTime: formValues.startTime,
+          weekly: false,
+          templateId: formValues.templateId,
+          title: titleToSave,
+          attendees: formValues.attendees,
+          responses: formValues.responses,
+          passagesStudied,
+          notes: formValues.notes,
+          weekPassage: weekPassage ?? undefined,
+          weekQuestion: weekQuestion || undefined,
+        });
+        await dropHeldDay(activeSession.id, formValues.meetingDate);
+        setActiveSession(created);
+        setIsDraftSession(false);
+        setHeldLog(null);
+        setFormValues(null);
+        setSessionPanelTab("session");
+        setSessionMode("view");
+        toast.success("Previous date saved");
+        savedId = created.id;
+      } else if (activeSession) {
         const updated = await updateSession(activeSession.id, {
           date: formValues.meetingDate,
           startTime: formValues.startTime,
-          weekly: formValues.repeat === "week",
-          repeat: formValues.repeat === "once" ? undefined : formValues.repeat,
+          weekly: repeat === "week",
+          repeat: repeat === "once" ? undefined : repeat,
           repeatDay:
-            formValues.repeat === "month"
+            repeat === "month"
               ? Number(formValues.meetingDate.slice(8, 10))
               : undefined,
           templateId: formValues.templateId,
@@ -956,7 +1042,17 @@ export function SpaceDetail() {
         });
         setActiveSession(updated);
         setIsDraftSession(false);
-        toast.success(isDraftSession ? "Session saved" : "Session updated");
+        if (heldLog && formValues.meetingDate === heldLog.day) {
+          await dropHeldDay(heldLog.sessionId, heldLog.day);
+        }
+        setHeldLog(null);
+        toast.success(
+          confirmPrevious
+            ? "Previous date saved"
+            : isDraftSession
+              ? "Session saved"
+              : "Session updated",
+        );
         setSessionMode("view");
         setFormValues(null);
         setSessionPanelTab("session");
@@ -967,10 +1063,10 @@ export function SpaceDetail() {
           spaceId: space.id,
           date: formValues.meetingDate,
           startTime: formValues.startTime,
-          weekly: formValues.repeat === "week",
-          repeat: formValues.repeat === "once" ? undefined : formValues.repeat,
+          weekly: repeat === "week",
+          repeat: repeat === "once" ? undefined : repeat,
           repeatDay:
-            formValues.repeat === "month"
+            repeat === "month"
               ? Number(formValues.meetingDate.slice(8, 10))
               : undefined,
           templateId: formValues.templateId,
@@ -1282,6 +1378,13 @@ export function SpaceDetail() {
                 <CalendarPlus className="h-5 w-5" aria-hidden />
                 Plan a meeting
               </Button>
+              <Button
+                variant="secondary"
+                onClick={() => openLogPrevious()}
+                disabled={saving}
+              >
+                Log a previous date
+              </Button>
             </Card>
           ) : (
             <ul className="space-y-2.5">
@@ -1321,9 +1424,23 @@ export function SpaceDetail() {
           )}
         </section>
 
-        {meetingLists.past.length > 0 && (
-          <section className="space-y-2.5" aria-label="Past">
-            <h3 className="text-lg">Past</h3>
+        <section className="space-y-2.5" aria-label="Past">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-lg">Past</h3>
+              <Button
+                variant="secondary"
+                className="!py-2"
+                onClick={() => openLogPrevious()}
+                disabled={saving}
+              >
+                Log a previous date
+              </Button>
+            </div>
+            {meetingLists.past.length === 0 ? (
+              <p className="text-sm text-muted">
+                No past meetings yet. Log a Wednesday you already met.
+              </p>
+            ) : (
             <ul className="space-y-2.5">
               {visiblePast.map((face) => (
                 <SessionRow
@@ -1331,11 +1448,30 @@ export function SpaceDetail() {
                   session={face.session}
                   whenLabel={formatMeetingWhen(face.day, face.startTime)}
                   template={templates.find((t) => t.id === face.session.templateId)}
-                  onOpen={() => openViewSession(face.session)}
+                  onOpen={() =>
+                    face.held
+                      ? openLogPrevious(face.day, face.startTime, {
+                          sessionId: face.session.id,
+                          day: face.day,
+                        })
+                      : openViewSession(face.session)
+                  }
+                  showWeek={!face.held}
+                  held={face.held}
                   coming={comingForFace(face)}
+                  onConfirmPrevious={
+                    face.held
+                      ? () =>
+                          openLogPrevious(face.day, face.startTime, {
+                            sessionId: face.session.id,
+                            day: face.day,
+                          })
+                      : undefined
+                  }
                 />
               ))}
             </ul>
+            )}
             {hasMorePast && (
               <Button
                 variant="secondary"
@@ -1351,7 +1487,6 @@ export function SpaceDetail() {
               </Button>
             )}
           </section>
-        )}
       </div>
 
 
@@ -2173,7 +2308,13 @@ export function SpaceDetail() {
                 templates={templates}
                 values={formValues}
                 onChange={setFormValues}
-                onSubmit={handleSaveSession}
+                onSubmit={(event) => void handleSaveSession(event)}
+                onConfirmPrevious={() => {
+                  void handleSaveSession(
+                    { preventDefault() {} } as FormEvent,
+                    true,
+                  );
+                }}
                 onCancel={
                   isDraftSession
                     ? () => void closeSessionModal()
@@ -2408,6 +2549,8 @@ function SessionRow({
   coming = [],
   members,
   onMark,
+  onConfirmPrevious,
+  held = false,
 }: {
   session: Session;
   template?: Template;
@@ -2419,6 +2562,8 @@ function SessionRow({
   coming?: { memberId: string; name: string; mark: ComingMark }[];
   members?: Member[];
   onMark?: (memberId: string, name: string, mark: ComingMark) => void;
+  onConfirmPrevious?: () => void;
+  held?: boolean;
 }) {
   const dateLabel = repeatNote ? `${whenLabel} · ${repeatNote}` : whenLabel;
   const attendeeCount = session.attendees?.length ?? 0;
@@ -2426,7 +2571,7 @@ function SessionRow({
   const progress = template
     ? countFilledSteps(template, session.responses)
     : null;
-  const heading = sessionDisplayTitle(session, template);
+  const heading = held ? "Not logged yet" : sessionDisplayTitle(session, template);
   const subtitle = sessionTitleSubtitle(session, template);
   const week = showWeek ? session.weekPassage : undefined;
   const question = showWeek ? session.weekQuestion?.trim() : "";
@@ -2510,6 +2655,17 @@ function SessionRow({
         )}
         {question ? (
           <p className="text-sm text-primary pt-0.5">{question}</p>
+        ) : null}
+        {onConfirmPrevious ? (
+          <Button
+            type="button"
+            variant="secondary"
+            className="mt-2"
+            fullWidth
+            onClick={onConfirmPrevious}
+          >
+            Confirm previous date
+          </Button>
         ) : null}
         {members && members.length > 0 && onMark ? (
           <ul className="space-y-1.5 pt-2">

@@ -71,6 +71,8 @@ interface SessionFormProps {
   spaceId?: string;
   /** Session id when editing — links prayer posts to this session. */
   sessionId?: string;
+  /** Save this day as its own past meeting. */
+  onConfirmPrevious?: () => void;
 }
 
 /**
@@ -92,6 +94,7 @@ export function SessionForm({
   privateNoteCount,
   spaceId,
   sessionId,
+  onConfirmPrevious,
 }: SessionFormProps) {
   const template = templates.find((t) => t.id === values.templateId);
   const isFreeform =
@@ -146,8 +149,9 @@ export function SessionForm({
       {/* Meta: date + title + template */}
       <section className="space-y-4">
         <label className="block space-y-1.5">
-          <span className="text-sm font-medium">Date</span>
+          <span className="text-sm font-medium">Session date</span>
           <input
+            id="session-date"
             type="date"
             value={values.meetingDate}
             onChange={(e) => patch({ meetingDate: e.target.value })}
@@ -155,7 +159,27 @@ export function SessionForm({
             required
             disabled={saving}
           />
+          <span className="text-xs text-muted">
+            {values.repeat === "once"
+              ? "Edit session date to move this meeting, including a day that already passed."
+              : "This is the next date. A day that already passed is confirmed on its own."}
+          </span>
         </label>
+        {onConfirmPrevious && values.meetingDate < localToday() && (
+          <div className="rounded-xl border border-border bg-bg px-3 py-3 space-y-2">
+            <p className="text-sm text-primary">
+              {values.meetingDate} already passed. Confirm it to keep this study in Past.
+            </p>
+            <Button
+              type="button"
+              fullWidth
+              onClick={onConfirmPrevious}
+              disabled={saving || !values.templateId}
+            >
+              Confirm previous date
+            </Button>
+          </div>
+        )}
 
         <label className="block space-y-1.5">
           <span className="text-sm font-medium">Time</span>
@@ -668,6 +692,14 @@ function ChecklistEditor({
       </Button>
     </div>
   );
+}
+
+function localToday(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /** Build initial form values for create or edit. */

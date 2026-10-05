@@ -186,7 +186,7 @@ export function SessionView({
 
       <div className="flex flex-col gap-2 pt-1">
         <Button fullWidth onClick={onEdit}>
-          Edit Session
+          Edit session date
         </Button>
         <div className="grid grid-cols-2 gap-2">
           <Button variant="secondary" fullWidth onClick={onClose}>
