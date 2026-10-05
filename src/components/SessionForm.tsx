@@ -77,6 +77,8 @@ interface SessionFormProps {
   onConfirmPrevious?: () => void;
   /** Date, passages, and recap only. */
   variant?: "full" | "past";
+  /** Open Read so verses can be logged onto this meeting. */
+  onOpenBible?: () => void;
 }
 
 /**
@@ -100,6 +102,7 @@ export function SessionForm({
   sessionId,
   onConfirmPrevious,
   variant = "full",
+  onOpenBible,
 }: SessionFormProps) {
   const template = templates.find((t) => t.id === values.templateId);
   const isFreeform =
@@ -149,6 +152,7 @@ export function SessionForm({
         onSubmit={onSubmit}
         onCancel={onCancel}
         saving={saving}
+        onOpenBible={onOpenBible}
       />
     );
   }
@@ -422,9 +426,20 @@ export function SessionForm({
           </div>
         </div>
         <p className="text-xs text-muted">
-          Log book + chapter + verse range with optional study notes — or use
-          the Bible reader while this space is selected.
+          Open Read and tap the verses, or type a book and chapter below.
         </p>
+        {onOpenBible ? (
+          <Button
+            type="button"
+            variant="secondary"
+            fullWidth
+            onClick={onOpenBible}
+            disabled={saving}
+          >
+            <BookOpen className="h-5 w-5" aria-hidden />
+            Open Read
+          </Button>
+        ) : null}
         <PassageList
           passages={values.passagesStudied}
           onChange={(passagesStudied) => {
@@ -717,12 +732,14 @@ function PastSessionForm({
   onSubmit,
   onCancel,
   saving,
+  onOpenBible,
 }: {
   values: SessionFormValues;
   onChange: (values: SessionFormValues) => void;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   saving: boolean;
+  onOpenBible?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [passageError, setPassageError] = useState("");
@@ -816,8 +833,20 @@ function PastSessionForm({
           </span>
         </label>
         <p className="text-xs text-muted">
-          Add each reading, such as Daniel 1–2, then Daniel 3 and 4.
+          Open Read and tap the chapters, or type a reading such as Daniel 1–2.
         </p>
+        {onOpenBible ? (
+          <Button
+            type="button"
+            variant="secondary"
+            fullWidth
+            onClick={onOpenBible}
+            disabled={saving}
+          >
+            <BookOpen className="h-5 w-5" aria-hidden />
+            Open Read
+          </Button>
+        ) : null}
         {passageError ? (
           <p className="text-sm text-primary">{passageError}</p>
         ) : null}

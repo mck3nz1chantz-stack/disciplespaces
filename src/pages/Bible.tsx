@@ -1083,7 +1083,11 @@ export function Bible() {
             {canOneTapLog || logContext.spaceName ? (
               <>
                 <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted">
-                  Tonight’s study
+                  {activeSession &&
+                  activeSession.date.slice(0, 10) <
+                    `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`
+                    ? "This meeting"
+                    : "Tonight’s study"}
                 </p>
                 <h2 className="text-xl sm:text-2xl font-serif tracking-tight text-primary leading-snug">
                   {sessionTitle ?? logContext.spaceName ?? "Bible"}

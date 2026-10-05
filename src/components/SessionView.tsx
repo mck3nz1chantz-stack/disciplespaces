@@ -145,7 +145,7 @@ export function SessionView({
         <PassageList passages={passages} readOnly compact />
         {onOpenBible && (
           <Button fullWidth onClick={onOpenBible}>
-            Open reader for this session
+            Open Read
           </Button>
         )}
       </section>

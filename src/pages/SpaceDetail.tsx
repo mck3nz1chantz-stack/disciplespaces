@@ -737,6 +737,42 @@ export function SpaceDetail() {
     navigate(`/bible?${params.toString()}`);
   }
 
+  /** Keep this meeting’s date, then open Read so logged verses stay on it. */
+  async function openBibleFromForm() {
+    if (!activeSession) return;
+    if (formValues) {
+      setSaving(true);
+      try {
+        await updateSession(activeSession.id, {
+          date: formValues.meetingDate,
+          startTime: formValues.startTime,
+          weekly: loggingPast ? false : formValues.repeat === "week",
+          repeat:
+            loggingPast || formValues.repeat === "once"
+              ? undefined
+              : formValues.repeat,
+          repeatDay:
+            !loggingPast && formValues.repeat === "month"
+              ? Number(formValues.meetingDate.slice(8, 10))
+              : undefined,
+          title: formValues.title.trim(),
+          attendees: formValues.attendees,
+          responses: formValues.responses,
+          passagesStudied: formValues.passagesStudied,
+          notes: formValues.notes,
+        });
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not open Read",
+        );
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+    openBibleForSpace(activeSession.id);
+  }
+
   function formOrSessionHasSharedContent(
     session: Session,
     form: SessionFormValues | null,
@@ -2361,6 +2397,7 @@ export function SpaceDetail() {
                 }}
                 spaceId={space.id}
                 sessionId={activeSession.id}
+                onOpenBible={() => void openBibleFromForm()}
                 onOpenPrivateNotes={(sectionKey) =>
                   openSessionPrivateDrawer(sectionKey)
                 }
