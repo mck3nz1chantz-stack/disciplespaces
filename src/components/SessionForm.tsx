@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { BookOpen, Lock, Plus, Trash2 } from "lucide-react";
 import type {
   ChecklistItem,
@@ -19,6 +19,8 @@ import {
   SESSION_TITLE_MAX,
   suggestTitleFromPassages,
 } from "../lib/sessionTitle";
+import { formatPassageRef, passageFromCoveredText } from "../lib/passages";
+import { formatMeetingWhen } from "../lib/meetingCalendar";
 import { Button } from "./Button";
 import { PassageList } from "./PassageList";
 import { PrayerBoard } from "./PrayerBoard";
@@ -73,6 +75,8 @@ interface SessionFormProps {
   sessionId?: string;
   /** Save this day as its own past meeting. */
   onConfirmPrevious?: () => void;
+  /** Date, passages, and recap only. */
+  variant?: "full" | "past";
 }
 
 /**
@@ -95,6 +99,7 @@ export function SessionForm({
   spaceId,
   sessionId,
   onConfirmPrevious,
+  variant = "full",
 }: SessionFormProps) {
   const template = templates.find((t) => t.id === values.templateId);
   const isFreeform =
@@ -134,6 +139,18 @@ export function SessionForm({
   function applySuggestedTitle() {
     if (!suggestedTitle) return;
     patch({ title: suggestedTitle });
+  }
+
+  if (variant === "past") {
+    return (
+      <PastSessionForm
+        values={values}
+        onChange={onChange}
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+        saving={saving}
+      />
+    );
   }
 
   return (
@@ -691,6 +708,178 @@ function ChecklistEditor({
         Add item
       </Button>
     </div>
+  );
+}
+
+function PastSessionForm({
+  values,
+  onChange,
+  onSubmit,
+  onCancel,
+  saving,
+}: {
+  values: SessionFormValues;
+  onChange: (values: SessionFormValues) => void;
+  onSubmit: (e: FormEvent) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const [passageError, setPassageError] = useState("");
+
+  function patch(partial: Partial<SessionFormValues>) {
+    onChange({ ...values, ...partial });
+  }
+
+  function addCovered() {
+    const next = passageFromCoveredText(draft);
+    if (!next) {
+      setPassageError("Use a reading like Daniel 1–2 or Daniel 3 and 4.");
+      return;
+    }
+    setPassageError("");
+    setDraft("");
+    const passagesStudied = [...values.passagesStudied, next];
+    const suggested = suggestTitleFromPassages(passagesStudied);
+    patch({
+      passagesStudied,
+      title: values.title.trim() ? values.title : suggested,
+    });
+  }
+
+  function removeCovered(id: string | undefined, index: number) {
+    const passagesStudied = values.passagesStudied.filter((row, i) =>
+      id ? row.id !== id : i !== index,
+    );
+    patch({ passagesStudied });
+  }
+
+  const covered = values.passagesStudied
+    .map((row) => formatPassageRef(row))
+    .filter(Boolean);
+  const when = values.meetingDate
+    ? formatMeetingWhen(values.meetingDate, values.startTime)
+    : "Pick a date";
+  const recap = values.title.trim();
+  const savedAs = [when, covered.join(", "), recap].filter(Boolean).join(" · ");
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <p className="text-sm text-muted">
+        One screen for a meeting you already had. This is what Past will show.
+      </p>
+
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium">Date</span>
+        <input
+          id="session-date"
+          type="date"
+          value={values.meetingDate}
+          onChange={(e) => patch({ meetingDate: e.target.value })}
+          className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+          required
+          disabled={saving}
+        />
+      </label>
+
+      <div className="space-y-1.5">
+        <label className="block space-y-1.5" htmlFor="covered-passage">
+          <span className="text-sm font-medium">Passages covered</span>
+          <span className="flex gap-2">
+            <input
+              id="covered-passage"
+              type="text"
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                if (passageError) setPassageError("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCovered();
+                }
+              }}
+              placeholder="Daniel 1–2"
+              className="min-w-0 flex-1 rounded-xl border border-border bg-bg px-3 py-3 text-base"
+              disabled={saving}
+              autoComplete="off"
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={addCovered}
+              disabled={saving || !draft.trim()}
+            >
+              Add
+            </Button>
+          </span>
+        </label>
+        <p className="text-xs text-muted">
+          Add each reading, such as Daniel 1–2, then Daniel 3 and 4.
+        </p>
+        {passageError ? (
+          <p className="text-sm text-primary">{passageError}</p>
+        ) : null}
+        {covered.length > 0 ? (
+          <ul className="flex flex-wrap gap-2" aria-label="Passages on this date">
+            {values.passagesStudied.map((row, index) => (
+              <li key={row.id ?? index}>
+                <button
+                  type="button"
+                  onClick={() => removeCovered(row.id, index)}
+                  disabled={saving}
+                  className="rounded-full border border-border bg-bg px-3 py-1.5 text-sm text-primary touch-manipulation"
+                >
+                  {formatPassageRef(row)} · remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted">No passages on this date yet.</p>
+        )}
+      </div>
+
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium">Short recap</span>
+        <input
+          type="text"
+          value={values.title}
+          onChange={(e) => patch({ title: e.target.value })}
+          maxLength={SESSION_TITLE_MAX}
+          placeholder="Daniel 1 and 2"
+          className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+          disabled={saving}
+          autoComplete="off"
+        />
+        <span className="text-xs text-muted">
+          This line is the name Past uses for this date.
+        </span>
+      </label>
+
+      <div className="rounded-xl border border-primary/30 bg-primary/5 px-3 py-3 space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+          Saved as
+        </p>
+        <p className="text-sm text-primary">{savedAs}</p>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <Button
+          type="button"
+          variant="secondary"
+          fullWidth
+          onClick={onCancel}
+          disabled={saving}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" fullWidth disabled={saving || !values.meetingDate}>
+          {saving ? "Saving…" : "Save past session"}
+        </Button>
+      </div>
+    </form>
   );
 }
 

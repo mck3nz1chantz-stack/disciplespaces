@@ -70,7 +70,7 @@ import {
   SECTION_GENERAL,
 } from "../lib/sessionSections";
 import type { ComingMark, Member, Session, SpaceKind, Template, WeekReading } from "../types";
-import { formatWeekReading, parseWeekPassage } from "../lib/passages";
+import { formatPassageRef, formatWeekReading, parseWeekPassage } from "../lib/passages";
 import { MonthCalendar } from "../components/MonthCalendar";
 import {
   maxMembersForSpace,
@@ -184,6 +184,8 @@ export function SpaceDetail() {
   const [heldLog, setHeldLog] = useState<{ sessionId: string; day: string } | null>(
     null,
   );
+  /** Short past-session screen: date, passages, recap. */
+  const [loggingPast, setLoggingPast] = useState(false);
   const [deleteSessionOpen, setDeleteSessionOpen] = useState(false);
 
   const [editName, setEditName] = useState("");
@@ -447,6 +449,7 @@ export function SpaceDetail() {
     meetingDate?: string;
     startTime?: string;
     heldFrom?: { sessionId: string; day: string } | null;
+    loggingPast?: boolean;
   }): Promise<Session | null> {
     if (!space) return null;
     const mode =
@@ -483,6 +486,7 @@ export function SpaceDetail() {
     setActiveSession(null);
     setFormValues(null);
     setHeldLog(opts?.heldFrom ?? null);
+    setLoggingPast(Boolean(opts?.loggingPast));
     setIsDraftSession(true);
     setSessionMode("edit");
     setSaving(true);
@@ -786,6 +790,7 @@ export function SpaceDetail() {
     setSessionPanelTab("session");
     setLockedSectionKey(PRIVATE_SECTION.notes);
     setIsDraftSession(false);
+    setLoggingPast(false);
 
     let keptSessionId: string | null = null;
     if (wasDraft && draft) {
@@ -904,6 +909,7 @@ export function SpaceDetail() {
       meetingDate: day ?? suggested.day,
       startTime: startTime ?? (day ? "" : suggested.startTime),
       heldFrom: heldFrom ?? null,
+      loggingPast: true,
     });
   }
 
@@ -942,7 +948,7 @@ export function SpaceDetail() {
     }
 
     const template = templates.find((t) => t.id === formValues.templateId);
-    if (template) {
+    if (template && !loggingPast) {
       const missing = validateRequiredResponses(
         template,
         formValues.responses,
@@ -990,7 +996,19 @@ export function SpaceDetail() {
       suggestTitleFromPassages(passagesStudied) ||
       undefined;
 
-    const forceOnce = confirmPrevious || (dateIsPast && !seriesRepeats && formValues.repeat !== "once");
+    if (
+      loggingPast &&
+      !formValues.title.trim() &&
+      formValues.passagesStudied.every((row) => !row.book.trim())
+    ) {
+      toast.error("Add the passages or a short recap");
+      return;
+    }
+    const wasPast = loggingPast;
+    const forceOnce =
+      loggingPast ||
+      confirmPrevious ||
+      (dateIsPast && !seriesRepeats && formValues.repeat !== "once");
     const repeat = forceOnce ? "once" : formValues.repeat;
     const keepSeries = confirmPrevious && seriesRepeats;
 
@@ -1013,14 +1031,15 @@ export function SpaceDetail() {
           weekQuestion: weekQuestion || undefined,
         });
         await dropHeldDay(activeSession.id, formValues.meetingDate);
-        setActiveSession(created);
+        setActiveSession(wasPast ? null : created);
         setIsDraftSession(false);
         setHeldLog(null);
+        setLoggingPast(false);
         setFormValues(null);
         setSessionPanelTab("session");
-        setSessionMode("view");
-        toast.success("Previous date saved");
-        savedId = created.id;
+        setSessionMode(wasPast ? null : "view");
+        toast.success(wasPast ? "Past session saved" : "Previous date saved");
+        savedId = wasPast ? null : created.id;
       } else if (activeSession) {
         const updated = await updateSession(activeSession.id, {
           date: formValues.meetingDate,
@@ -1040,23 +1059,26 @@ export function SpaceDetail() {
           weekPassage: weekPassage ?? undefined,
           weekQuestion: weekQuestion || undefined,
         });
-        setActiveSession(updated);
-        setIsDraftSession(false);
         if (heldLog && formValues.meetingDate === heldLog.day) {
           await dropHeldDay(heldLog.sessionId, heldLog.day);
         }
         setHeldLog(null);
-        toast.success(
-          confirmPrevious
-            ? "Previous date saved"
-            : isDraftSession
-              ? "Session saved"
-              : "Session updated",
-        );
-        setSessionMode("view");
+        setLoggingPast(false);
         setFormValues(null);
+        setActiveSession(wasPast ? null : updated);
+        setIsDraftSession(false);
+        setSessionMode(wasPast ? null : "view");
+        toast.success(
+          wasPast
+            ? "Past session saved"
+            : confirmPrevious
+              ? "Previous date saved"
+              : isDraftSession
+                ? "Session saved"
+                : "Session updated",
+        );
         setSessionPanelTab("session");
-        savedId = updated.id;
+        savedId = wasPast ? null : updated.id;
       } else {
         // Fallback if draft creation was skipped
         const created = await createSession({
@@ -1190,7 +1212,9 @@ export function SpaceDetail() {
       ? "Start new session"
       : sessionMode === "edit"
         ? isDraftSession
-          ? formValues?.title?.trim() ||
+          ? loggingPast
+            ? "Log a past session"
+            : formValues?.title?.trim() ||
             liveSessionTemplate?.name ||
             "New session"
           : formValues?.title?.trim()
@@ -2239,14 +2263,18 @@ export function SpaceDetail() {
           void closeSessionModal();
         }}
         containBody
-        tabs={[
-          { id: "session", label: "Session" },
-          {
-            id: "private",
-            label: "Private",
-            badge: sessionPrivateCount,
-          },
-        ]}
+        tabs={
+          loggingPast
+            ? undefined
+            : [
+                { id: "session", label: "Session" },
+                {
+                  id: "private",
+                  label: "Private",
+                  badge: sessionPrivateCount,
+                },
+              ]
+        }
         activeTab={sessionPanelTab}
         onTabChange={(id) => {
           if (id === "private") {
@@ -2308,7 +2336,8 @@ export function SpaceDetail() {
                 templates={templates}
                 values={formValues}
                 onChange={setFormValues}
-                onSubmit={(event) => void handleSaveSession(event)}
+                variant={loggingPast ? "past" : "full"}
+                onSubmit={(event) => void handleSaveSession(event, loggingPast)}
                 onConfirmPrevious={() => {
                   void handleSaveSession(
                     { preventDefault() {} } as FormEvent,
@@ -2571,6 +2600,9 @@ function SessionRow({
   const progress = template
     ? countFilledSteps(template, session.responses)
     : null;
+  const covered = (session.passagesStudied ?? [])
+    .map((row) => formatPassageRef(row))
+    .filter(Boolean);
   const heading = held ? "Not logged yet" : sessionDisplayTitle(session, template);
   const subtitle = sessionTitleSubtitle(session, template);
   const week = showWeek ? session.weekPassage : undefined;
@@ -2631,6 +2663,9 @@ function SessionRow({
                   : null}
               </p>
 
+              {covered.length > 0 ? (
+                <p className="text-sm text-primary pt-0.5">{covered.join(" · ")}</p>
+              ) : null}
               {preview ? (
                 <p className="text-sm text-muted line-clamp-2 pt-0.5">
                   {preview}

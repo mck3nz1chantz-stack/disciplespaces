@@ -66,6 +66,64 @@ export async function parseWeekPassage(
   };
 }
 
+/**
+ * One covered reading for a past meeting.
+ * Accepts "Daniel 1", "Daniel 1–2", "Daniel 1 and 2", or "Daniel 1:1–21".
+ */
+export function passageFromCoveredText(raw: string): Passage | null {
+  const text = raw.trim().replace(/\s+/g, " ");
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  const book = [...BIBLE_BOOK_NAMES]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => lower.startsWith(name.toLowerCase()));
+  if (!book) return null;
+  const rest = text.slice(book.length).trim();
+  const verseRange = /^(\d+):(\d+)\s*[–-]\s*(\d+)$/.exec(rest);
+  const chapterSpan = /^(\d+)\s*(?:[–-]|and|,)\s*(\d+)$/i.exec(rest);
+  const oneVerse = /^(\d+):(\d+)$/.exec(rest);
+  const one = /^(\d+)$/.exec(rest);
+
+  let startChapter = 0;
+  let endChapter = 0;
+  let startVerse: number | undefined;
+  let endVerse: number | undefined;
+  if (verseRange) {
+    startChapter = endChapter = Number(verseRange[1]);
+    startVerse = Number(verseRange[2]);
+    endVerse = Number(verseRange[3]);
+  } else if (chapterSpan) {
+    startChapter = Number(chapterSpan[1]);
+    endChapter = Number(chapterSpan[2]);
+  } else if (oneVerse) {
+    startChapter = endChapter = Number(oneVerse[1]);
+    startVerse = endVerse = Number(oneVerse[2]);
+  } else if (one) {
+    startChapter = endChapter = Number(one[1]);
+  } else {
+    return null;
+  }
+  if (startChapter < 1 || endChapter < 1) return null;
+  if (endChapter < startChapter) {
+    const swap = startChapter;
+    startChapter = endChapter;
+    endChapter = swap;
+  }
+  if (startVerse != null && endVerse != null && endVerse < startVerse) {
+    const swap = startVerse;
+    startVerse = endVerse;
+    endVerse = swap;
+  }
+  return {
+    id: crypto.randomUUID(),
+    book,
+    startChapter,
+    endChapter,
+    startVerse,
+    endVerse,
+  };
+}
+
 /** Human-readable scripture reference for a Passage. */
 export function formatPassageRef(p: Passage): string {
   const book = p.book;
