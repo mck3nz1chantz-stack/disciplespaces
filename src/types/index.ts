@@ -220,6 +220,55 @@ export interface SpaceSyncState {
   groupKeyRotation?: GroupKeyRotationState;
 }
 
+/**
+ * One chapter marked studied in one study.
+ * Stays on this phone. Not part of a group room.
+ */
+export interface ChapterMark {
+  /** `${spaceId}|${bookId}|${chapter}` */
+  id: string;
+  spaceId: string;
+  bookId: string;
+  chapter: number;
+  markedAt: string;
+}
+
+/** Last chapter open in one study. Stays on this phone. Not part of a group room. */
+export interface StudyReadingPlace {
+  version: "kjv" | "web";
+  bookId: string;
+  chapter: number;
+  bookName?: string;
+}
+
+/**
+ * One reading this study means to open later.
+ * Private to this phone. Not a shared assignment.
+ */
+export interface StudyQueueItem {
+  id: string;
+  spaceId: string;
+  /** 0 is the Next line. Higher numbers follow. */
+  order: number;
+  bookId: string;
+  bookName: string;
+  chapter: number;
+  startVerse?: number;
+  endVerse?: number;
+}
+
+/**
+ * Optional aim for one study. A chapter and a date you type.
+ * No countdown. Local only. Not sent on the group room.
+ */
+export interface StudyAim {
+  bookId: string;
+  bookName: string;
+  chapter: number;
+  /** yyyy-MM-dd. Optional. */
+  byDate?: string;
+}
+
 export interface Space {
   id: string;
   name: string;
@@ -234,6 +283,12 @@ export interface Space {
    * Never required — missing means “accept remote roster on replace-shared pull”.
    */
   membersUpdatedAt?: string;
+  /**
+   * ISO time of the last local rename.
+   * A host pull keeps this name until sync has pushed it.
+   * Not sent on the group room.
+   */
+  nameUpdatedAt?: string;
   /**
    * Preferred public-domain edition for this Space (KJV or WEB).
    * No paid/licensed translations.
@@ -265,6 +320,23 @@ export interface Space {
    * Never includes private notes.
    */
   sync?: SpaceSyncState;
+  /**
+   * personal = the built-in study on this phone. group = a group you already had
+   * or created. Missing means group. Never rewrite a group into personal.
+   */
+  studyRole?: "personal" | "group";
+  /**
+   * Hue on the color wheel, 0–359. Local only. Missing until the first study pass.
+   * Not sent on the group room.
+   */
+  colorHue?: number;
+  /** Where this study last was in the Bible. Local only. Not sent on the group room. */
+  readingPlace?: StudyReadingPlace;
+  /**
+   * Optional “aim to be at” line. Local only. Not sent on the group room.
+   * A sync replace keeps it because it is not a shared field.
+   */
+  studyAim?: StudyAim;
   /** Hydrated at read time from the sessions table; not duplicated in Dexie. */
   sessions: Session[];
 }
@@ -329,6 +401,11 @@ export interface PrivateNote {
   content: string;
   /** Set when this note belongs to one verse or a verse range. */
   verse?: VerseAnchor;
+  /**
+   * One other reference the person typed on this note.
+   * Same shape as `verse`. Stays on this phone. Not a printed margin.
+   */
+  anotherVerse?: VerseAnchor;
   /** Lookup key for verse: version|bookId|chapter|start|end */
   verseKey?: string;
   createdAt: string;

@@ -3,7 +3,7 @@
   "projectName": "DiscipleSpaces",
   "workspacePath": "/Users/kenzi/ChantzMedia/ChantzMediaProjects/DiscipleSpaces",
   "kind": "first-party",
-  "lastUpdated": "2026-10-04",
+  "lastUpdated": "2026-10-22",
   "gitBranch": "main",
   "lastKnownCommit": "2208c6c",
   "deploy": {
@@ -13,8 +13,8 @@
     "latestDeploymentUrl": "https://ee8f8a17.disciple-spaces.pages.dev",
     "notes": "Pages deployed 2026-08-27 (S1–S5 local working tree; git not pushed). Relay unchanged. Canonical https://disciple-spaces.pages.dev"
   },
-  "currentSlice": "R5 group screen order coded locally. Reader-and-group R1–R5 are in the tree. Two-phone sync accept still open.",
-  "nextSlice": "Two-phone share accept is still open. Do not call it done without a live test. No further reader-and-group slice.",
+  "currentSlice": "B3 coded locally 2026-10-22. Not deployed. Not pushed. B1, B2, and A1–A5 remain coded locally. Two-phone sync is sidelined, not accepted.",
+  "nextSlice": "Beginner-study slices B1–B3 are coded locally. Do not deploy unless Kenzi asks. Do not resume two-phone share. Do not start a cross-reference library.",
   "sliceStatuses": {
     "sync-relay-harden": "done-partial — field reports still fail to sync live",
     "gui-p0-p2": "done",
@@ -29,11 +29,20 @@
     "s2-join-share": "landed-local",
     "s3-history-copy": "done",
     "s4-zip-restore": "landed-local",
-    "s5-polish-p0": "landed-local"
+    "s5-polish-p0": "landed-local",
+    "a1-switch-studies": "coded-local — not deployed, not pushed",
+    "a2-mark-studied": "coded-local — not deployed, not pushed",
+    "a3-whats-next": "coded-local — not deployed, not pushed",
+    "a4-studies-quiet": "coded-local — not deployed, not pushed",
+    "a5-notes-follow-study": "coded-local — not deployed, not pushed",
+    "b0-beginner-research": "spec written 2026-10-22 — docs/drafts/beginner-study-research-2026-10.md and docs/drafts/beginner-study-2026-10.md",
+    "b1-reference-sentence": "coded-local — not deployed, not pushed",
+    "b2-saved-verses": "coded-local — not deployed, not pushed",
+    "b3-another-verse": "coded-local — not deployed, not pushed. One optional anotherVerse on the note. No schema bump."
   },
   "criticalNotes": [
     "Private notes never leave device; assertNoPrivateNotes on relay snapshots",
-    "Online/Offline is HEADER ONLY; group pulse shows status + Sync",
+    "Online/Offline lives on More and inside Group sharing. It is not in the header. Moving it must not change the saved mode.",
     "Live badge = getGroupLinkStatus (Online + connected + !paused + !lastError)",
     "Canonical origin: https://disciple-spaces.pages.dev (IndexedDB per-origin)",
     "inviteBehavior.newMembersGetPastSessions is true — joiners get whatever is already on the room",
@@ -41,7 +50,8 @@
     "Taste bar: quiet sanctuary phone group — no SaaS dual status strips",
     "Real repo path is ~/ChantzMedia/ChantzMediaProjects/DiscipleSpaces (Desktop copy may be missing)",
     "2026-10-04 refinement: Notes tab, verse notes, Read search S1b, More tab (Save a copy / Open a copy), join link /join?code=, personal DSP1 includes plain notes and does not overwrite notes already on the phone",
-    "Bottom bar is four items only: Groups, Read, Notes, More. Do not add a fifth tab for calendar",
+    "Bottom bar is four items only: Read, Studies, Notes, More. Read opens first. Do not add a fifth tab for calendar",
+    "2026-10-22 study-first: any number of studies, hue wheel per study, no six-color cap. Do not delete or disconnect existing groups. Christian’s device must still open members, meetings, prayer, notes, and a connected room after an update. Additive schema only. Do not deploy a relay change in A1–A5.",
     "Session.date is an ISO string (day or full). Shared meetings sync through the room. Private notes never go on the room"
   ],
   "openIssues": [

@@ -1,29 +1,23 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { format, formatDistanceToNow, parseISO } from "date-fns";
-import { HandHeart, Plus, UserPlus, Users } from "lucide-react";
+import { Plus, UserPlus, Users } from "lucide-react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import {
   consumePendingHomeAction,
   consumePendingJoinRaw,
 } from "../components/Layout";
-import { GroupLinkBadge } from "../components/GroupLinkBadge";
 import { lastActivityIso, useAppStore } from "../stores/useAppStore";
-import {
-  useLiveOpenPrayerSummary,
-  useLiveSpaces,
-} from "../hooks/useLiveDb";
-import { useOnlineMode } from "../hooks/useOnlineMode";
+import { useLiveSpaces, useLiveStudyNoteCount, useLiveStudyQueue } from "../hooks/useLiveDb";
 import { getSpaceTemplateMeta } from "../lib/spaceTemplates";
-import {
-  formatReadingPositionLabel,
-  loadReadingPosition,
-} from "../lib/bible";
 import type { Space } from "../types";
-import { maxMembersForSpace, spaceKindLabel } from "../types";
+import { spaceKindLabel } from "../types";
 import { formatMeetingWhen, soonestUpcoming } from "../lib/meetingCalendar";
 import { MonthCalendar } from "../components/MonthCalendar";
+import { StudyColorControl } from "../components/StudyColorControl";
+import { isPersonalStudy } from "../lib/study";
+import { isSpaceGuest } from "../lib/sync";
+import { formatQueueLabel } from "../lib/studyQueue";
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -34,7 +28,7 @@ export function Dashboard() {
   const isLoading = useAppStore((s) => s.isLoading) && liveSpaces === undefined;
   const error = useAppStore((s) => s.error);
   const initialize = useAppStore((s) => s.initialize);
-  const { mode: onlineMode } = useOnlineMode();
+  const setActiveStudy = useAppStore((s) => s.setActiveStudy);
 
   useEffect(() => {
     void initialize();
@@ -70,34 +64,12 @@ export function Dashboard() {
       window.removeEventListener("ds-pending-join", openPendingFromHandoff);
   }, [navigate]);
 
-  const continueReading = (() => {
-    const pos = loadReadingPosition();
-    if (!pos) return null;
-    return formatReadingPositionLabel(pos);
-  })();
-
-  /** Most recently active group (list is activity-sorted in store; live query may differ). */
-  const lastSpace = useMemo(() => {
-    if (spaces.length === 0) return null;
-    return [...spaces].sort((a, b) =>
-      lastActivityIso(b).localeCompare(lastActivityIso(a)),
-    )[0]!;
-  }, [spaces]);
-
-  const openPrayers = useLiveOpenPrayerSummary();
-  const prayerSpace =
-    openPrayers && openPrayers.count > 0
-      ? (spaces.find((s) => s.id === openPrayers.spaceId) ?? null)
-      : null;
-
-  const showNextUp = Boolean(lastSpace) || Boolean(prayerSpace);
-
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-2xl">Your groups</h2>
+        <h2 className="text-2xl">Your studies</h2>
         <p className="text-sm text-muted mt-1">
-          New group, or join one you were invited to. Notes stay on this phone.
+          Your own reading, plus each group. Notes stay on this phone.
         </p>
       </div>
 
@@ -105,37 +77,25 @@ export function Dashboard() {
 
       {(() => {
         const next = spaces.length > 0 ? soonestUpcoming(spaces) : null;
-        if (!next && !continueReading) return null;
+        if (!next) return null;
         return (
-          <div className="space-y-2">
-            {next && (
-              <Link
-                to={`/space/${next.spaceId}`}
-                className="block touch-manipulation"
-              >
-                <Card className="border-primary/30 bg-primary/5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                    Next meeting
-                  </p>
-                  <p className="text-base font-medium text-primary mt-1">
-                    {formatMeetingWhen(next.face.day, next.face.startTime)}
-                  </p>
-                  <p className="text-sm text-muted mt-0.5">
-                    {next.spaceName}
-                    {next.place ? ` · ${next.place}` : ""}
-                  </p>
-                </Card>
-              </Link>
-            )}
-            {continueReading && (
-              <Link
-                to="/bible"
-                className="block text-sm text-primary touch-manipulation underline-offset-2 hover:underline"
-              >
-                Continue in {continueReading}.
-              </Link>
-            )}
-          </div>
+          <Link
+            to={`/space/${next.spaceId}`}
+            className="block touch-manipulation"
+          >
+            <Card className="border-primary/30 bg-primary/5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                Next meeting
+              </p>
+              <p className="text-base font-medium text-primary mt-1">
+                {formatMeetingWhen(next.face.day, next.face.startTime)}
+              </p>
+              <p className="text-sm text-muted mt-0.5">
+                {next.spaceName}
+                {next.place ? ` · ${next.place}` : ""}
+              </p>
+            </Card>
+          </Link>
         );
       })()}
 
@@ -147,7 +107,7 @@ export function Dashboard() {
           onClick={() => navigate("/new")}
         >
           <Plus className="h-5 w-5" aria-hidden />
-          New group
+          New study
         </Button>
         <Button
           variant="secondary"
@@ -159,72 +119,6 @@ export function Dashboard() {
           Join a group
         </Button>
       </div>
-      )}
-
-      {spaces.length > 0 && showNextUp && (
-        <section className="space-y-2" aria-label="Next up">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted px-0.5">
-            Next up
-          </h3>
-          <div className="-mx-0.5 overflow-x-auto pb-0.5">
-            <ul className="flex gap-2 min-w-min px-0.5">
-              {lastSpace && (
-                <li>
-                  <Link
-                    to={`/space/${lastSpace.id}`}
-                    className={[
-                      "inline-flex items-center gap-2 rounded-2xl border border-border/90",
-                      "bg-surface/95 px-3 py-2.5 touch-manipulation",
-                      "hover:border-primary/35 hover:bg-primary/5 active:scale-[0.98]",
-                      "max-w-[14rem]",
-                    ].join(" ")}
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Users className="h-4 w-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 text-left">
-                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                        Last group
-                      </span>
-                      <span className="block text-sm font-medium text-primary truncate">
-                        {lastSpace.name}
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              )}
-              {prayerSpace && openPrayers && (
-                <li>
-                  <Link
-                    to={`/space/${prayerSpace.id}`}
-                    state={{ openPrayer: true }}
-                    className={[
-                      "inline-flex items-center gap-2 rounded-2xl border border-primary/25",
-                      "bg-primary/8 px-3 py-2.5 touch-manipulation",
-                      "hover:border-primary/40 active:scale-[0.98]",
-                      "max-w-[14rem]",
-                    ].join(" ")}
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-                      <HandHeart className="h-4 w-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 text-left">
-                      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                        Prayer
-                      </span>
-                      <span className="block text-sm font-medium text-primary truncate">
-                        {openPrayers.count} open
-                        {prayerSpace.name
-                          ? ` · ${prayerSpace.name}`
-                          : ""}
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              )}
-            </ul>
-          </div>
-        </section>
       )}
 
       {error && (
@@ -269,7 +163,7 @@ export function Dashboard() {
           <div className="flex flex-col gap-2 max-w-xs mx-auto w-full">
             <Button onClick={() => navigate("/new")}>
               <Plus className="h-5 w-5" aria-hidden />
-              New group
+              New study
             </Button>
             <Button variant="secondary" onClick={() => navigate("/join")}>
               <UserPlus className="h-5 w-5" aria-hidden />
@@ -280,55 +174,27 @@ export function Dashboard() {
       )}
 
       <ul className="space-y-3">
-        {spaces.map((space) => {
-          const n = space.members.length;
-          const max = maxMembersForSpace(space.spaceKind);
-          return (
+        {[...spaces]
+          .sort((a, b) => {
+            const aPersonal = isPersonalStudy(a) ? 0 : 1;
+            const bPersonal = isPersonalStudy(b) ? 0 : 1;
+            if (aPersonal !== bPersonal) return aPersonal - bPersonal;
+            return lastActivityIso(b).localeCompare(lastActivityIso(a));
+          })
+          .map((space) => (
             <li key={space.id}>
-              <Link
-                to={`/space/${space.id}`}
-                className="block touch-manipulation"
-              >
-                <Card className="cursor-pointer transition-all duration-150 hover:border-primary/40 hover:shadow-md hover:-translate-y-px active:scale-[0.99] active:translate-y-0">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <h3 className="text-lg font-semibold truncate text-primary">
-                          {space.name}
-                        </h3>
-                        <GroupLinkBadge
-                          sync={space.sync}
-                          onlineMode={onlineMode}
-                        />
-                      </div>
-                      <p className="text-sm text-muted mt-1">
-                        {n === 0
-                          ? "No people listed yet"
-                          : `${n} of ${max} people`}
-                        {space.sessions.length > 0
-                          ? ` · ${space.sessions.length} meeting${space.sessions.length === 1 ? "" : "s"}`
-                          : ""}
-                      </p>
-                      {n > 0 && (
-                        <p className="text-xs text-muted mt-0.5 truncate">
-                          {space.members.map((m) => m.name).join(", ")}
-                        </p>
-                      )}
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs text-muted">
-                        {formatIsoDay(lastActivityIso(space))}
-                      </p>
-                      <p className="text-[11px] text-muted/80 mt-0.5">
-                        {activityLabel(space)}
-                      </p>
-                    </div>
-                  </div>
-                </Card>
-              </Link>
+              <StudyCard
+                space={space}
+                onOpenRead={() => {
+                  setActiveStudy(space.id);
+                  navigate("/bible");
+                }}
+                onRename={() =>
+                  navigate(`/space/${space.id}`, { state: { openRename: true } })
+                }
+              />
             </li>
-          );
-        })}
+          ))}
       </ul>
 
       {spaces.length > 0 && (
@@ -383,23 +249,87 @@ export function SpaceKindBadge({
   );
 }
 
-function formatIsoDay(iso: string): string {
-  try {
-    return format(parseISO(iso), "MMM d");
-  } catch {
-    return iso.slice(0, 10);
-  }
-}
+function StudyCard({
+  space,
+  onOpenRead,
+  onRename,
+}: {
+  space: Space;
+  onOpenRead: () => void;
+  onRename: () => void;
+}) {
+  const personal = isPersonalStudy(space);
+  const queue = useLiveStudyQueue(space.id);
+  const noteCount = useLiveStudyNoteCount(space.id, personal);
+  const nextReading = (queue ?? [])[0];
+  const meeting = soonestUpcoming([space]);
+  const leftOff = space.readingPlace?.bookId
+    ? formatQueueLabel({
+        bookName: space.readingPlace.bookName || space.readingPlace.bookId,
+        chapter: space.readingPlace.chapter,
+      })
+    : null;
+  const notesLabel =
+    noteCount == null
+      ? "Notes"
+      : `${noteCount} note${noteCount === 1 ? "" : "s"}`;
 
-function activityLabel(space: Space): string {
-  const last = lastActivityIso(space);
-  try {
-    const d = parseISO(last);
-    if (space.sessions.length === 0) {
-      return "Created " + formatDistanceToNow(d, { addSuffix: true });
-    }
-    return "Active " + formatDistanceToNow(d, { addSuffix: true });
-  } catch {
-    return "";
-  }
+  return (
+    <Card className="transition-all duration-150 hover:border-primary/40 hover:shadow-md">
+      <div className="flex items-start gap-3">
+        <StudyColorControl space={space} compact />
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-start justify-between gap-2">
+            <Link
+              to={`/space/${space.id}`}
+              className="min-w-0 touch-manipulation"
+            >
+              <h3 className="text-lg font-semibold truncate text-primary">
+                {space.name}
+              </h3>
+            </Link>
+            {!isSpaceGuest(space.sync) && (
+              <Button
+                variant="secondary"
+                className="!py-2 !px-3 text-sm shrink-0"
+                onClick={onRename}
+              >
+                Rename
+              </Button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onOpenRead}
+            className="block text-left text-sm text-primary underline-offset-2 hover:underline touch-manipulation"
+            data-left-off={leftOff ?? "none"}
+          >
+            Left off · {leftOff ?? "Not opened yet"}
+          </button>
+          {nextReading ? (
+            <p className="text-sm text-muted" data-next-reading={formatQueueLabel(nextReading)}>
+              Next · {formatQueueLabel(nextReading)}
+            </p>
+          ) : null}
+          {meeting ? (
+            <Link
+              to={`/space/${space.id}`}
+              className="block text-sm text-muted touch-manipulation"
+              data-next-meeting
+            >
+              {formatMeetingWhen(meeting.face.day, meeting.face.startTime)}
+              {meeting.place ? ` · ${meeting.place}` : ""}
+            </Link>
+          ) : null}
+          <Link
+            to={`/notes?study=${space.id}`}
+            className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-2 hover:underline touch-manipulation"
+            data-note-count={noteCount ?? 0}
+          >
+            {notesLabel}
+          </Link>
+        </div>
+      </div>
+    </Card>
+  );
 }

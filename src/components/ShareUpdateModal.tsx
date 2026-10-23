@@ -22,6 +22,7 @@ import {
   decryptPersonalNotes,
   mergePersonalNotes,
   parsePersonalBackupInput,
+  restoreStudyBundle,
 } from "../lib/keys/personalBackup";
 import { getStoredAccountKey } from "../lib/keys/accountKey";
 import {
@@ -156,6 +157,8 @@ export function ShareUpdateModal({
         sessionTotal += pack.sessions?.length ?? result.addedSessions;
         lastSpaceId = result.space.id;
       }
+      await restoreStudyBundle(personal);
+      await useAppStore.getState().loadSpaces();
       if (personal.privateNotes?.length) {
         await mergePersonalNotes(personal.privateNotes);
       } else if (personal.privateNotesIncluded && personal.privateNotesEnc) {

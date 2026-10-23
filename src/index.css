@@ -249,6 +249,10 @@ html:not(.dark) {
    */
   .bible-reader {
     isolation: isolate;
+    /* Study hue. Outline only — do not set overflow here. */
+    --study-hue: 42;
+    outline: 3px solid hsl(var(--study-hue) 72% 38%);
+    outline-offset: 2px;
     background:
       linear-gradient(
         180deg,
@@ -270,6 +274,19 @@ html:not(.dark) {
    * With-video mode must keep overflow visible so the plate can pin
    * for the FULL chapter height — not just the first screen.
    */
+  html.dark .bible-reader {
+    outline-color: hsl(var(--study-hue) 78% 66%);
+  }
+
+  /* Studied chapter in the chapter list. Inset so a scrolling list does not clip it. */
+  .study-chapter-ring {
+    box-shadow: inset 0 0 0 3px hsl(var(--study-hue) 72% 38%);
+  }
+
+  html.dark .study-chapter-ring {
+    box-shadow: inset 0 0 0 3px hsl(var(--study-hue) 78% 66%);
+  }
+
   .bible-reader--with-video {
     overflow: visible !important;
     background-color: var(--color-reader);

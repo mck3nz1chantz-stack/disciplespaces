@@ -1,7 +1,9 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, hydrateSpace, hydrateSpaces, type SpaceRow } from "../lib/db";
 import type {
+  ChapterMark,
   PrayerBoardEntry,
+  StudyQueueItem,
   PrayerBoardScope,
   PrivateNote,
   Session,
@@ -38,6 +40,28 @@ export function useLiveSpace(
     const row = await db.spaces.get(spaceId);
     if (!row) return null;
     return hydrateSpace(row);
+  }, [spaceId]);
+}
+
+/** What’s next for one study, first item first. Empty until you add one. */
+export function useLiveStudyQueue(
+  spaceId: string | undefined,
+): StudyQueueItem[] | undefined {
+  return useLiveQuery(async () => {
+    if (!spaceId) return [];
+    const rows = await db.studyQueue.where("spaceId").equals(spaceId).toArray();
+    rows.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    return rows;
+  }, [spaceId]);
+}
+
+/** Studied chapters for one study. Empty until the reader marks one. */
+export function useLiveChapterMarks(
+  spaceId: string | undefined,
+): ChapterMark[] | undefined {
+  return useLiveQuery(async () => {
+    if (!spaceId) return [];
+    return db.chapterMarks.where("spaceId").equals(spaceId).toArray();
   }, [spaceId]);
 }
 
@@ -133,6 +157,20 @@ export function useLiveChapterVerseNotes(
       .filter((n) => typeof n.verseKey === "string" && n.verseKey.startsWith(prefix))
       .toArray();
   }, [version, bookId, chapter]);
+}
+
+/** Notes filed on one study. A note with no study counts on My study. */
+export function useLiveStudyNoteCount(
+  spaceId: string | undefined,
+  personal: boolean,
+): number | undefined {
+  return useLiveQuery(async () => {
+    if (!spaceId) return 0;
+    const notes = await db.privateNotes.toArray();
+    return notes.filter((note) =>
+      personal ? !note.spaceId || note.spaceId === spaceId : note.spaceId === spaceId,
+    ).length;
+  }, [spaceId, personal]);
 }
 
 /** Count of private notes for a session (badge), optional section. */

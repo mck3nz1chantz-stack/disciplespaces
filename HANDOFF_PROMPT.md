@@ -12,21 +12,25 @@ You are continuing **DiscipleSpaces** (operator may say DisciplesApp). Same prod
 **Live site:** https://disciple-spaces.pages.dev  
 **Dev:** `cd` the code path and `npm run dev` (Vite, often http://127.0.0.1:5173/).
 
-Read first: `HANDOFF_STATE.json`, this file, `docs/drafts/reader-and-group-2026-10.md`, `docs/drafts/refinement-2026-10.md`.
+Read first: `HANDOFF_STATE.json`, this file, `docs/drafts/study-first-2026-10.md`. Older drafts (`reader-and-group-2026-10.md`, `refinement-2026-10.md`) describe what is already built.
 
 ## This chat’s job
 
-R1–R5 from `docs/drafts/reader-and-group-2026-10.md` are already in the tree. Do not start another reader-and-group slice. Do not rescaffold. Do not add a fifth bottom tab.
+A1 through A5 are coded locally and are not deployed. Do not deploy unless Kenzi asks. Do not resume two-phone share.
 
-The open check is two-phone share accept. Do not call sharing done without a live test on two phones.
+B1, B2, and B3 are coded locally and are not deployed. Read `docs/drafts/beginner-study-2026-10.md`. Do not rebuild them. Do not add a cross-reference library unless Kenzi names that slice.
+
+R1–R5 are already in the tree. Do not start another reader-and-group slice. Do not rescaffold. Do not add a fifth bottom tab.
+
+Two-phone share stays unaccepted. It is sidelined until the study tool is in daily use. Do not call sharing done without a live test on two phones. Do not make that test the next build.
 
 ## Locked
 
 - This phone is the copy you can always open. A group shares only after the host opens a room. Private notes never go on the room.
-- Bottom bar: **Groups**, **Read**, **Notes**, **More**. Header is the app name and Online / Offline.
-- **More → Save a copy** writes every group, its meetings, and notes into one file. **Open a copy** restores every group. A note already on the phone is kept. A group file has no notes.
+- Bottom bar: **Read**, **Studies**, **Notes**, **More**. Read opens first. The header is the app name and the active study. Online / Offline is on More and inside Group sharing.
+- **More → Save a copy** writes every group, its meetings, notes, color, place, aim, marks, and what’s-next queue into one file. **Open a copy** restores them. A note already on the phone is kept. A group file has no notes, marks, or queue.
 - Join link is `https://disciple-spaces.pages.dev/join?code=ABCD-EF`.
-- Verse notes: one note per exact reference, pencil on the verse, Notes tab.
+- Verse notes: one note per study per exact reference. The scripture key is `version|bookId|chapter|start|end`. The study is `spaceId`. Notes chips filter by study. A reference opens Read in that study.
 - Read search: current translation, collapsed results, **Go to verse**.
 - Meetings already have a day, an optional time, weekly, Upcoming, and Past. Groups home shows the soonest meeting. Leave that behavior in place.
 - Bible video plate stays as locked in `docs/final/bible-reader-scroll-video-plate.md`.

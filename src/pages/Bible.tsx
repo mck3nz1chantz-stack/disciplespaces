@@ -11,6 +11,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   BookMarked,
   BookOpen,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -24,8 +25,17 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useLiveChapterVerseNotes } from "../hooks/useLiveDb";
-import { makeVerseKey, noteCoveringVerse, verseAnchor } from "../lib/verseNote";
+import {
+  useLiveChapterMarks,
+  useLiveChapterVerseNotes,
+  useLiveStudyQueue,
+} from "../hooks/useLiveDb";
+import {
+  formatReferenceSentence,
+  makeVerseKey,
+  noteCoveringVerse,
+  verseAnchor,
+} from "../lib/verseNote";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { BibleReaderVideoBg } from "../components/BibleReaderVideoBg";
@@ -77,7 +87,23 @@ import { formatPassageRef, passageFromSelection } from "../lib/passages";
 import { useAppStore } from "../stores/useAppStore";
 import { useBibleStore } from "../stores/useBibleStore";
 import { sessionDisplayTitle } from "../lib/sessionTitle";
-import { PRIVATE_SECTION, type Passage, type Session } from "../types";
+import { PRIVATE_SECTION, type Passage, type PrivateNote, type Session } from "../types";
+import { StudyColorControl } from "../components/StudyColorControl";
+import { EditStudied } from "../components/EditStudied";
+import { EditWhatsNext } from "../components/EditWhatsNext";
+import {
+  offerMarkTheseStudied,
+  offerTakeOffWhatsNext,
+} from "../components/markStudiedOffer";
+import { setChapterStudied } from "../lib/chapterMarks";
+import { formatQueueLabel, type StudyQueueItem } from "../lib/studyQueue";
+import {
+  isPersonalStudy,
+  normalizeHue,
+  orderedStudies,
+  PERSONAL_HUE,
+  studyColor,
+} from "../lib/study";
 
 type Panel = "read" | "search";
 
@@ -94,6 +120,10 @@ export function Bible() {
   const addPassageToSession = useAppStore((s) => s.addPassageToSession);
   const addPrivateNote = useAppStore((s) => s.addPrivateNote);
   const saveVerseNote = useAppStore((s) => s.saveVerseNote);
+  const isLoading = useAppStore((s) => s.isLoading);
+  const activeStudyId = useAppStore((s) => s.activeStudyId);
+  const setActiveStudy = useAppStore((s) => s.setActiveStudy);
+  const setStudyReadingPlace = useAppStore((s) => s.setStudyReadingPlace);
   const logContext = useBibleStore((s) => s.logContext);
   const setLogContext = useBibleStore((s) => s.setLogContext);
   const clearLogContext = useBibleStore((s) => s.clearLogContext);
@@ -111,6 +141,24 @@ export function Bible() {
 
   const versionMeta = bibleVersionMeta(bibleVersion);
   const chapterNotes = useLiveChapterVerseNotes(bibleVersion, bookId, chapter);
+  const activeStudy = spaces.find((space) => space.id === activeStudyId) ?? null;
+  const studyChips = orderedStudies(spaces);
+  const frameColor = studyColor(normalizeHue(activeStudy?.colorHue) ?? PERSONAL_HUE);
+  const studyNotes = useMemo(() => {
+    const notes = chapterNotes ?? [];
+    if (!activeStudyId) return notes;
+    return notes.filter(
+      (note) => !note.spaceId || note.spaceId === activeStudyId,
+    );
+  }, [chapterNotes, activeStudyId]);
+
+  function noteForThisStudy(notes: PrivateNote[], key: string) {
+    return (
+      notes.find(
+        (note) => note.verseKey === key && note.spaceId === activeStudyId,
+      ) ?? notes.find((note) => note.verseKey === key && !note.spaceId)
+    );
+  }
 
   useEffect(() => {
     const ver = searchParams.get("ver");
@@ -121,6 +169,10 @@ export function Bible() {
 
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const [chapterPickerOpen, setChapterPickerOpen] = useState(false);
+  const [editStudiedOpen, setEditStudiedOpen] = useState(false);
+  const [whatsNextOpen, setWhatsNextOpen] = useState(false);
+  const chapterMarks = useLiveChapterMarks(activeStudyId ?? undefined);
+  const studyQueue = useLiveStudyQueue(activeStudyId ?? undefined);
   const [spacePickerOpen, setSpacePickerOpen] = useState(false);
   const [panel, setPanel] = useState<Panel>("read");
 
@@ -172,8 +224,15 @@ export function Bible() {
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(
     null,
   );
+  /** Book and chapter the plain reference sentence belongs to. */
+  const referenceLandingRef = useRef<string | null>(null);
+  const [referenceLine, setReferenceLine] = useState<string | null>(null);
   const openNoteOnArrivalRef = useRef(false);
   const didRestorePlaceRef = useRef(false);
+  /** Place version is applied once per study. A later KJV/WEB tap must stick. */
+  const versionAppliedForStudyRef = useRef<string | null>(null);
+  /** Chip switch clears ?space= on the next paint. Don't snap back to the old one. */
+  const skipSpaceSyncRef = useRef(false);
   const prefillVerseKeyRef = useRef<string | null>(null);
   /** Skip chapter gate on the very first load of this mount. */
   const isFirstChapterLoadRef = useRef(true);
@@ -354,10 +413,38 @@ export function Bible() {
     };
   }, [clearLogContext]);
 
-  // Load index + restore position (per version)
+  // Load index + restore this study's place (URL jump still wins)
   useEffect(() => {
+    if (isLoading) return;
+    const spaceParam = searchParams.get("space");
+    if (skipSpaceSyncRef.current) {
+      if (!spaceParam) skipSpaceSyncRef.current = false;
+    } else if (
+      spaceParam &&
+      spaces.some((space) => space.id === spaceParam) &&
+      spaceParam !== activeStudyId
+    ) {
+      setActiveStudy(spaceParam);
+      return;
+    }
+    if (!activeStudyId || spaces.length === 0) return;
+
     const urlVer = searchParams.get("ver");
-    if ((urlVer === "kjv" || urlVer === "web") && urlVer !== bibleVersion) return;
+    const study = spaces.find((space) => space.id === activeStudyId);
+    const placeVersion = study?.readingPlace?.version;
+    const arriving = versionAppliedForStudyRef.current !== activeStudyId;
+    if (arriving) versionAppliedForStudyRef.current = activeStudyId;
+    const desiredVersion =
+      urlVer === "kjv" || urlVer === "web"
+        ? urlVer
+        : arriving && (placeVersion === "web" || placeVersion === "kjv")
+          ? placeVersion
+          : bibleVersion;
+    if (desiredVersion !== bibleVersion) {
+      setBibleVersion(desiredVersion);
+      saveReadingVersion(desiredVersion);
+      return;
+    }
     if (didRestorePlaceRef.current) return;
 
     let cancelled = false;
@@ -369,25 +456,49 @@ export function Bible() {
         if (cancelled || didRestorePlaceRef.current) return;
         didRestorePlaceRef.current = true;
         setBooks(list);
-        const saved = loadReadingPosition();
+        const place = study?.readingPlace;
+        const saved = place?.bookId
+          ? {
+              bookId: place.bookId,
+              chapter: place.chapter,
+              bookName: place.bookName,
+            }
+          : study && isPersonalStudy(study)
+            ? loadReadingPosition()
+            : null;
         const jumpBook = searchParams.get("b");
         const jumpChapter = Number(searchParams.get("c"));
         const jumpStart = Number(searchParams.get("sv"));
         const jumpEnd = Number(searchParams.get("ev"));
         if (jumpBook && list.some((b) => b.id === jumpBook)) {
           const meta = list.find((b) => b.id === jumpBook)!;
-          setBookId(jumpBook);
-          setChapter(
-            Math.min(
-              Math.max(1, Number.isFinite(jumpChapter) ? jumpChapter : 1),
-              meta.chapterCount,
-            ),
+          const landedChapter = Math.min(
+            Math.max(1, Number.isFinite(jumpChapter) ? jumpChapter : 1),
+            meta.chapterCount,
           );
-          if (Number.isFinite(jumpStart) && jumpStart > 0) {
-            const end = Number.isFinite(jumpEnd) && jumpEnd > 0 ? jumpEnd : jumpStart;
+          setBookId(jumpBook);
+          setChapter(landedChapter);
+          const start =
+            Number.isFinite(jumpStart) && jumpStart > 0 ? jumpStart : undefined;
+          const end =
+            start != null
+              ? Number.isFinite(jumpEnd) && jumpEnd > 0
+                ? jumpEnd
+                : start
+              : undefined;
+          referenceLandingRef.current = `${jumpBook}|${landedChapter}`;
+          setReferenceLine(
+            formatReferenceSentence({
+              bookName: meta.name,
+              chapter: landedChapter,
+              startVerse: start,
+              endVerse: end,
+            }),
+          );
+          if (start != null && end != null) {
             pendingSelectionRef.current = {
-              start: Math.min(jumpStart, end),
-              end: Math.max(jumpStart, end),
+              start: Math.min(start, end),
+              end: Math.max(start, end),
             };
             openNoteOnArrivalRef.current = searchParams.get("note") === "1";
           }
@@ -428,7 +539,15 @@ export function Bible() {
     return () => {
       cancelled = true;
     };
-  }, [bibleVersion, searchParams, setSearchParams]);
+  }, [
+    activeStudyId,
+    bibleVersion,
+    isLoading,
+    searchParams,
+    setActiveStudy,
+    setSearchParams,
+    spaces,
+  ]);
 
   // Load chapter when book/chapter/version changes (+ soft handoff)
   useEffect(() => {
@@ -459,6 +578,14 @@ export function Bible() {
           chapter,
           bookName: data.book.name,
         });
+        if (activeStudyId) {
+          void setStudyReadingPlace(activeStudyId, {
+            version: bibleVersion,
+            bookId,
+            chapter,
+            bookName: data.book.name,
+          });
+        }
         const pending = pendingSelectionRef.current;
         if (pending) {
           pendingSelectionRef.current = null;
@@ -511,7 +638,25 @@ export function Bible() {
         chapterGateTimerRef.current = null;
       }
     };
-  }, [bookId, chapter, loadingIndex, bibleVersion, books, prefersReducedMotion]);
+  }, [
+    activeStudyId,
+    bookId,
+    chapter,
+    loadingIndex,
+    bibleVersion,
+    books,
+    prefersReducedMotion,
+    setStudyReadingPlace,
+  ]);
+
+  useEffect(() => {
+    const landing = referenceLandingRef.current;
+    if (!landing) return;
+    if (landing !== `${bookId}|${chapter}`) {
+      referenceLandingRef.current = null;
+      setReferenceLine(null);
+    }
+  }, [bookId, chapter]);
 
   function handleVersionChange(next: BibleVersionId) {
     const v = normalizeBibleVersion(next);
@@ -554,7 +699,7 @@ export function Bible() {
       nextBookId: string,
       nextChapter: number,
       verse?: number,
-      opts?: { enterFocus?: boolean },
+      opts?: { enterFocus?: boolean; endVerse?: number },
     ) => {
       setBookId(nextBookId);
       setChapter(nextChapter);
@@ -563,11 +708,21 @@ export function Bible() {
       setChapterPickerOpen(false);
       setSelectStart(null);
       setSelectEnd(null);
+      referenceLandingRef.current = null;
+      setReferenceLine(null);
       if (verse) {
-        pendingSelectionRef.current = { start: verse, end: verse };
-        setSelectStart(verse);
-        setSelectEnd(verse);
-        setHighlightVerse(verse);
+        const end = opts?.endVerse && opts.endVerse > 0 ? opts.endVerse : verse;
+        const start = Math.min(verse, end);
+        const last = Math.max(verse, end);
+        const samePlace = nextBookId === bookId && nextChapter === chapter;
+        pendingSelectionRef.current = samePlace
+          ? null
+          : { start, end: last };
+        setSelectStart(start);
+        setSelectEnd(last);
+        setHighlightVerse(start);
+      } else {
+        pendingSelectionRef.current = null;
       }
       if (opts?.enterFocus) {
         setFocusMode(true);
@@ -577,8 +732,41 @@ export function Bible() {
         block: "start",
       });
     },
-    [prefersReducedMotion],
+    [bookId, chapter, prefersReducedMotion],
   );
+
+  /** Open a queued reading. Leaves it on the list. */
+  function openQueueItem(item: StudyQueueItem) {
+    const start = item.startVerse;
+    const end = item.endVerse ?? item.startVerse;
+    const samePlace = item.bookId === bookId && item.chapter === chapter;
+    if (samePlace) {
+      if (start && end) {
+        const a = Math.min(start, end);
+        const b = Math.max(start, end);
+        setSelectStart(a);
+        setSelectEnd(b);
+        setHighlightVerse(a);
+      }
+      pendingSelectionRef.current = null;
+    } else if (start && end) {
+      const a = Math.min(start, end);
+      const b = Math.max(start, end);
+      pendingSelectionRef.current = { start: a, end: b };
+      setHighlightVerse(a);
+    } else {
+      pendingSelectionRef.current = null;
+    }
+    setBookId(item.bookId);
+    setChapter(item.chapter);
+    setPanel("read");
+    setBookPickerOpen(false);
+    setChapterPickerOpen(false);
+    readerTopRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "start",
+    });
+  }
 
   function startAtBeginning() {
     const first = books[0];
@@ -684,6 +872,8 @@ export function Bible() {
       books.findIndex((b) => b.id === bookId) < books.length - 1);
 
   function handleVerseTap(verseNum: number) {
+    referenceLandingRef.current = null;
+    setReferenceLine(null);
     if (selectStart == null || (selectStart != null && selectEnd != null)) {
       // Start fresh selection
       setSelectStart(verseNum);
@@ -769,6 +959,8 @@ export function Bible() {
   }
 
   function clearSelection() {
+    referenceLandingRef.current = null;
+    setReferenceLine(null);
     setSelectStart(null);
     setSelectEnd(null);
     setPrivateNoteDraft("");
@@ -782,7 +974,7 @@ export function Bible() {
     if (!currentBook) return;
     if (spaces.length === 0) {
       toast.error("Create a space first to log passages");
-      navigate("/");
+      navigate("/studies");
       return;
     }
 
@@ -792,7 +984,7 @@ export function Bible() {
     setLogOpen(true);
   }
 
-  function handleLogged(session: Session) {
+  function handleLogged(session: Session, passage?: Passage) {
     clearSelection();
     toast.success("Passage logged", {
       description: canOneTapLog
@@ -803,6 +995,8 @@ export function Bible() {
         onClick: () => navigate(`/space/${session.spaceId}`),
       },
     });
+    const logged = passage ?? session.passagesStudied.at(-1);
+    if (logged) void offerMarkTheseStudied(session.spaceId, [logged]);
   }
 
   /** One-tap when session is pre-selected; otherwise open the full modal. */
@@ -813,7 +1007,7 @@ export function Bible() {
     if (!currentBook) return;
     if (spaces.length === 0) {
       toast.error("Create a space first to log passages");
-      navigate("/");
+      navigate("/studies");
       return;
     }
 
@@ -846,7 +1040,7 @@ export function Bible() {
         });
       }
 
-      handleLogged(updated);
+      handleLogged(updated, passage);
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Could not log passage",
@@ -859,18 +1053,20 @@ export function Bible() {
   useEffect(() => {
     const key = prefillVerseKeyRef.current;
     if (!key || !chapterNotes) return;
-    const existing = chapterNotes.find((n) => n.verseKey === key);
+    const existing = noteForThisStudy(chapterNotes, key);
     if (existing) setPrivateNoteDraft(existing.content);
     prefillVerseKeyRef.current = null;
   }, [chapterNotes]);
 
   function openExistingVerseNote(verseNum: number) {
-    const note = noteCoveringVerse(chapterNotes ?? [], verseNum);
+    const note = noteCoveringVerse(studyNotes, verseNum);
     if (!note?.verse) return;
     setSelectStart(note.verse.startVerse);
     setSelectEnd(note.verse.endVerse);
     setPrivateNoteDraft(note.content);
     setShowPrivateNote(true);
+    referenceLandingRef.current = `${bookId}|${chapter}`;
+    setReferenceLine(formatReferenceSentence(note.verse));
   }
 
   function openNoteComposer() {
@@ -882,19 +1078,15 @@ export function Bible() {
       startVerse: selectionRange.start,
       endVerse: selectionRange.end,
     });
-    const existing = (chapterNotes ?? []).find((n) => n.verseKey === key);
+    const existing = noteForThisStudy(chapterNotes ?? [], key);
     setPrivateNoteDraft(existing?.content ?? "");
     setShowPrivateNote(true);
   }
 
-  /** Note attached to the selected verse. Stays on this phone. */
-  async function handleSavePrivateNoteOnly() {
-    const text = privateNoteDraft.trim();
-    if (!text) {
-      toast.error("Write a note first");
-      return;
-    }
-    if (!currentBook || !selectionRange) return;
+  /** Save the selected verses on the active study. Words are optional. */
+  async function handleSaveThisVerse() {
+    if (!currentBook || !selectionRange || savingNote) return;
+    const text = showPrivateNote ? privateNoteDraft.trim() : "";
 
     setSavingNote(true);
     try {
@@ -908,9 +1100,12 @@ export function Bible() {
           endVerse: selectionRange.end,
         }),
         content: text,
+        spaceId: activeStudyId ?? undefined,
       });
       setShowPrivateNote(false);
-      toast.success("Note saved on this phone");
+      toast.success(
+        text ? "Note saved on this phone" : "Verse saved on this phone",
+      );
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Could not save note",
@@ -938,7 +1133,36 @@ export function Bible() {
     if (looksLikeRef) {
       const ref = await parseReference(q);
       if (ref) {
-        goTo(ref.bookId, ref.chapter, ref.verse);
+        let startVerse = ref.verse;
+        let endVerse = ref.endVerse;
+        if (startVerse) {
+          try {
+            const data = await getChapter(
+              ref.bookId,
+              ref.chapter,
+              bibleVersion,
+            );
+            const max = data.verses.length;
+            if (max > 0 && startVerse > max) {
+              startVerse = undefined;
+              endVerse = undefined;
+            } else if (endVerse && max > 0 && endVerse > max) {
+              endVerse = max;
+            }
+          } catch {
+            // Open the reference even if the chapter could not be counted.
+          }
+        }
+        goTo(ref.bookId, ref.chapter, startVerse, { endVerse });
+        referenceLandingRef.current = `${ref.bookId}|${ref.chapter}`;
+        setReferenceLine(
+          formatReferenceSentence({
+            bookName: ref.bookName,
+            chapter: ref.chapter,
+            startVerse,
+            endVerse,
+          }),
+        );
         setSearchResults([]);
         setSearchTruncated(false);
         setSearchError(null);
@@ -1002,6 +1226,60 @@ export function Bible() {
     if (nextSession) setSpacePickerOpen(false);
   }
 
+  function switchStudy(id: string) {
+    if (!id || id === activeStudyId) return;
+    const next = spaces.find((space) => space.id === id);
+    if (!next) return;
+    skipSpaceSyncRef.current = true;
+    if (activeStudyId && bookId) {
+      void setStudyReadingPlace(activeStudyId, {
+        version: bibleVersion,
+        bookId,
+        chapter,
+        bookName: currentBook?.name,
+      });
+    }
+    setActiveStudy(id);
+    const place = next.readingPlace;
+    if (place?.bookId) {
+      const ver = place.version === "web" ? "web" : "kjv";
+      setBibleVersion(ver);
+      saveReadingVersion(ver);
+      setBookId(place.bookId);
+      setChapter(Math.max(1, place.chapter || 1));
+      continueLabelRef.current = place.bookName
+        ? `${place.bookName} ${place.chapter}`
+        : null;
+      setShowContinueHint(true);
+    } else {
+      setBibleVersion("kjv");
+      saveReadingVersion("kjv");
+      setBookId("john");
+      setChapter(1);
+      setShowContinueHint(false);
+    }
+    clearLogContext();
+    setSearchParams(
+      (prev) => {
+        const nextParams = new URLSearchParams(prev);
+        for (const key of [
+          "space",
+          "session",
+          "b",
+          "c",
+          "sv",
+          "ev",
+          "ver",
+          "note",
+        ]) {
+          nextParams.delete(key);
+        }
+        return nextParams;
+      },
+      { replace: true },
+    );
+  }
+
   function clearSpaceContext() {
     clearLogContext();
     setSearchParams(
@@ -1028,6 +1306,14 @@ export function Bible() {
       b.date.localeCompare(a.date),
     );
   }, [logContext.spaceId, spaces, sessions]);
+
+  useEffect(() => {
+    if (!activeStudyId) return;
+    const row = document.querySelector<HTMLButtonElement>(
+      `[data-study-id="${activeStudyId}"]`,
+    );
+    row?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activeStudyId]);
 
   if (loadingIndex) {
     return (
@@ -1056,6 +1342,14 @@ export function Bible() {
     );
   }
 
+  const studiedChapters = new Set(
+    (chapterMarks ?? [])
+      .filter((mark) => mark.bookId === bookId)
+      .map((mark) => mark.chapter),
+  );
+  const chapterIsStudied = studiedChapters.has(chapter);
+  const nextReading = (studyQueue ?? [])[0];
+
   const logButtonLabel = selectionRange
     ? `Log ${currentBook?.name} ${chapter}:${selectionRange.start}${selectionRange.end !== selectionRange.start ? `–${selectionRange.end}` : ""}`
     : canOneTapLog
@@ -1064,6 +1358,50 @@ export function Bible() {
 
   return (
     <div className="space-y-3" ref={readerTopRef}>
+      {!focusMode && studyChips.length > 0 && (
+        <div className="flex items-center gap-2">
+          <div
+            className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1"
+            role="tablist"
+            aria-label="Studies"
+          >
+            {studyChips.map((study) => {
+              const color = studyColor(
+                normalizeHue(study.colorHue) ?? PERSONAL_HUE,
+              );
+              const selected = study.id === activeStudyId;
+              return (
+                <button
+                  key={study.id}
+                  type="button"
+                  role="tab"
+                  data-study-id={study.id}
+                  aria-selected={selected}
+                  onClick={() => switchStudy(study.id)}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium touch-manipulation"
+                  style={
+                    selected
+                      ? {
+                          background: color.fill,
+                          borderColor: color.stroke,
+                          color: color.ink,
+                        }
+                      : {
+                          background: "transparent",
+                          borderColor: color.stroke,
+                          color: color.stroke,
+                        }
+                  }
+                >
+                  <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
+                  {study.name}
+                </button>
+              );
+            })}
+          </div>
+          {activeStudy ? <StudyColorControl space={activeStudy} /> : null}
+        </div>
+      )}
       {!focusMode && (
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -1071,7 +1409,7 @@ export function Bible() {
               <NavBreadcrumb
                 className="mb-1.5"
                 items={[
-                  { label: "Groups", to: "/" },
+                  { label: "Studies", to: "/studies" },
                   {
                     label: logContext.spaceName,
                     to: `/space/${logContext.spaceId}`,
@@ -1102,7 +1440,9 @@ export function Bible() {
                   Bible
                 </h2>
                 <p className="text-sm text-muted mt-0.5 leading-snug">
-                  Read · select verses · log to a group
+                  {activeStudy
+                    ? `Reading in ${activeStudy.name}`
+                    : "Read · select verses · write a note"}
                 </p>
               </>
             )}
@@ -1448,6 +1788,87 @@ export function Bible() {
                 <ChevronRight className="h-5 w-5" aria-hidden />
               </button>
             </div>
+            {!focusMode && activeStudyId && (
+              <div
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-sm"
+                data-position-line
+              >
+                <span className="text-muted">
+                  Left off · {currentBook?.name ?? "Chapter"} {chapter}
+                </span>
+                {nextReading ? (
+                  <button
+                    type="button"
+                    className="min-h-11 font-medium text-primary underline-offset-2 hover:underline"
+                    data-next-label={formatQueueLabel(nextReading)}
+                    onClick={() => openQueueItem(nextReading)}
+                  >
+                    Next · {formatQueueLabel(nextReading)}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="min-h-11 font-medium text-primary underline-offset-2 hover:underline"
+                    data-next-label="add"
+                    onClick={() => setWhatsNextOpen(true)}
+                  >
+                    Add what’s next
+                  </button>
+                )}
+                {nextReading ? (
+                  <button
+                    type="button"
+                    className="min-h-11 text-primary underline-offset-2 hover:underline"
+                    onClick={() => setWhatsNextOpen(true)}
+                  >
+                    Edit what’s next
+                  </button>
+                ) : null}
+              </div>
+            )}
+            {!focusMode && activeStudyId && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  aria-pressed={chapterIsStudied}
+                  onClick={() => {
+                    const marking = !chapterIsStudied;
+                    void setChapterStudied({
+                      spaceId: activeStudyId,
+                      bookId,
+                      chapter,
+                      studied: marking,
+                    }).then(() => {
+                      if (marking) {
+                        void offerTakeOffWhatsNext(activeStudyId, [
+                          { bookId, chapters: [chapter] },
+                        ]);
+                      }
+                    });
+                  }}
+                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-primary touch-manipulation"
+                  style={
+                    chapterIsStudied
+                      ? {
+                          borderColor: frameColor.stroke,
+                          background: frameColor.soft,
+                          color: frameColor.stroke,
+                        }
+                      : undefined
+                  }
+                >
+                  <Check className="h-4 w-4" aria-hidden />
+                  {chapterIsStudied ? "Studied" : "Mark studied"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditStudiedOpen(true)}
+                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border px-3 py-2 text-sm font-medium text-primary touch-manipulation"
+                >
+                  Edit studied
+                </button>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -1470,6 +1891,7 @@ export function Bible() {
             ]
               .filter(Boolean)
               .join(" ")}
+            style={{ ["--study-hue" as string]: String(frameColor.hue) }}
             aria-busy={loadingChapter}
             aria-label={
               currentBook
@@ -1502,6 +1924,14 @@ export function Bible() {
                 <p className="mt-1 font-serif text-lg text-muted tabular-nums">
                   Chapter {chapter}
                 </p>
+                {referenceLine ? (
+                  <p
+                    className="mt-3 text-sm font-sans text-muted"
+                    data-reference-sentence
+                  >
+                    {referenceLine}
+                  </p>
+                ) : null}
                 <div
                   className="mx-auto mt-4 h-px w-16 bg-gradient-to-r from-transparent via-accent/70 to-transparent"
                   aria-hidden
@@ -1533,7 +1963,7 @@ export function Bible() {
                     const active = highlightVerse === v.verse;
                     const logged = loggedVersesInChapter.has(v.verse);
                     const pulsing = pulseVerse === v.verse;
-                    const covering = noteCoveringVerse(chapterNotes ?? [], v.verse);
+                    const covering = noteCoveringVerse(studyNotes, v.verse);
                     const verseNote =
                       covering?.verse?.startVerse === v.verse ? covering : undefined;
                     return (
@@ -1596,21 +2026,47 @@ export function Bible() {
             {selectionRange && (
               <div className="space-y-2">
                 {!showPrivateNote ? (
-                  <button
-                    type="button"
-                    onClick={openNoteComposer}
-                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation"
-                  >
-                    <Pencil className="h-4 w-4" aria-hidden />
-                    Note
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={openNoteComposer}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation"
+                    >
+                      <Pencil className="h-4 w-4" aria-hidden />
+                      Note
+                    </button>
+                    <button
+                      type="button"
+                      data-save-verse
+                      disabled={savingNote}
+                      onClick={() => void handleSaveThisVerse()}
+                      className="inline-flex items-center justify-center rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation disabled:opacity-50"
+                    >
+                      {savingNote ? "Saving…" : "Save this verse"}
+                    </button>
+                  </div>
                 ) : (
                   <div className="rounded-xl border border-primary/15 bg-primary/5 p-2.5 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-medium text-primary inline-flex items-center gap-1">
-                        <Pencil className="h-3.5 w-3.5" aria-hidden />
-                        Note on this verse
-                      </p>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-primary inline-flex items-center gap-1">
+                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                          Note on this verse
+                        </p>
+                        {currentBook && selectionRange ? (
+                          <p
+                            className="text-sm text-muted"
+                            data-reference-sentence
+                          >
+                            {formatReferenceSentence({
+                              bookName: currentBook.name,
+                              chapter,
+                              startVerse: selectionRange.start,
+                              endVerse: selectionRange.end,
+                            })}
+                          </p>
+                        ) : null}
+                      </div>
                       <button
                         type="button"
                         onClick={() => {
@@ -1634,10 +2090,11 @@ export function Bible() {
                       <Button
                         variant="secondary"
                         className="!py-2 !px-3 text-xs flex-1"
-                        disabled={savingNote || !privateNoteDraft.trim()}
-                        onClick={() => void handleSavePrivateNoteOnly()}
+                        data-save-verse
+                        disabled={savingNote}
+                        onClick={() => void handleSaveThisVerse()}
                       >
-                        {savingNote ? "Saving…" : "Save note"}
+                        {savingNote ? "Saving…" : "Save this verse"}
                       </Button>
 
                     </div>
@@ -1755,28 +2212,56 @@ export function Bible() {
         title={`${currentBook?.name ?? "Book"} — chapter`}
         onClose={() => setChapterPickerOpen(false)}
       >
-        <div className="grid grid-cols-5 gap-2 max-h-[55dvh] overflow-y-auto">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <p className="text-xs text-muted leading-snug">
+            A ring means you marked it studied. Tap a number to open that
+            chapter.
+          </p>
+          <button
+            type="button"
+            className="shrink-0 text-sm font-medium text-primary underline-offset-2 hover:underline"
+            onClick={() => {
+              setChapterPickerOpen(false);
+              setEditStudiedOpen(true);
+            }}
+          >
+            Edit studied
+          </button>
+        </div>
+        <div
+          className="grid grid-cols-5 gap-2 max-h-[55dvh] overflow-y-auto"
+          style={{ ["--study-hue" as string]: String(frameColor.hue) }}
+        >
           {Array.from(
             { length: currentBook?.chapterCount ?? 0 },
             (_, i) => i + 1,
-          ).map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => {
-                setChapter(n);
-                setChapterPickerOpen(false);
-              }}
-              className={[
-                "rounded-xl border py-3 text-sm font-medium touch-manipulation tap-target tabular-nums",
-                n === chapter
-                  ? "border-primary bg-primary text-on-primary"
-                  : "border-border bg-bg text-primary hover:border-primary/40",
-              ].join(" ")}
-            >
-              {n}
-            </button>
-          ))}
+          ).map((n) => {
+            const studied = studiedChapters.has(n);
+            return (
+              <button
+                key={n}
+                type="button"
+                onClick={() => {
+                  setChapter(n);
+                  setChapterPickerOpen(false);
+                }}
+                aria-label={
+                  studied
+                    ? `${currentBook?.name ?? "Chapter"} ${n}, studied`
+                    : `${currentBook?.name ?? "Chapter"} ${n}`
+                }
+                className={[
+                  "rounded-xl border py-3 text-sm font-medium touch-manipulation tap-target tabular-nums",
+                  studied ? "study-chapter-ring" : "",
+                  n === chapter
+                    ? "border-primary bg-primary text-on-primary"
+                    : "border-border bg-bg text-primary hover:border-primary/40",
+                ].join(" ")}
+              >
+                {n}
+              </button>
+            );
+          })}
         </div>
       </Modal>
 
@@ -1910,6 +2395,27 @@ export function Bible() {
           onLogged={handleLogged}
         />
       )}
+
+      {activeStudyId && activeStudy ? (
+        <EditStudied
+          open={editStudiedOpen}
+          onClose={() => setEditStudiedOpen(false)}
+          spaceId={activeStudyId}
+          studyName={activeStudy.name}
+          initialBookId={bookId}
+        />
+      ) : null}
+
+      {activeStudyId && activeStudy ? (
+        <EditWhatsNext
+          open={whatsNextOpen}
+          onClose={() => setWhatsNextOpen(false)}
+          spaceId={activeStudyId}
+          studyName={activeStudy.name}
+          initialBookId={bookId}
+          aim={activeStudy.studyAim}
+        />
+      ) : null}
 
       {prayDraft && logContext.spaceId && (
         <PrayFromVerseModal

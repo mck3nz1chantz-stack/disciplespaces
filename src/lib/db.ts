@@ -1,6 +1,8 @@
 import Dexie, { type EntityTable } from "dexie";
 import type {
+  ChapterMark,
   PrayerBoardEntry,
+  StudyQueueItem,
   PrivateNote,
   Session,
   Space,
@@ -37,6 +39,8 @@ export class DiscipleSpacesDB extends Dexie {
   prayerBoard!: EntityTable<PrayerBoardEntry, "id">;
   syncQueue!: EntityTable<SyncQueueItem, "id">;
   sharedTombstones!: EntityTable<SharedTombstoneRow, "key">;
+  chapterMarks!: EntityTable<ChapterMark, "id">;
+  studyQueue!: EntityTable<StudyQueueItem, "id">;
 
   constructor() {
     super("discipleSpaces");

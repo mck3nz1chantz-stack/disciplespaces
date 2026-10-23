@@ -21,13 +21,13 @@ export function JoinGroup() {
   });
 
   function handleClose() {
-    navigate("/");
+    navigate("/studies");
   }
 
   return (
     <div className="space-y-4">
       <NavBreadcrumb
-        items={[{ label: "Groups", to: "/" }, { label: "Join" }]}
+        items={[{ label: "Studies", to: "/studies" }, { label: "Join" }]}
       />
 
       <div>

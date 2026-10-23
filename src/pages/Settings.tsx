@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { CircleHelp, MessageSquareWarning, Moon, UserPlus } from "lucide-react";
+import { OfflineIndicator } from "../components/OfflineIndicator";
 import { useAppStore } from "../stores/useAppStore";
 import { LegalDisclaimerText } from "../components/LegalDisclaimer";
 import { Card } from "../components/Card";
@@ -137,6 +138,17 @@ export function Settings() {
         </p>
       </div>
 
+      <Card className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-primary">Online or Offline</p>
+          <p className="text-xs text-muted mt-0.5">
+            This choice stays as you left it. Connected groups still sync when
+            Online.
+          </p>
+        </div>
+        <OfflineIndicator />
+      </Card>
+
       <section
         id="settings-backup"
         className="scroll-mt-24 space-y-3"
@@ -157,7 +169,7 @@ export function Settings() {
           Getting started
         </summary>
         <p className="text-sm text-muted pb-2">
-          New group and Join a group are on the Groups tab. The full walkthrough
+          New group and Join a group are on the Studies tab. The full walkthrough
           is in Help.
         </p>
         <Link to="/help" className="inline-block pb-2 text-sm font-medium text-primary">

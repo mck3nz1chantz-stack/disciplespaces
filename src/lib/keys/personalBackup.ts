@@ -3,7 +3,15 @@
  * Separate from Space Update packages (DSX1.) which stay shared-layer only.
  */
 
-import type { PrivateNote, Session, Space } from "../../types";
+import type {
+  ChapterMark,
+  PrivateNote,
+  Session,
+  Space,
+  StudyAim,
+  StudyQueueItem,
+  StudyReadingPlace,
+} from "../../types";
 import { db } from "../db";
 import type { SpaceExportPayload } from "../share";
 import { buildSpaceExport, downloadTextFile } from "../share";
@@ -44,6 +52,23 @@ export interface PersonalBackupPayload {
   privateNotes?: PrivateNote[];
   /** true when notes were intentionally omitted (default). */
   privateNotesIncluded: boolean;
+  /**
+   * Local study fields. Not part of a group file.
+   * Older copies omit this and still open.
+   */
+  studyCopies?: StudyCopyFields[];
+  /** Studied chapters on this phone. Not part of a group file. */
+  chapterMarks?: ChapterMark[];
+  /** What’s next on this phone. Not part of a group file. */
+  studyQueue?: StudyQueueItem[];
+}
+
+export interface StudyCopyFields {
+  spaceId: string;
+  colorHue?: number;
+  readingPlace?: StudyReadingPlace;
+  studyAim?: StudyAim;
+  studyRole?: "personal" | "group";
 }
 
 function toBase64Url(json: string): string {
@@ -125,6 +150,11 @@ export async function buildPersonalBackup(input: {
     ),
   );
 
+  const [chapterMarks, studyQueue] = await Promise.all([
+    db.chapterMarks.toArray(),
+    db.studyQueue.toArray(),
+  ]);
+
   const payload: PersonalBackupPayload = {
     v: 1,
     kind: PERSONAL_BACKUP_KIND,
@@ -133,6 +163,15 @@ export async function buildPersonalBackup(input: {
     accountKeyFingerprint: meta?.fingerprint,
     spaces,
     privateNotesIncluded: false,
+    studyCopies: input.spaces.map((space) => ({
+      spaceId: space.id,
+      colorHue: space.colorHue,
+      readingPlace: space.readingPlace,
+      studyAim: space.studyAim,
+      studyRole: space.studyRole,
+    })),
+    chapterMarks,
+    studyQueue,
   };
 
   if (input.includePlainNotes) {
@@ -153,6 +192,41 @@ export async function buildPersonalBackup(input: {
   }
 
   return payload;
+}
+
+/**
+ * Put color, place, aim, marks, and what’s next back on the matching studies.
+ * A mark or queue row already on this phone is left unchanged.
+ * Does nothing for an older copy that has none of these fields.
+ */
+export async function restoreStudyBundle(
+  payload: PersonalBackupPayload,
+): Promise<void> {
+  for (const copy of payload.studyCopies ?? []) {
+    if (!copy?.spaceId) continue;
+    const row = await db.spaces.get(copy.spaceId);
+    if (!row) continue;
+    const next = { ...row };
+    if (typeof copy.colorHue === "number") next.colorHue = copy.colorHue;
+    if (copy.readingPlace?.bookId) next.readingPlace = copy.readingPlace;
+    if (copy.studyAim?.bookId) next.studyAim = copy.studyAim;
+    if (copy.studyRole === "personal" || copy.studyRole === "group") {
+      next.studyRole = copy.studyRole;
+    }
+    await db.spaces.put(next);
+  }
+  for (const mark of payload.chapterMarks ?? []) {
+    if (!mark?.id || !mark.spaceId) continue;
+    const exists = await db.chapterMarks.get(mark.id);
+    if (exists) continue;
+    await db.chapterMarks.put(mark);
+  }
+  for (const item of payload.studyQueue ?? []) {
+    if (!item?.id || !item.spaceId) continue;
+    const exists = await db.studyQueue.get(item.id);
+    if (exists) continue;
+    await db.studyQueue.put(item);
+  }
 }
 
 /** Add notes from a file. A note already on this phone is left unchanged. */

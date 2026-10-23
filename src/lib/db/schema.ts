@@ -14,7 +14,7 @@
 
 import type { Transaction } from "dexie";
 
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 11;
 
 export interface SchemaMigration {
   /** Dexie version number (monotonic). */
@@ -282,6 +282,37 @@ export const SCHEMA_MIGRATIONS: SchemaMigration[] = [
       prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
       syncQueue: "id, spaceId, status, createdAt",
       sharedTombstones: "key, spaceId, kind, id, deletedAt",
+    },
+  },
+  {
+    version: 10,
+    notes:
+      "chapterMarks table for per-study studied chapters. Adds the store only. Does not rewrite or delete spaces, sessions, notes, or prayer.",
+    stores: {
+      spaces: "id, name, createdAt, inviteCode, spaceTemplate, spaceKind",
+      sessions: "id, spaceId, date, templateId",
+      templates: "id, name",
+      privateNotes: "id, spaceId, sessionId, createdAt, verseKey",
+      prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
+      syncQueue: "id, spaceId, status, createdAt",
+      sharedTombstones: "key, spaceId, kind, id, deletedAt",
+      chapterMarks: "id, spaceId, bookId, [spaceId+bookId]",
+    },
+  },
+  {
+    version: 11,
+    notes:
+      "studyQueue table for each study’s what’s-next list. Adds the store only. Does not rewrite or delete spaces, sessions, notes, marks, or prayer. Aim stays a nested field on the space.",
+    stores: {
+      spaces: "id, name, createdAt, inviteCode, spaceTemplate, spaceKind",
+      sessions: "id, spaceId, date, templateId",
+      templates: "id, name",
+      privateNotes: "id, spaceId, sessionId, createdAt, verseKey",
+      prayerBoard: "id, spaceId, sessionId, scope, kind, createdAt",
+      syncQueue: "id, spaceId, status, createdAt",
+      sharedTombstones: "key, spaceId, kind, id, deletedAt",
+      chapterMarks: "id, spaceId, bookId, [spaceId+bookId]",
+      studyQueue: "id, spaceId, [spaceId+order]",
     },
   },
 ];

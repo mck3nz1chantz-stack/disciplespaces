@@ -41,6 +41,7 @@ import {
   decryptPersonalNotes,
   downloadPersonalBackup,
   mergePersonalNotes,
+  restoreStudyBundle,
 } from "../lib/keys/personalBackup";
 import { useAppStore } from "../stores/useAppStore";
 import { db } from "../lib/db";
@@ -79,6 +80,7 @@ async function restorePersonalPayload(
     });
     sessionTotal += result.addedSessions;
   }
+  await restoreStudyBundle(personal);
   let notesRestored = 0;
   if (personal.privateNotes?.length) {
     notesRestored += await mergePersonalNotes(personal.privateNotes);

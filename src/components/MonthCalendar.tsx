@@ -9,6 +9,7 @@ import {
   type MonthMeeting,
 } from "../lib/meetingCalendar";
 import type { Session } from "../types";
+import { normalizeHue, PERSONAL_HUE, studyColor } from "../lib/study";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 type CalendarFilter = "coming" | "done" | "today";
@@ -22,7 +23,12 @@ const FILTERS: { id: CalendarFilter; label: string }[] = [
 export function MonthCalendar({
   groups,
 }: {
-  groups: Array<{ id: string; name: string; sessions?: Session[] }>;
+  groups: Array<{
+    id: string;
+    name: string;
+    colorHue?: number;
+    sessions?: Session[];
+  }>;
 }) {
   const today = new Date();
   const [cursor, setCursor] = useState({
@@ -56,6 +62,13 @@ export function MonthCalendar({
   const dayCount = new Date(cursor.year, cursor.month, 0).getDate();
   const title = format(new Date(cursor.year, cursor.month - 1, 1), "MMMM yyyy");
   const todayKey = format(today, "yyyy-MM-dd");
+  const hueBySpace = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const group of groups) {
+      map.set(group.id, normalizeHue(group.colorHue) ?? PERSONAL_HUE);
+    }
+    return map;
+  }, [groups]);
   const selectedMarks = selected ? byDay.get(selected) ?? [] : [];
   const countWord = marks.length === 1 ? "1 meeting" : `${marks.length} meetings`;
   const countLabel =
@@ -188,10 +201,14 @@ export function MonthCalendar({
                   {dayMarks.slice(0, 3).map((mark) => (
                     <span
                       key={mark.sessionId}
-                      className={[
-                        "h-1 w-1 rounded-full",
-                        isSelected ? "bg-on-primary" : "bg-primary",
-                      ].join(" ")}
+                      className="h-1.5 w-1.5 rounded-full"
+                      data-study-dot={mark.spaceId}
+                      style={{
+                        background: studyColor(
+                          hueBySpace.get(mark.spaceId) ?? PERSONAL_HUE,
+                        ).fill,
+                        boxShadow: isSelected ? "0 0 0 1px white" : undefined,
+                      }}
                     />
                   ))}
                 </span>

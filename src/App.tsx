@@ -17,7 +17,8 @@ export default function App() {
       <ToastHost />
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<Navigate to="/bible" replace />} />
+          <Route path="studies" element={<Dashboard />} />
           <Route path="space/:id" element={<SpaceDetail />} />
           <Route path="join" element={<JoinGroup />} />
           <Route path="new" element={<NewGroup />} />

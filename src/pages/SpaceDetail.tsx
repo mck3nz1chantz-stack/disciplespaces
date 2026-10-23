@@ -38,6 +38,13 @@ import { InviteModal } from "../components/InviteModal";
 import { YourDataBundle } from "../components/YourDataBundle";
 import { SpaceConnectionBar } from "../components/SpaceConnectionBar";
 import { GroupShareActions } from "../components/GroupShareActions";
+import { OfflineIndicator } from "../components/OfflineIndicator";
+import { StudyColorControl } from "../components/StudyColorControl";
+import { EditStudied } from "../components/EditStudied";
+import { EditWhatsNext } from "../components/EditWhatsNext";
+import { formatAimLine, formatQueueLabel } from "../lib/studyQueue";
+import { offerMarkTheseStudied } from "../components/markStudiedOffer";
+import { isPersonalStudy } from "../lib/study";
 import { PrayerBoard } from "../components/PrayerBoard";
 import { PrivateNotesModal } from "../components/PrivateNotesModal";
 import { SessionPrivateDrawer } from "../components/SessionPrivateDrawer";
@@ -84,6 +91,7 @@ import {
   useLivePrivateNoteCount,
   useLiveSessions,
   useLiveSpace,
+  useLiveStudyQueue,
   useLiveTemplates,
 } from "../hooks/useLiveDb";
 import { useSessionSectionSpy } from "../hooks/useSessionSectionSpy";
@@ -132,6 +140,7 @@ export function SpaceDetail() {
   // Dexie live queries — timeline updates without manual reload
   const liveSpace = useLiveSpace(id);
   const liveSessions = useLiveSessions(id);
+  const studyQueue = useLiveStudyQueue(id);
   const liveTemplates = useLiveTemplates();
 
   const storeTemplates = useAppStore((s) => s.templates);
@@ -145,8 +154,12 @@ export function SpaceDetail() {
   const updateSession = useAppStore((s) => s.updateSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
   const claimSpaceHostRole = useAppStore((s) => s.claimSpaceHostRole);
+  const setActiveStudy = useAppStore((s) => s.setActiveStudy);
   const { mode: onlineMode } = useOnlineMode();
   const [hostRestoreOpen, setHostRestoreOpen] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
+  const [editStudiedOpen, setEditStudiedOpen] = useState(false);
+  const [whatsNextOpen, setWhatsNextOpen] = useState(false);
 
   const space = liveSpace ?? null;
   const spaceSessions = liveSessions ?? [];
@@ -277,8 +290,14 @@ export function SpaceDetail() {
       openCreateSession?: boolean;
       openInvite?: boolean;
       openPrayer?: boolean;
+      openRename?: boolean;
     } | null;
     if (!space || !state) return;
+    if (state.openRename) {
+      openEdit();
+      navigate(location.pathname, { replace: true, state: {} });
+      return;
+    }
     if (state.openCreateSession) {
       void openCreateSession();
       navigate(location.pathname, { replace: true, state: {} });
@@ -317,6 +336,10 @@ export function SpaceDetail() {
     // Only when entering this group (or reconnecting Online)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [space?.id, onlineMode]);
+
+  useEffect(() => {
+    if (space?.sync?.lastError) setSharingOpen(true);
+  }, [space?.id, space?.sync?.lastError]);
 
   const modeCounts = useMemo(
     () => countSessionsByMode(spaceSessions),
@@ -895,7 +918,7 @@ export function SpaceDetail() {
         place: editPlace,
         spaceKind: draftSpaceKind,
       });
-      toast.success("Space updated");
+      toast.success("Name saved");
       setEditOpen(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not update space");
@@ -1075,6 +1098,9 @@ export function SpaceDetail() {
         setSessionPanelTab("session");
         setSessionMode(wasPast ? null : "view");
         toast.success(wasPast ? "Past session saved" : "Previous date saved");
+        if (wasPast || confirmPrevious) {
+          void offerMarkTheseStudied(space.id, passagesStudied);
+        }
         savedId = wasPast ? null : created.id;
       } else if (activeSession) {
         const updated = await updateSession(activeSession.id, {
@@ -1113,6 +1139,9 @@ export function SpaceDetail() {
                 ? "Session saved"
                 : "Session updated",
         );
+        if (wasPast || confirmPrevious) {
+          void offerMarkTheseStudied(space.id, passagesStudied);
+        }
         setSessionPanelTab("session");
         savedId = wasPast ? null : updated.id;
       } else {
@@ -1187,7 +1216,7 @@ export function SpaceDetail() {
     try {
       await deleteSpace(space.id);
       toast.success("Space deleted");
-      navigate("/", { replace: true });
+      navigate("/studies", { replace: true });
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Could not delete space",
@@ -1211,11 +1240,11 @@ export function SpaceDetail() {
     return (
       <div className="space-y-4">
         <NavBreadcrumb
-          items={[{ label: "Groups", to: "/" }, { label: "Not found" }]}
+          items={[{ label: "Studies", to: "/studies" }, { label: "Not found" }]}
         />
         <Card>
           <p className="text-muted">This group was not found on this device.</p>
-          <Button className="mt-4" variant="secondary" onClick={() => navigate("/")}>
+          <Button className="mt-4" variant="secondary" onClick={() => navigate("/studies")}>
             Back to groups
           </Button>
         </Card>
@@ -1227,7 +1256,7 @@ export function SpaceDetail() {
     return (
       <div className="space-y-4">
         <NavBreadcrumb
-          items={[{ label: "Groups", to: "/" }, { label: "Loading…" }]}
+          items={[{ label: "Studies", to: "/studies" }, { label: "Loading…" }]}
         />
         <p className="text-sm text-muted">Loading group…</p>
       </div>
@@ -1266,6 +1295,7 @@ export function SpaceDetail() {
   const peopleCount = space.members.length;
   const isHost = isSpaceHost(space.sync);
   const isGuest = isSpaceGuest(space.sync);
+  const nextReading = (studyQueue ?? [])[0];
   const spaceSync = normalizeSpaceSync(space.sync);
   const guestLinked =
     isGuest &&
@@ -1284,21 +1314,22 @@ export function SpaceDetail() {
         <NavBreadcrumb
           className="flex-1"
           items={[
-            { label: "Groups", to: "/" },
+            { label: "Studies", to: "/studies" },
             { label: space.name },
           ]}
         />
         <div className="flex items-center gap-1 shrink-0">
           {isHost && (
             <Button
-              variant="ghost"
-              className="!p-2"
+              variant="secondary"
+              className="!py-2 !px-3 text-sm"
               onClick={openEdit}
-              aria-label="Edit group"
             >
-              <Pencil className="h-5 w-5" aria-hidden />
+              <Pencil className="h-4 w-4" aria-hidden />
+              Rename
             </Button>
           )}
+          {!isPersonalStudy(space) && (
           <Button
             variant="ghost"
             className="!p-2 text-danger"
@@ -1307,6 +1338,7 @@ export function SpaceDetail() {
           >
             <Trash2 className="h-5 w-5" aria-hidden />
           </Button>
+          )}
         </div>
       </div>
 
@@ -1324,6 +1356,47 @@ export function SpaceDetail() {
           <h2 className="text-2xl sm:text-3xl leading-tight tracking-tight">
             {space.name}
           </h2>
+          <p className="text-sm text-primary">
+            <Link
+              to="/bible"
+              onClick={() => setActiveStudy(space.id)}
+              className="underline-offset-2 hover:underline"
+            >
+              Left off ·{" "}
+              {space.readingPlace?.bookId
+                ? formatQueueLabel({
+                    bookName:
+                      space.readingPlace.bookName || space.readingPlace.bookId,
+                    chapter: space.readingPlace.chapter,
+                  })
+                : "Not opened yet"}
+            </Link>
+          </p>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <StudyColorControl space={space} />
+            <Button
+              variant="secondary"
+              className="!py-2 !px-3 text-sm"
+              onClick={() => setEditStudiedOpen(true)}
+            >
+              Edit studied
+            </Button>
+            <Button
+              variant="secondary"
+              className="!py-2 !px-3 text-sm"
+              onClick={() => setWhatsNextOpen(true)}
+            >
+              Edit what’s next
+            </Button>
+          </div>
+          {nextReading ? (
+            <p className="text-sm text-primary">
+              Next · {formatQueueLabel(nextReading)}
+            </p>
+          ) : null}
+          {space.studyAim ? (
+            <p className="text-sm text-muted">{formatAimLine(space.studyAim)}</p>
+          ) : null}
           {space.description ? (
             <p className="text-sm text-muted line-clamp-2">{space.description}</p>
           ) : null}
@@ -1351,11 +1424,6 @@ export function SpaceDetail() {
               {prayerBoardCount === 1 ? "" : "s"}
             </button>
           )}
-          <GroupLinkBadge
-            sync={space.sync}
-            onlineMode={onlineMode}
-            size="md"
-          />
         </div>
       </Card>
 
@@ -1414,10 +1482,17 @@ export function SpaceDetail() {
         </Card>
       )}
 
-      <GroupShareActions space={space} isHost={isHost} />
-
       {/* This group's month */}
-      <MonthCalendar groups={[{ id: space.id, name: space.name, sessions: spaceSessions }]} />
+      <MonthCalendar
+        groups={[
+          {
+            id: space.id,
+            name: space.name,
+            colorHue: space.colorHue,
+            sessions: spaceSessions,
+          },
+        ]}
+      />
 
       {/* Upcoming, then Past */}
       <div id="group-past" className="space-y-5 scroll-mt-24">
@@ -1755,14 +1830,43 @@ export function SpaceDetail() {
         </section>
       )}
 
-      {/* Group pulse / Sync */}
-      <div id="group-sync" className="scroll-mt-24">
-        <SpaceConnectionBar
-          space={space}
-          defaultExpanded={needsRoomOpen || Boolean(spaceSync.lastError)}
-          expandSignal={syncExpandSignal}
-        />
-      </div>
+      <section id="group-sync" className="scroll-mt-24 rounded-2xl border border-border bg-surface px-3 py-2">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-2 py-2 text-left touch-manipulation"
+          aria-expanded={sharingOpen}
+          onClick={() => setSharingOpen((open) => !open)}
+        >
+          <span className="text-sm font-semibold text-primary">Group sharing</span>
+          <ChevronDown
+            className={[
+              "h-4 w-4 text-muted transition-transform",
+              sharingOpen ? "rotate-180" : "",
+            ].join(" ")}
+            aria-hidden
+          />
+        </button>
+        {sharingOpen && (
+          <div className="space-y-3 border-t border-border/70 pt-3 pb-2">
+            <p className="text-xs text-muted leading-relaxed">
+              Online or Offline applies to every group. A group that is already
+              connected still syncs.
+            </p>
+            <GroupLinkBadge
+              sync={space.sync}
+              onlineMode={onlineMode}
+              size="md"
+            />
+            <OfflineIndicator />
+            <GroupShareActions space={space} isHost={isHost} />
+            <SpaceConnectionBar
+              space={space}
+              defaultExpanded={needsRoomOpen || Boolean(spaceSync.lastError)}
+              expandSignal={syncExpandSignal}
+            />
+          </div>
+        )}
+      </section>
 
       {gather.active ? (
         <GatherRitualBar
@@ -1809,7 +1913,7 @@ export function SpaceDetail() {
       )}
       {linkStatus.kind === "offline" && (
         <p className="text-[11px] text-amber-800 dark:text-amber-200 text-center">
-          App is Offline (header). Meetings still save on this phone.
+          App is Offline. Switch it under Group sharing or More. Meetings still save on this phone.
         </p>
       )}
 
@@ -2050,7 +2154,7 @@ export function SpaceDetail() {
       {/* Edit space */}
       <Modal
         open={editOpen}
-        title="Edit space"
+        title="Rename"
         onClose={() => !saving && setEditOpen(false)}
       >
         <form onSubmit={handleSaveEdit} className="space-y-4">
@@ -2063,7 +2167,11 @@ export function SpaceDetail() {
               maxLength={80}
               required
               autoFocus
+              placeholder="Wednesday Bible Study"
             />
+            <span className="block text-xs text-muted">
+              For example, Wednesday Bible Study or Friday Discipleship.
+            </span>
           </label>
           <label className="block space-y-1.5">
             <span className="text-sm font-medium">Description (optional)</span>
@@ -2561,6 +2669,22 @@ export function SpaceDetail() {
           </div>
         </div>
       </Modal>
+
+      <EditStudied
+        open={editStudiedOpen}
+        onClose={() => setEditStudiedOpen(false)}
+        spaceId={space.id}
+        studyName={space.name}
+        initialBookId={space.readingPlace?.bookId}
+      />
+      <EditWhatsNext
+        open={whatsNextOpen}
+        onClose={() => setWhatsNextOpen(false)}
+        spaceId={space.id}
+        studyName={space.name}
+        initialBookId={space.readingPlace?.bookId}
+        aim={space.studyAim}
+      />
     </div>
   );
 }

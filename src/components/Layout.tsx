@@ -6,7 +6,6 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { BookOpen, Menu, NotebookPen, Users } from "lucide-react";
-import { OfflineIndicator } from "./OfflineIndicator";
 import { OfflineBanner } from "./OfflineBanner";
 import { TestingPhaseRibbon } from "./TestingPhaseNotice";
 import { LegalDisclaimerModal } from "./LegalDisclaimer";
@@ -18,27 +17,29 @@ import {
   readFlag,
 } from "../lib/onboarding";
 import { useForegroundSpaceSync } from "../hooks/useForegroundSpaceSync";
+import { normalizeHue, PERSONAL_HUE, studyColor } from "../lib/study";
 
 const PENDING_ACTION_KEY = "ds-pending-home-action";
 const PENDING_JOIN_RAW_KEY = "ds-pending-join-raw";
 
 const tabs = [
   {
-    to: "/",
-    label: "Groups",
-    icon: Users,
-    /** Parent route: home, group detail, join/create entry */
-    isActivePath: (path: string) =>
-      path === "/" ||
-      path.startsWith("/space/") ||
-      path === "/join" ||
-      path === "/new",
-  },
-  {
     to: "/bible",
     label: "Read",
     icon: BookOpen,
-    isActivePath: (path: string) => path.startsWith("/bible"),
+    isActivePath: (path: string) =>
+      path === "/" || path.startsWith("/bible"),
+  },
+  {
+    to: "/studies",
+    label: "Studies",
+    icon: Users,
+    /** Group detail, join, and create stay on this tab. */
+    isActivePath: (path: string) =>
+      path.startsWith("/studies") ||
+      path.startsWith("/space/") ||
+      path === "/join" ||
+      path === "/new",
   },
   {
     to: "/notes",
@@ -60,6 +61,12 @@ export function Layout() {
   const location = useLocation();
   const isBibleRoute = location.pathname.startsWith("/bible");
   const hasAcknowledgedLegal = useAppStore((s) => s.hasAcknowledgedLegal);
+  const spaces = useAppStore((s) => s.spaces);
+  const activeStudyId = useAppStore((s) => s.activeStudyId);
+  const activeStudy = spaces.find((space) => space.id === activeStudyId);
+  const headerColor = studyColor(
+    normalizeHue(activeStudy?.colorHue) ?? PERSONAL_HUE,
+  );
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Soft catch-up for connected Spaces only (no-op if relay URL unset)
@@ -104,12 +111,19 @@ export function Layout() {
       <header className="safe-top sticky top-0 z-20 border-b border-border/80 bg-surface/75 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/60">
         <div className="mx-auto max-w-lg safe-x py-2.5 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-lg leading-tight tracking-tight font-serif text-primary">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
               DiscipleSpaces
+            </p>
+            <h1 className="flex items-center gap-2 text-lg leading-tight tracking-tight font-serif text-primary">
+              <span
+                className="h-3.5 w-3.5 shrink-0 rounded-full border border-black/10"
+                style={{ background: headerColor.fill }}
+                aria-hidden
+              />
+              <span className="truncate">
+                {activeStudy?.name ?? "Read"}
+              </span>
             </h1>
-          </div>
-          <div className="flex items-center shrink-0">
-            <OfflineIndicator />
           </div>
         </div>
       </header>
@@ -139,7 +153,6 @@ export function Layout() {
               <li key={to}>
                 <NavLink
                   to={to}
-                  end={to === "/"}
                   aria-current={isActive ? "page" : undefined}
                   className={() =>
                     [

@@ -33,6 +33,30 @@ export function verseAnchor(input: {
   };
 }
 
+/**
+ * What a reference means, in plain words.
+ * "John, chapter 3, verse 16." / "John, chapter 3, verses 16 through 18."
+ */
+export function formatReferenceSentence(anchor: {
+  bookName: string;
+  chapter: number;
+  startVerse?: number;
+  endVerse?: number;
+}): string {
+  const book = anchor.bookName.trim() || "This book";
+  const chapter = anchor.chapter;
+  if (anchor.startVerse == null || anchor.startVerse < 1) {
+    return `${book}, chapter ${chapter}.`;
+  }
+  const endRaw = anchor.endVerse ?? anchor.startVerse;
+  const start = Math.min(anchor.startVerse, endRaw);
+  const end = Math.max(anchor.startVerse, endRaw);
+  if (start === end) {
+    return `${book}, chapter ${chapter}, verse ${start}.`;
+  }
+  return `${book}, chapter ${chapter}, verses ${start} through ${end}.`;
+}
+
 /** John 3:16 or John 3:16–18 */
 export function formatVerseTitle(anchor: VerseAnchor): string {
   const range =

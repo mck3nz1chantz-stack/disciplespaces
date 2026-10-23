@@ -26,6 +26,8 @@ Applied in `src/lib/db.ts` via `this.version(n).stores(...).upgrade(...)`.
 | 7 | `space.sync` metadata (default `local-only`) + `syncQueue` table for opportunistic shared-layer push; **privateNotes never queued** |
 | 8 | `sharedTombstones` table — deleted sessions/prayer rows propagate via room + vault (LWW vs entity `updatedAt`) |
 | 9 | `privateNotes.verseKey` index. `spaceId` may be omitted for a personal note. No row rewrite. |
+| 10 | `chapterMarks` table only. Per-study studied chapters. No row rewrite and no deletes. |
+| 11 | `studyQueue` table only. Per-study what’s-next rows. Aim is a nested field on the space, not a table. No row rewrite and no deletes. |
 
 ### Account Key / Group Key (no Dexie bump)
 

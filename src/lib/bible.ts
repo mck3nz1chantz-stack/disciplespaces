@@ -435,21 +435,44 @@ export async function searchVerses(
   };
 }
 
-/** Parse simple refs like "John 3:16", "Gen 1", "psalm 23:1-3" (first verse). */
+export type ParsedReference = {
+  bookId: string;
+  bookName: string;
+  chapter: number;
+  verse?: number;
+  /** Set only for a through-span in one chapter: 16-18, 16–18, or 16 to 18. */
+  endVerse?: number;
+};
+
+/** A trailing through-span, or nothing. Other tails stay unread. */
+function spanEnd(tail: string): number | undefined {
+  const match = tail.trim().match(/^(?:[-–—]|to)\s*(\d+)$/i);
+  if (!match) return undefined;
+  const n = parseInt(match[1], 10);
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return n;
+}
+
+/** Parse "John 3", "John 3:16", "Jn 3:16-18", "John 3:16 to 18". */
 export async function parseReference(
   input: string,
-): Promise<{ bookId: string; chapter: number; verse?: number } | null> {
+): Promise<ParsedReference | null> {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
   const match = trimmed.match(
-    /^(\d?\s*[A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(\d+)(?::(\d+))?/,
+    /^(\d?\s*[A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(\d+)(?::(\d+))?([\s\S]*)$/,
   );
   if (!match) return null;
 
   const bookPart = match[1].replace(/\s+/g, " ").trim().toLowerCase();
   const chapter = parseInt(match[2], 10);
   const verse = match[3] ? parseInt(match[3], 10) : undefined;
+  const parsedEnd = verse ? spanEnd(match[4] ?? "") : undefined;
+  const endVerse =
+    parsedEnd != null && verse != null && parsedEnd !== verse
+      ? parsedEnd
+      : undefined;
 
   const books = await getBooks();
   const book = books.find((b) => {
@@ -467,7 +490,14 @@ export async function parseReference(
 
   if (!book) return null;
   if (chapter < 1 || chapter > book.chapterCount) return null;
-  return { bookId: book.id, chapter, verse };
+  if (verse != null && verse < 1) return null;
+  return {
+    bookId: book.id,
+    bookName: book.name,
+    chapter,
+    verse,
+    endVerse,
+  };
 }
 
 export function loadReadingPosition(): ReadingPosition | null {

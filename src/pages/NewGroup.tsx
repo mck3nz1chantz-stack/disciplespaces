@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -18,6 +18,22 @@ import {
 import { useAppStore } from "../stores/useAppStore";
 import type { Member, SpaceKind } from "../types";
 import { maxMembersForSpace, spaceKindLabel } from "../types";
+import { HueWheel } from "../components/StudyColorControl";
+import {
+  closestOtherStudy,
+  nextFreeHue,
+  normalizeHue,
+} from "../lib/study";
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 
 /**
  * Full-page create flow (/new) — deep-link friendly; lands on the new group.
@@ -35,6 +51,24 @@ export function NewGroup() {
   const [members, setMembers] = useState<Member[]>([]);
   const [saving, setSaving] = useState(false);
   const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
+  const [weekday, setWeekday] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [hueTouched, setHueTouched] = useState(false);
+  const [hue, setHue] = useState(0);
+  const suggestedHue = useMemo(
+    () =>
+      nextFreeHue(
+        spaces
+          .map((space) => normalizeHue(space.colorHue))
+          .filter((value): value is number => value != null),
+      ),
+    [spaces],
+  );
+  const hueValue = hueTouched ? hue : suggestedHue;
+  const near = closestOtherStudy(
+    hueValue,
+    spaces.map((space) => ({ name: space.name, colorHue: space.colorHue })),
+  );
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -52,7 +86,15 @@ export function NewGroup() {
         members,
         spaceTemplate,
         spaceKind,
-        createFirstSession: true,
+        createFirstSession: false,
+        colorHue: hueValue,
+        firstMeeting:
+          weekday === ""
+            ? undefined
+            : {
+                weekday: Number(weekday),
+                startTime: startTime || undefined,
+              },
       });
       const roomKey = space.sync?.shortCode;
       toast.success(
@@ -84,29 +126,28 @@ export function NewGroup() {
   return (
     <div className="space-y-4">
       <NavBreadcrumb
-        items={[{ label: "Groups", to: "/" }, { label: "New group" }]}
+        items={[{ label: "Studies", to: "/studies" }, { label: "New study" }]}
       />
 
       <div>
         <h2 className="text-2xl font-serif tracking-tight text-primary">
-          New group
+          New study
         </h2>
         <p className="text-sm text-muted mt-1 leading-relaxed">
-          Just a name is enough. When Online, you’ll get a{" "}
-          <strong className="text-text">room key</strong> to share — friends only
-          Join with that key.
+          A name, a color, and an optional day. People and meeting style are
+          under More options.
         </p>
       </div>
 
       <Card padding="lg" className="space-y-0">
         <form onSubmit={(e) => void handleCreate(e)} className="space-y-5">
           <label className="block space-y-1.5">
-            <span className="text-sm font-medium">Group name</span>
+            <span className="text-sm font-medium">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
-              placeholder="e.g. Thursday morning"
+              placeholder="e.g. Wednesday Bible Study"
               maxLength={80}
               required
               autoFocus
@@ -114,17 +155,71 @@ export function NewGroup() {
           </label>
 
           <div className="space-y-2">
-            <p className="text-sm font-medium">
-              Who’s in it{" "}
-              <span className="text-muted font-normal">(optional)</span>
-            </p>
-            <MemberEditor
-              members={members}
-              onChange={setMembers}
-              maxMembers={maxMembersForSpace(spaceKind)}
-              kindLabel={spaceKindLabel(spaceKind)}
+            <p className="text-sm font-medium">Color</p>
+            <HueWheel
+              hue={hueValue}
+              className="h-44 w-44"
+              onChange={(next) => {
+                setHueTouched(true);
+                setHue(next);
+              }}
             />
+            <div className="flex justify-center">
+              <Button
+                type="button"
+                variant="secondary"
+                className="!py-2 !px-3 text-sm"
+                onClick={() => {
+                  setHueTouched(true);
+                  setHue(suggestedHue);
+                }}
+              >
+                Next free color
+              </Button>
+            </div>
+            {near ? (
+              <p className="text-sm text-primary text-center">
+                This is close to {near.name}. The name still shows which study
+                it is.
+              </p>
+            ) : (
+              <p className="text-sm text-muted text-center">
+                Drag the wheel. The name stays next to the color.
+              </p>
+            )}
           </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-sm font-medium text-primary">
+              Day
+              <select
+                value={weekday}
+                onChange={(event) => setWeekday(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-border bg-bg px-3 py-3 text-base"
+              >
+                <option value="">No meeting</option>
+                {WEEKDAYS.map((label, index) => (
+                  <option key={label} value={String(index)}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm font-medium text-primary">
+              Time
+              <input
+                type="time"
+                value={startTime}
+                disabled={weekday === ""}
+                onChange={(event) => setStartTime(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-border bg-bg px-3 py-3 text-base disabled:opacity-40"
+              />
+            </label>
+          </div>
+          <p className="text-xs text-muted -mt-3">
+            Optional. A weekly meeting on that day. Leave the day blank if this
+            study has none.
+          </p>
 
           <div className="border-t border-border pt-2 space-y-3">
             <button
@@ -134,7 +229,7 @@ export function NewGroup() {
               aria-expanded={moreOptionsOpen}
             >
               <span className="text-sm font-semibold text-muted">
-                More options · family, meeting style
+                More options · people, family, meeting style
               </span>
               <ChevronDown
                 className={[
@@ -147,6 +242,18 @@ export function NewGroup() {
 
             {moreOptionsOpen && (
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">
+                    Who’s in it{" "}
+                    <span className="text-muted font-normal">(optional)</span>
+                  </p>
+                  <MemberEditor
+                    members={members}
+                    onChange={setMembers}
+                    maxMembers={maxMembersForSpace(spaceKind)}
+                    kindLabel={spaceKindLabel(spaceKind)}
+                  />
+                </div>
                 <fieldset className="space-y-2">
                   <legend className="text-sm font-medium">Size</legend>
                   <div className="grid grid-cols-2 gap-2">
@@ -264,24 +371,20 @@ export function NewGroup() {
               type="button"
               variant="secondary"
               fullWidth
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/studies")}
               disabled={saving}
             >
               Cancel
             </Button>
             <Button type="submit" fullWidth disabled={saving}>
-              {saving
-                ? "Saving…"
-                : spaces.length === 0
-                  ? "Start first group"
-                  : "Create group"}
+              {saving ? "Saving…" : "Create study"}
             </Button>
           </div>
         </form>
       </Card>
 
       <p className="text-center text-sm text-muted">
-        Have a room key?{" "}
+        Invited to a group?{" "}
         <Link
           to="/join"
           className="font-medium text-primary underline-offset-2 hover:underline"

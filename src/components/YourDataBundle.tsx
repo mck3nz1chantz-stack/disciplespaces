@@ -181,7 +181,7 @@ export function YourDataBundle({
             Your copy
           </h3>
           <p className="text-sm text-muted mt-1 leading-relaxed">
-            Save a copy keeps every group, its meetings, and your notes in one file on this phone. Open a copy brings them back. A note already here is left as it is. Sharing a group does not include notes.
+            Save a copy keeps every group, its meetings, notes, color, place, marks, and what’s next in one file on this phone. Open a copy brings them back. A note already here is left as it is. Sharing a group does not include notes.
           </p>
           <p className="text-xs font-medium text-primary mt-2">
             {PRIVATE_NOTES_PILL}

@@ -15,6 +15,8 @@ import type {
   SpaceKind,
   SpaceSyncState,
   SpaceTemplateId,
+  StudyAim,
+  StudyReadingPlace,
   Template,
   WeekReading,
 } from "../types";
@@ -30,6 +32,17 @@ import {
 } from "../lib/db";
 import { FIRST_LAUNCH_ACK_KEY } from "../lib/legal";
 import { makeVerseKey } from "../lib/verseNote";
+import {
+  beginPlaceWrite,
+  ensureStudies,
+  isLatestPlaceWrite,
+  isPersonalStudy,
+  loadActiveStudyId,
+  PERSONAL_STUDY_ID,
+  nextFreeHue,
+  normalizeHue,
+  saveActiveStudyId,
+} from "../lib/study";
 import {
   applyRemoteTombstonesLocally,
   buildSharedSnapshotWithTombstones,
@@ -122,10 +135,22 @@ interface AppState {
   error: string | null;
   offlineReady: boolean;
   hasAcknowledgedLegal: boolean;
+  /** Study currently open on Read. Local preference. Not a room field. */
+  activeStudyId: string | null;
 
   setOfflineReady: (ready: boolean) => void;
   acknowledgeLegal: () => void;
   clearError: () => void;
+  setActiveStudy: (id: string) => void;
+  /** Local hue only. Does not sync and does not touch members or meetings. */
+  setStudyHue: (id: string, hue: number) => Promise<Space>;
+  /** Local reading place only. Does not sync. */
+  setStudyReadingPlace: (
+    id: string,
+    place: StudyReadingPlace,
+  ) => Promise<void>;
+  /** Local aim only. Does not sync. Pass null to clear it. */
+  setStudyAim: (id: string, aim: StudyAim | null) => Promise<Space>;
 
   initialize: () => Promise<void>;
   loadSpaces: () => Promise<void>;
@@ -142,6 +167,10 @@ interface AppState {
     spaceKind?: SpaceKind;
     /** When true (default), auto-create the first session for the template. */
     createFirstSession?: boolean;
+    /** Local hue, 0–359. Missing uses the next free color. Not sent on the room. */
+    colorHue?: number;
+    /** Optional weekly meeting. Weekday is 0 (Sunday) through 6. */
+    firstMeeting?: { weekday: number; startTime?: string };
   }) => Promise<Space>;
 
   updateSpace: (
@@ -273,14 +302,23 @@ interface AppState {
     sectionKey?: string;
     content: string;
   }) => Promise<PrivateNote>;
-  /** Create or replace the single note for this exact verse reference. */
+  /**
+   * Create or edit the note for this verse on one study.
+   * A note already stored on another study is left alone.
+   */
   saveVerseNote: (input: {
     anchor: VerseAnchor;
     content: string;
+    spaceId?: string;
   }) => Promise<PrivateNote>;
   updatePrivateNote: (
     id: string,
     content: string,
+  ) => Promise<PrivateNote>;
+  /** Set or clear the one reference this person added on a verse note. */
+  setAnotherVerse: (
+    id: string,
+    anotherVerse: VerseAnchor | null,
   ) => Promise<PrivateNote>;
   deletePrivateNote: (id: string) => Promise<void>;
   listPrivateNotes: (opts: {
@@ -445,6 +483,16 @@ function toIsoDate(date?: string): string {
   return day.includes("T") ? day : new Date(`${day}T12:00:00`).toISOString();
 }
 
+/** Soonest date for a weekday, including today. 0 is Sunday. */
+function nextWeekdayIso(weekday: number): string {
+  const day = Math.min(6, Math.max(0, Math.round(weekday)));
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  const delta = (day - date.getDay() + 7) % 7;
+  date.setDate(date.getDate() + delta);
+  return format(date, "yyyy-MM-dd");
+}
+
 function readLegalAck(): boolean {
   try {
     return localStorage.getItem(FIRST_LAUNCH_ACK_KEY) === "1";
@@ -511,6 +559,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   offlineReady: false,
   hasAcknowledgedLegal: readLegalAck(),
+  activeStudyId: loadActiveStudyId(),
 
   setOfflineReady: (ready) => set({ offlineReady: ready }),
 
@@ -525,12 +574,86 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 
+  setActiveStudy: (id) => {
+    saveActiveStudyId(id);
+    set({ activeStudyId: id });
+  },
+
+  setStudyHue: async (id, hue) => {
+    const row = await db.spaces.get(id);
+    if (!row) throw new Error("Space not found");
+    const colorHue = normalizeHue(hue);
+    if (colorHue == null) throw new Error("Pick a color");
+    const nextRow: SpaceRow = { ...row, colorHue };
+    await db.spaces.put(nextRow);
+    const updated = await hydrateSpace(nextRow);
+    set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    return updated;
+  },
+
+  setStudyReadingPlace: async (id, place) => {
+    const token = beginPlaceWrite(id);
+    const row = await db.spaces.get(id);
+    if (!row || !isLatestPlaceWrite(id, token)) return;
+    const chapter = Math.max(1, Math.round(place.chapter) || 1);
+    const nextRow: SpaceRow = {
+      ...row,
+      readingPlace: {
+        version: place.version === "web" ? "web" : "kjv",
+        bookId: place.bookId,
+        chapter,
+        bookName: place.bookName?.trim() || undefined,
+      },
+    };
+    if (!isLatestPlaceWrite(id, token)) return;
+    await db.spaces.put(nextRow);
+    if (!isLatestPlaceWrite(id, token)) return;
+    const updated = await hydrateSpace(nextRow);
+    set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+  },
+
+  setStudyAim: async (id, aim) => {
+    const row = await db.spaces.get(id);
+    if (!row) throw new Error("Space not found");
+    const nextRow: SpaceRow = { ...row };
+    if (aim == null) {
+      delete nextRow.studyAim;
+    } else {
+      const chapter = Math.round(aim.chapter);
+      if (!aim.bookId || !Number.isFinite(chapter) || chapter < 1) {
+        throw new Error("Pick a chapter");
+      }
+      const byDate = aim.byDate?.trim();
+      const nextAim: StudyAim = {
+        bookId: aim.bookId,
+        bookName: aim.bookName.trim() || aim.bookId,
+        chapter,
+      };
+      if (byDate && /^\d{4}-\d{2}-\d{2}$/.test(byDate)) {
+        nextAim.byDate = byDate;
+      }
+      nextRow.studyAim = nextAim;
+    }
+    await db.spaces.put(nextRow);
+    const updated = await hydrateSpace(nextRow);
+    set((state) => ({ spaces: patchSpaceInState(state.spaces, updated) }));
+    return updated;
+  },
+
   initialize: async () => {
     set({ isLoading: true, error: null });
     try {
       await ensureSeedData();
       await ensureSpaceSyncDefaults();
+      await ensureStudies();
       await Promise.all([get().loadSpaces(), get().loadTemplates()]);
+      const spaces = get().spaces;
+      const saved = loadActiveStudyId();
+      const pick =
+        spaces.find((s) => s.id === saved) ??
+        spaces.find((s) => isPersonalStudy(s)) ??
+        spaces[0];
+      if (pick) get().setActiveStudy(pick.id);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to initialize app data";
@@ -600,6 +723,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     spaceTemplate,
     spaceKind,
     createFirstSession = true,
+    colorHue: requestedHue,
+    firstMeeting,
   }) => {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("Space name is required");
@@ -612,6 +737,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const id = crypto.randomUUID();
     const memberList = normalizeMembers(members, maxMembers);
+    const usedHues = (await db.spaces.toArray())
+      .map((row) => normalizeHue(row.colorHue))
+      .filter((hue): hue is number => hue != null);
     const space: Space = {
       id,
       name: trimmed,
@@ -624,12 +752,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       defaultSessionTemplateId,
       inviteCode: await deriveInviteCode(id),
       sync: defaultSpaceSync("host"),
+      studyRole: "group",
+      colorHue: normalizeHue(requestedHue) ?? nextFreeHue(usedHues),
       sessions: [],
     };
     await db.spaces.add(toRow(space));
 
     let sessions: Session[] = [];
-    if (createFirstSession) {
+    const meetingTime = firstMeeting?.startTime?.trim();
+    const startTime =
+      meetingTime && /^\d{2}:\d{2}$/.test(meetingTime) ? meetingTime : undefined;
+    if (createFirstSession || firstMeeting) {
       // Ensure starter templates exist (incl. freeform / advanced)
       await ensureSeedData();
       let sessionTpl = await db.templates.get(defaultSessionTemplateId);
@@ -642,7 +775,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         const first: Session = {
           id: crypto.randomUUID(),
           spaceId: id,
-          date: toIsoDate(),
+          date: firstMeeting
+            ? toIsoDate(nextWeekdayIso(firstMeeting.weekday))
+            : toIsoDate(),
+          startTime,
+          weekly: firstMeeting ? true : undefined,
+          repeat: firstMeeting ? "week" : undefined,
           templateId: sessionTpl.id,
           attendees: memberList.map((m) => m.id),
           passagesStudied: [],
@@ -710,12 +848,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
+    const nextName =
+      patch.name !== undefined ? patch.name.trim() || row.name : row.name;
     const nextRow: SpaceRow = {
       ...row,
-      name:
-        patch.name !== undefined
-          ? patch.name.trim() || row.name
-          : row.name,
+      name: nextName,
+      nameUpdatedAt:
+        nextName !== row.name ? new Date().toISOString() : row.nameUpdatedAt,
       description:
         patch.description === null
           ? undefined
@@ -766,16 +905,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteSpace: async (id) => {
+    const existing = await db.spaces.get(id);
+    if (existing && isPersonalStudy(existing)) {
+      throw new Error("My study stays on this phone");
+    }
     await db.transaction(
       "rw",
-      db.spaces,
-      db.sessions,
-      db.privateNotes,
-      db.prayerBoard,
+      [
+        db.spaces,
+        db.sessions,
+        db.privateNotes,
+        db.prayerBoard,
+        db.chapterMarks,
+        db.studyQueue,
+      ],
       async () => {
         await db.sessions.where("spaceId").equals(id).delete();
         await db.privateNotes.where("spaceId").equals(id).delete();
         await db.prayerBoard.where("spaceId").equals(id).delete();
+        await db.chapterMarks.where("spaceId").equals(id).delete();
+        await db.studyQueue.where("spaceId").equals(id).delete();
         await db.spaces.delete(id);
       },
     );
@@ -1359,6 +1508,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           (await deriveInviteCode(payload.space.id)),
         // File import never enables relay — stays local-only (private notes never in file)
         sync: defaultSpaceSync(),
+        studyRole: "group",
+        colorHue: nextFreeHue(
+          (await db.spaces.toArray())
+            .map((row) => normalizeHue(row.colorHue))
+            .filter((hue): hue is number => hue != null),
+        ),
       };
       await db.spaces.add(spaceRow);
     } else {
@@ -1400,9 +1555,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         nextMembers = mergeMembers(existing.members, remoteMembers, max);
       }
 
+      // Host rename stays until a push of that name succeeds.
+      // A failed pull must not put the room's older name back.
+      const pendingLocalName =
+        mergeStrategy === "replace-shared" &&
+        isSpaceHost(existing.sync) &&
+        Boolean(existing.nameUpdatedAt);
+
       spaceRow = {
         ...existing,
-        name: payload.space.name || existing.name,
+        name: pendingLocalName
+          ? existing.name
+          : payload.space.name || existing.name,
         description: payload.space.description ?? existing.description,
         place:
           mergeStrategy === "replace-shared"
@@ -1796,6 +1960,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         const fresh = await db.spaces.get(spaceId);
         if (!fresh) throw new Error("Space not found");
+        const pushedNameAt = fresh.nameUpdatedAt;
         const hydrated = await hydrateSpace(fresh);
         const sessions = await db.sessions
           .where("spaceId")
@@ -1826,7 +1991,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           // Personal vault is home for Spaces under Account Key
           scheduleAccountVaultUpload();
 
-          return get().patchSpaceSync(spaceId, {
+          const synced = await get().patchSpaceSync(spaceId, {
             mode: "connected",
             roomId: liveRoomId,
             shortCode:
@@ -1837,6 +2002,17 @@ export const useAppStore = create<AppState>((set, get) => ({
             lastSyncedAt: new Date().toISOString(),
             lastError: undefined,
           });
+          if (!pushedNameAt) return synced;
+          const after = await db.spaces.get(spaceId);
+          if (!after || after.nameUpdatedAt !== pushedNameAt) return synced;
+          const cleared: SpaceRow = { ...after };
+          delete cleared.nameUpdatedAt;
+          await db.spaces.put(cleared);
+          const updated = await hydrateSpace(cleared);
+          set((state) => ({
+            spaces: patchSpaceInState(state.spaces, updated),
+          }));
+          return updated;
         } catch (pushErr) {
           if (
             pushErr instanceof SpaceRelayConflictError &&
@@ -2311,25 +2487,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     return note;
   },
 
-  saveVerseNote: async ({ anchor, content }) => {
+  saveVerseNote: async ({ anchor, content, spaceId }) => {
     const trimmed = content.trim();
-    if (!trimmed) throw new Error("Write a note first");
     const start = Math.min(anchor.startVerse, anchor.endVerse);
     const end = Math.max(anchor.startVerse, anchor.endVerse);
     const verse: VerseAnchor = { ...anchor, startVerse: start, endVerse: end };
     const verseKey = makeVerseKey(verse);
     const now = new Date().toISOString();
-    const existing = await db.privateNotes.where("verseKey").equals(verseKey).first();
+    const matches = await db.privateNotes
+      .where("verseKey")
+      .equals(verseKey)
+      .toArray();
+    // Same verses on two studies are two notes. The scripture key stays
+    // version|book|chapter|start|end. The study is spaceId.
+    const unscoped = matches.find((note) => !note.spaceId);
+    const existing = spaceId
+      ? matches.find((note) => note.spaceId === spaceId) ??
+        (spaceId === PERSONAL_STUDY_ID ? unscoped : undefined)
+      : unscoped;
+    // An empty save keeps the reference. It does not wipe words already written.
     const note: PrivateNote = existing
       ? {
           ...existing,
-          content: trimmed,
+          content: trimmed || existing.content,
           verse,
           verseKey,
+          spaceId: spaceId || existing.spaceId,
           updatedAt: now,
         }
       : {
           id: crypto.randomUUID(),
+          spaceId: spaceId || undefined,
           content: trimmed,
           verse,
           verseKey,
@@ -2350,6 +2538,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...existing,
       content: trimmed,
       updatedAt: new Date().toISOString(),
+    };
+    await db.privateNotes.put(note);
+    scheduleAccountVaultUpload();
+    return note;
+  },
+
+  setAnotherVerse: async (id, anotherVerse) => {
+    const existing = await db.privateNotes.get(id);
+    if (!existing?.verse) throw new Error("Save the verse first");
+    const now = new Date().toISOString();
+    if (!anotherVerse) {
+      const cleared: PrivateNote = { ...existing, updatedAt: now };
+      delete cleared.anotherVerse;
+      await db.privateNotes.put(cleared);
+      scheduleAccountVaultUpload();
+      return cleared;
+    }
+    const note: PrivateNote = {
+      ...existing,
+      anotherVerse,
+      updatedAt: now,
     };
     await db.privateNotes.put(note);
     scheduleAccountVaultUpload();
