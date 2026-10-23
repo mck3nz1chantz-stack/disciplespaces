@@ -18,7 +18,7 @@ Read first: `HANDOFF_STATE.json`, this file, `docs/drafts/study-first-2026-10.md
 
 A1 through A5 are coded locally and are not deployed. Do not deploy unless Kenzi asks. Do not resume two-phone share.
 
-B1, B2, and B3 are coded locally and are not deployed. Read `docs/drafts/beginner-study-2026-10.md`. Do not rebuild them. Do not add a cross-reference library unless Kenzi names that slice.
+B1, B2, and B3 are deployed with study-first A1–A5. Commit `72b302d`. Site: https://disciple-spaces.pages.dev. Preview: https://7b90519d.disciple-spaces.pages.dev. Relay was not redeployed. Do not rebuild these slices. Do not add a cross-reference library unless Kenzi names that slice.
 
 R1–R5 are already in the tree. Do not start another reader-and-group slice. Do not rescaffold. Do not add a fifth bottom tab.
 
