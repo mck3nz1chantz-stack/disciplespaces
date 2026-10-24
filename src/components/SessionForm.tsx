@@ -18,6 +18,7 @@ import {
 import {
   SESSION_TITLE_MAX,
   suggestTitleFromPassages,
+  titleShouldFollowLatest,
 } from "../lib/sessionTitle";
 import { formatPassageRef, passageFromCoveredText } from "../lib/passages";
 import { formatMeetingWhen } from "../lib/meetingCalendar";
@@ -451,15 +452,13 @@ export function SessionForm({
           passages={values.passagesStudied}
           onChange={(passagesStudied) => {
             const nextSuggest = suggestTitleFromPassages(passagesStudied);
-            const prevSuggest = suggestTitleFromPassages(values.passagesStudied);
-            const current = values.title.trim();
-            // Auto-fill when empty, or keep title in sync if it still matches the
-            // previous passage suggestion (user has not customized it).
-            const shouldAuto =
-              !current || (prevSuggest !== "" && current === prevSuggest);
+            const tracks = titleShouldFollowLatest(
+              values.title,
+              values.passagesStudied,
+            );
             patch({
               passagesStudied,
-              ...(shouldAuto && nextSuggest ? { title: nextSuggest } : {}),
+              ...(tracks ? { title: nextSuggest } : {}),
             });
           }}
           disabled={saving}
@@ -767,10 +766,12 @@ function PastSessionForm({
     setPassageError("");
     setDraft("");
     const passagesStudied = [...values.passagesStudied, next];
-    const suggested = suggestTitleFromPassages(passagesStudied);
+    const tracks = titleShouldFollowLatest(values.title, values.passagesStudied);
     patch({
       passagesStudied,
-      title: values.title.trim() ? values.title : suggested,
+      ...(tracks
+        ? { title: suggestTitleFromPassages(passagesStudied) }
+        : {}),
     });
   }
 
@@ -778,7 +779,13 @@ function PastSessionForm({
     const passagesStudied = values.passagesStudied.filter((row, i) =>
       id ? row.id !== id : i !== index,
     );
-    patch({ passagesStudied });
+    const tracks = titleShouldFollowLatest(values.title, values.passagesStudied);
+    patch({
+      passagesStudied,
+      ...(tracks
+        ? { title: suggestTitleFromPassages(passagesStudied) }
+        : {}),
+    });
   }
 
   const covered = values.passagesStudied

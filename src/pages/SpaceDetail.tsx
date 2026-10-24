@@ -48,6 +48,7 @@ import { validateRequiredResponses } from "../lib/sessionResponses";
 import {
   sessionDisplayTitle,
   suggestTitleFromPassages,
+  titleShouldFollowLatest,
 } from "../lib/sessionTitle";
 import {
   SPACE_TEMPLATES,
@@ -856,14 +857,11 @@ export function SpaceDetail() {
       passage.id ? row.id !== passage.id : i !== index,
     );
     if (next.length === current.length) return;
-    const prevSuggest = suggestTitleFromPassages(current);
-    const nextSuggest = suggestTitleFromPassages(next);
-    const title = activeSession.title?.trim() ?? "";
     const patch: { passagesStudied: Passage[]; title?: string } = {
       passagesStudied: next,
     };
-    if (!title || title === prevSuggest) {
-      patch.title = nextSuggest;
+    if (titleShouldFollowLatest(activeSession.title, current)) {
+      patch.title = suggestTitleFromPassages(next);
     }
     setSaving(true);
     try {
@@ -881,7 +879,26 @@ export function SpaceDetail() {
 
   function openViewSession(session: Session, day?: string) {
     setOpenedDay(day ?? calendarDay(session.date));
-    setActiveSession(session);
+    const stored = session.title?.trim() ?? "";
+    const followed = titleShouldFollowLatest(stored, session.passagesStudied)
+      ? suggestTitleFromPassages(session.passagesStudied)
+      : stored;
+    const opened =
+      followed === stored ? session : { ...session, title: followed || undefined };
+    setActiveSession(opened);
+    if (followed !== stored) {
+      void updateSession(session.id, { title: followed })
+        .then((updated) => {
+          setActiveSession((current) =>
+            current?.id === updated.id ? updated : current,
+          );
+        })
+        .catch((err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Could not update the session name",
+          );
+        });
+    }
     setIsDraftSession(false);
     setSessionPanelTab("session");
     const tpl = templates.find((t) => t.id === session.templateId);
@@ -893,7 +910,22 @@ export function SpaceDetail() {
     const s = session ?? activeSession;
     if (!space || !s) return;
     setOpenedDay(day ?? openedDay ?? calendarDay(s.date));
-    setActiveSession(s);
+    const storedTitle = s.title?.trim() ?? "";
+    const followedTitle = titleShouldFollowLatest(storedTitle, s.passagesStudied)
+      ? suggestTitleFromPassages(s.passagesStudied)
+      : storedTitle;
+    setActiveSession(
+      followedTitle === storedTitle
+        ? s
+        : { ...s, title: followedTitle || undefined },
+    );
+    if (followedTitle !== storedTitle) {
+      void updateSession(s.id, { title: followedTitle }).catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Could not update the session name",
+        );
+      });
+    }
     setIsDraftSession(false);
     setSessionPanelTab("session");
     const tpl = templates.find((t) => t.id === s.templateId);
@@ -909,7 +941,7 @@ export function SpaceDetail() {
         weekly: Boolean(planned.weekly),
         repeat: repeatOf(planned),
         templateId: s.templateId,
-        title: s.title ?? "",
+        title: followedTitle,
         attendees: s.attendees,
         responses: s.responses,
         passagesStudied: s.passagesStudied ?? [],

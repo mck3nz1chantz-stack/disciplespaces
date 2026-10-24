@@ -102,7 +102,10 @@ import {
   normalizeSpaceTemplate,
 } from "../lib/spaceTemplates";
 import { emptyResponses } from "../lib/sessionResponses";
-import { suggestTitleFromPassages } from "../lib/sessionTitle";
+import {
+  suggestTitleFromPassages,
+  titleShouldFollowLatest,
+} from "../lib/sessionTitle";
 import { isOnlineModeEnabled } from "../lib/onlineMode";
 import {
   normalizeSavedDates,
@@ -1252,13 +1255,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(existing.passagesStudied ?? []),
       passage,
     ];
-    // If the meeting has no custom title yet, seed from primary passage
-    // so Past meetings stays scannable after Bible logging.
+    // A passage label follows the latest log. A typed recap stays put.
     const patch: {
       passagesStudied: typeof passagesStudied;
       title?: string;
     } = { passagesStudied };
-    if (!existing.title?.trim()) {
+    if (titleShouldFollowLatest(existing.title, existing.passagesStudied)) {
       const suggested = suggestTitleFromPassages(passagesStudied);
       if (suggested) patch.title = suggested;
     }
