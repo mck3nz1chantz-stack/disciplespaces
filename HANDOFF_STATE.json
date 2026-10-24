@@ -5,15 +5,15 @@
   "kind": "first-party",
   "lastUpdated": "2026-10-24",
   "gitBranch": "main",
-  "lastKnownCommit": "03001c3",
+  "lastKnownCommit": "9e7d6f6",
   "deploy": {
     "pages": "https://disciple-spaces.pages.dev",
     "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
     "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
-    "latestDeploymentUrl": "https://f5edccb8.disciple-spaces.pages.dev",
-    "notes": "Pages deployed 2026-10-24. Calendar opens on All, so completed, today, and upcoming show together. Direct upload of 03001c3 plus uncommitted files. Canonical https://disciple-spaces.pages.dev"
+    "latestDeploymentUrl": "https://84263b88.disciple-spaces.pages.dev",
+    "notes": "Pages deployed 2026-10-24. U1–U4 group page is in git: Tonight, Meetings, Prayer, Group. A calendar day opens, plans, or logs. Prayer switches study and night. Duplicate nights ask before a copy is removed. Read scrolls on a phone while logging a passage, and a past session can remove a bad passage. Relay was not redeployed. Canonical https://disciple-spaces.pages.dev"
   },
-  "currentSlice": "Deployed 2026-10-24. Calendar All view shows completed, today, and upcoming together. Uncommitted files on top of 03001c3. Two-phone sync is sidelined, not accepted.",
+  "currentSlice": "U1–U4 group page, phone Read scroll, and past-session passage removal are committed. Two-phone sync is sidelined, not accepted.",
   "nextSlice": "Do not resume two-phone share. Do not start a cross-reference library unless Kenzi names that slice.",
   "sliceStatuses": {
     "sync-relay-harden": "done-partial — field reports still fail to sync live",
@@ -38,7 +38,12 @@
     "b0-beginner-research": "spec written 2026-10-22 — docs/drafts/beginner-study-research-2026-10.md and docs/drafts/beginner-study-2026-10.md",
     "b1-reference-sentence": "coded-local — not deployed, not pushed",
     "b2-saved-verses": "coded-local — not deployed, not pushed",
-    "b3-another-verse": "coded-local — not deployed, not pushed. One optional anotherVerse on the note. No schema bump."
+    "b3-another-verse": "coded-local — not deployed, not pushed. One optional anotherVerse on the note. No schema bump.",
+    "u0-group-ux-spec": "spec written 2026-10-23 — docs/drafts/group-ux-2026-10.md",
+    "u1-group-tabs": "deployed 2026-10-24. Tonight, Meetings, Prayer, Group on the study page.",
+    "u2-calendar-day": "deployed 2026-10-24. A calendar day opens, plans, or logs that night.",
+    "u3-prayer-switch": "deployed 2026-10-24. Prayer tab switches study and night.",
+    "u4-session-copies": "deployed 2026-10-24. Duplicate nights ask before a copy is removed."
   },
   "criticalNotes": [
     "Private notes never leave device; assertNoPrivateNotes on relay snapshots",
@@ -69,6 +74,7 @@
     "docs/drafts/gui-report.md",
     "docs/drafts/debug-report.md",
     "docs/drafts/sync-and-polish-spec.md",
+    "docs/drafts/group-ux-2026-10.md",
     "docs/client-hub/facts.v1.json",
     "$LAUNCHER/products/apphub/shell/bugs/disciple-spaces.v1.json"
   ]

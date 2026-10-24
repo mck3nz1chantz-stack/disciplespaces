@@ -1,7 +1,6 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
 import {
-  CheckCircle2,
   HandHeart,
   Plus,
   Trash2,
@@ -10,6 +9,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLivePrayerBoard } from "../hooks/useLiveDb";
+import { calendarDay } from "../lib/meetingCalendar";
 import { useAppStore } from "../stores/useAppStore";
 import type {
   Member,
@@ -24,12 +24,43 @@ interface PrayerBoardProps {
   members: Member[];
   /** When logging from a session, attaches sessionId. */
   sessionId?: string;
+  /**
+   * yyyy-MM-dd of the session being started.
+   * Open prayers from before that day are last session’s, ready to complete.
+   */
+  reviewDay?: string;
+  /**
+   * Set inside a session window so that session does not show another session’s prayers.
+   * current: last week’s completed, then follow-ups, then this session.
+   * past: only prayers from that session.
+   */
+  sessionScope?: PrayerSessionScope;
+  /** All open: every prayer that is not completed. */
+  openOnly?: boolean;
+  /** Shown on the form, such as “Saves on Wed, Oct 28”. */
+  saveNote?: string;
   /** Compact layout for embedding in session forms. */
   compact?: boolean;
   disabled?: boolean;
 }
 
 type BoardTab = PrayerBoardScope;
+
+export interface PrayerSessionScope {
+  role: "past" | "current";
+  /** yyyy-MM-dd this window covers. Current uses today. Past uses that session day. */
+  day: string;
+  /** Prior session day. Prayers on that day belong to the prior session. */
+  previousDay?: string;
+  /** This session’s id. Prayers saved on it stay with it. */
+  sessionId?: string;
+  /** The completed night before this one. */
+  previousSessionId?: string;
+}
+
+function isPrayerDone(entry: PrayerBoardEntry): boolean {
+  return entry.status === "closed" || entry.status === "answered";
+}
 
 /**
  * Shared, space-facing prayer board (exportable with Space Updates).
@@ -39,6 +70,10 @@ export function PrayerBoard({
   spaceId,
   members,
   sessionId,
+  reviewDay,
+  sessionScope,
+  openOnly = false,
+  saveNote,
   compact = false,
   disabled = false,
 }: PrayerBoardProps) {
@@ -59,14 +94,109 @@ export function PrayerBoard({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(!compact);
 
+  useEffect(() => {
+    if (sessionScope?.role === "current") setComposeOpen(true);
+    if (sessionScope?.role === "past") setComposeOpen(false);
+  }, [sessionScope?.role, sessionScope?.sessionId]);
+
   const entries = useMemo(() => {
     const list = allEntries ?? [];
     return list.filter((e) => e.scope === tab);
   }, [allEntries, tab]);
 
-  const individualCount =
-    allEntries?.filter((e) => e.scope === "individual").length ?? 0;
-  const groupCount = allEntries?.filter((e) => e.scope === "group").length ?? 0;
+  const boundary = calendarDay(
+    sessionScope?.role === "current"
+      ? sessionScope.day
+      : (reviewDay ?? ""),
+  );
+  const openEntries = entries.filter((entry) => !isPrayerDone(entry));
+  const doneEntries = entries.filter((entry) => isPrayerDone(entry));
+  const inPastSession = (entry: PrayerBoardEntry) => {
+    if (sessionScope?.role !== "past") return false;
+    if (sessionScope.sessionId && entry.sessionId === sessionScope.sessionId) {
+      return true;
+    }
+    if (entry.sessionId) return false;
+    const day = calendarDay(entry.createdAt);
+    if (!day || day > sessionScope.day) return false;
+    if (sessionScope.previousDay) return day > sessionScope.previousDay;
+    return day <= sessionScope.day;
+  };
+  const inLastWeek = (entry: PrayerBoardEntry) => {
+    if (sessionScope?.role !== "current") return false;
+    if (
+      sessionScope.previousSessionId &&
+      entry.sessionId === sessionScope.previousSessionId
+    ) {
+      return true;
+    }
+    if (entry.sessionId) return false;
+    if (!boundary) return false;
+    const day = calendarDay(entry.createdAt);
+    if (!day || day >= boundary) return false;
+    if (sessionScope.previousDay) return day >= sessionScope.previousDay;
+    return true;
+  };
+  const pastEntries = sessionScope?.role === "past" ? entries.filter(inPastSession) : [];
+  const lastCompleted =
+    sessionScope?.role === "current"
+      ? entries.filter((entry) => inLastWeek(entry) && isPrayerDone(entry))
+      : [];
+  const carryOver =
+    sessionScope?.role === "past"
+      ? []
+      : sessionScope?.role === "current"
+        ? entries.filter((entry) => inLastWeek(entry) && !isPrayerDone(entry))
+        : boundary
+          ? openEntries.filter((entry) => calendarDay(entry.createdAt) < boundary)
+          : [];
+  const currentEntries = openOnly
+    ? openEntries
+    : sessionScope?.role === "past"
+      ? pastEntries.filter((entry) => !isPrayerDone(entry))
+      : sessionScope?.role === "current"
+        ? openEntries.filter((entry) => {
+            if (
+              sessionScope.sessionId &&
+              entry.sessionId === sessionScope.sessionId
+            ) {
+              return true;
+            }
+            if (entry.sessionId) return false;
+            return calendarDay(entry.createdAt) >= boundary;
+          })
+        : boundary
+          ? openEntries.filter((entry) => calendarDay(entry.createdAt) >= boundary)
+          : openEntries;
+  const visibleDone = openOnly
+    ? []
+    : sessionScope?.role === "past"
+      ? pastEntries.filter((entry) => isPrayerDone(entry))
+      : sessionScope?.role === "current"
+        ? []
+        : doneEntries;
+
+  function countFor(scopeName: PrayerBoardScope): number {
+    const list = (allEntries ?? []).filter((entry) => entry.scope === scopeName);
+    if (openOnly) return list.filter((entry) => !isPrayerDone(entry)).length;
+    if (sessionScope?.role === "past") {
+      return list.filter((entry) => inPastSession(entry) && !isPrayerDone(entry)).length;
+    }
+    if (sessionScope?.role === "current") {
+      return list.filter((entry) => {
+        if (isPrayerDone(entry)) return false;
+        if (inLastWeek(entry)) return true;
+        if (sessionScope.sessionId && entry.sessionId === sessionScope.sessionId) {
+          return true;
+        }
+        if (entry.sessionId) return false;
+        return Boolean(boundary) && calendarDay(entry.createdAt) >= boundary;
+      }).length;
+    }
+    return list.filter((entry) => !isPrayerDone(entry)).length;
+  }
+  const individualCount = countFor("individual");
+  const groupCount = countFor("group");
 
   const authorName = resolveAuthorName(
     members,
@@ -115,16 +245,30 @@ export function PrayerBoard({
     }
   }
 
-  async function markAnswered(entry: PrayerBoardEntry) {
+  async function setStatus(
+    entry: PrayerBoardEntry,
+    status: "open" | "closed",
+  ) {
     if (saving || disabled) return;
     setSaving(true);
     try {
-      await updateEntry(entry.id, {
-        status: entry.status === "answered" ? "open" : "answered",
-      });
-      toast.success(
-        entry.status === "answered" ? "Marked open again" : "Marked as answered",
-      );
+      await updateEntry(entry.id, { status });
+      toast.success(status === "closed" ? "Prayer completed" : "Prayer opened again");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function completeCarryOver() {
+    if (saving || disabled || carryOver.length === 0) return;
+    setSaving(true);
+    try {
+      for (const entry of carryOver) {
+        await updateEntry(entry.id, { status: "closed" });
+      }
+      toast.success("Last session’s prayers completed");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not update");
     } finally {
@@ -148,6 +292,85 @@ export function PrayerBoard({
 
   const loading = allEntries === undefined;
 
+  function renderEntry(entry: PrayerBoardEntry, completed: boolean) {
+    const statusLabel =
+      entry.status === "answered"
+        ? "Answered"
+        : entry.status === "closed"
+          ? "Completed"
+          : "";
+    return (
+      <li
+        key={entry.id}
+        className={[
+          "rounded-xl border px-3 py-2.5 space-y-1.5",
+          completed ? "border-success/30 bg-success/5" : "border-border bg-surface",
+        ].join(" ")}
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-primary">
+            {formatPrayerHeadline(entry)}
+          </p>
+          <p className="text-[11px] text-muted tabular-nums mt-0.5">
+            {formatEntryTime(entry.createdAt)}
+            {statusLabel ? ` · ${statusLabel}` : ""}
+          </p>
+        </div>
+        {entry.content && !isHeadlineOnly(entry) && (
+          <p className="text-sm whitespace-pre-wrap text-text/90">{entry.content}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant={completed ? "ghost" : "secondary"}
+            className="!min-h-11"
+            onClick={() => void setStatus(entry, completed ? "open" : "closed")}
+            disabled={disabled || saving}
+          >
+            {completed ? "Open again" : "Mark completed"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="!min-h-11 text-danger"
+            onClick={() =>
+              setConfirmDeleteId(confirmDeleteId === entry.id ? null : entry.id)
+            }
+            disabled={disabled || saving}
+            aria-label={`Delete ${formatPrayerHeadline(entry)}`}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden />
+            Delete
+          </Button>
+        </div>
+        {confirmDeleteId === entry.id && (
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button
+              type="button"
+              variant="secondary"
+              fullWidth
+              className="!py-2"
+              onClick={() => setConfirmDeleteId(null)}
+              disabled={saving}
+            >
+              Keep
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              fullWidth
+              className="!py-2"
+              onClick={() => void handleDelete(entry.id)}
+              disabled={saving}
+            >
+              Delete
+            </Button>
+          </div>
+        )}
+      </li>
+    );
+  }
+
   return (
     <section
       className={[
@@ -163,9 +386,13 @@ export function PrayerBoard({
             Prayer board
           </h3>
           <p className="text-xs text-muted mt-0.5">
-            Shared with this space
-            {sessionId ? " · logs from this session" : ""}. Travels with Space
-            Updates (not private).
+            {sessionScope?.role === "past"
+              ? "Only prayers from this session. Later requests stay on the current session."
+              : sessionScope?.role === "current"
+                ? "Last week’s completed prayers stay separate from follow-ups and new requests."
+                : boundary
+                  ? "Last session stays up until you mark it completed. New requests are for this session."
+                  : "Shared with this space. Travels with Space Updates (not private)."}
           </p>
         </div>
         {compact && (
@@ -204,8 +431,47 @@ export function PrayerBoard({
         />
       </div>
 
+      {lastCompleted.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Last week’s completed
+          </p>
+          <ul className="space-y-2" aria-label="Last week’s completed prayers">
+            {lastCompleted.map((entry) => renderEntry(entry, true))}
+          </ul>
+        </div>
+      )}
+
+      {carryOver.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+            {sessionScope?.role === "current" ? "Upcoming follow up" : "From last session"}
+          </p>
+          <p className="text-sm text-primary">
+            {sessionScope?.role === "current"
+              ? "Still open from last session. Mark one completed after you talk it through."
+              : "Talk through these, then mark them completed."}
+          </p>
+          {carryOver.length > 1 && (
+            <Button
+              type="button"
+              variant="secondary"
+              fullWidth
+              onClick={() => void completeCarryOver()}
+              disabled={disabled || saving}
+            >
+              Mark all completed
+            </Button>
+          )}
+          <ul className="space-y-2" aria-label="Prayers from the last session">
+            {carryOver.map((entry) => renderEntry(entry, false))}
+          </ul>
+        </div>
+      )}
+
       {(composeOpen || !compact) && (
         <form onSubmit={handleAdd} className="space-y-2.5 border-t border-border pt-3">
+          {saveNote ? <p className="text-sm text-muted">{saveNote}</p> : null}
           <div className="grid grid-cols-3 gap-1.5">
             {(
               [
@@ -322,128 +588,57 @@ export function PrayerBoard({
         </form>
       )}
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="flex items-baseline justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-            {tab === "group" ? "Group prayers" : "Individual prayers"}
-          </p>
-          <span className="text-xs text-muted tabular-nums">
-            {loading ? "…" : `${entries.length}`}
-          </span>
-        </div>
-
+      <div className="space-y-4 border-t border-border pt-3">
         {loading && (
           <p className="text-sm text-muted">Loading prayer board…</p>
         )}
 
-        {!loading && entries.length === 0 && (
-          <p className="text-sm text-muted italic rounded-xl bg-surface-muted/50 px-3 py-3">
-            {tab === "group"
-              ? "No group prayer items yet. Post a need the whole space can carry."
-              : "No individual posts yet. Try “Sam requests prayers…” or “John prayed for Jeff.”"}
+        {sessionScope?.role === "past" &&
+          currentEntries.length === 0 &&
+          visibleDone.length === 0 && (
+            <p className="text-sm text-muted italic rounded-xl bg-surface-muted/50 px-3 py-3">
+              No prayers were saved on this session.
+            </p>
+          )}
+
+        {(sessionScope?.role !== "past" || currentEntries.length > 0) && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+            {sessionScope?.role === "past"
+              ? "Requests"
+              : boundary || sessionScope?.role === "current"
+                ? "This session"
+                : tab === "group"
+                  ? "Group prayers"
+                  : "Individual prayers"}
           </p>
+          {!loading && currentEntries.length === 0 && visibleDone.length === 0 && (
+            <p className="text-sm text-muted italic rounded-xl bg-surface-muted/50 px-3 py-3">
+              {sessionScope?.role === "past"
+                ? "No prayers were saved on this session."
+                : boundary || sessionScope?.role === "current"
+                ? "No new requests yet."
+                : tab === "group"
+                  ? "No group prayer items yet. Post a need the whole space can carry."
+                  : "No individual posts yet. Try “Sam requests prayers…” or “John prayed for Jeff.”"}
+            </p>
+          )}
+          <ul className="space-y-2" aria-label={`${tab} prayer board entries`}>
+            {currentEntries.map((entry) => renderEntry(entry, false))}
+          </ul>
+        </div>
         )}
 
-        <ul className="space-y-2" aria-label={`${tab} prayer board entries`}>
-          {entries.map((entry) => (
-            <li
-              key={entry.id}
-              className={[
-                "rounded-xl border px-3 py-2.5 space-y-1.5",
-                entry.status === "answered"
-                  ? "border-success/30 bg-success/5"
-                  : "border-border bg-surface",
-              ].join(" ")}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-primary">
-                    {formatPrayerHeadline(entry)}
-                  </p>
-                  <p className="text-[11px] text-muted tabular-nums mt-0.5">
-                    {formatEntryTime(entry.createdAt)}
-                    {entry.status === "answered" ? " · Answered" : ""}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-0.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="!p-2"
-                    onClick={() => void markAnswered(entry)}
-                    disabled={disabled || saving}
-                    aria-label={
-                      entry.status === "answered"
-                        ? "Mark as open"
-                        : "Mark as answered"
-                    }
-                    title={
-                      entry.status === "answered"
-                        ? "Mark open"
-                        : "Mark answered"
-                    }
-                  >
-                    <CheckCircle2
-                      className={[
-                        "h-4 w-4",
-                        entry.status === "answered"
-                          ? "text-success"
-                          : "text-muted",
-                      ].join(" ")}
-                      aria-hidden
-                    />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="!p-2 text-danger"
-                    onClick={() =>
-                      setConfirmDeleteId(
-                        confirmDeleteId === entry.id ? null : entry.id,
-                      )
-                    }
-                    disabled={disabled || saving}
-                    aria-label="Delete prayer entry"
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden />
-                  </Button>
-                </div>
-              </div>
-
-              {entry.content &&
-                !isHeadlineOnly(entry) && (
-                  <p className="text-sm whitespace-pre-wrap text-text/90">
-                    {entry.content}
-                  </p>
-                )}
-
-              {confirmDeleteId === entry.id && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    fullWidth
-                    className="!py-2"
-                    onClick={() => setConfirmDeleteId(null)}
-                    disabled={saving}
-                  >
-                    Keep
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    fullWidth
-                    className="!py-2"
-                    onClick={() => void handleDelete(entry.id)}
-                    disabled={saving}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+        {visibleDone.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Completed
+            </p>
+            <ul className="space-y-2" aria-label="Completed prayers">
+              {visibleDone.map((entry) => renderEntry(entry, true))}
+            </ul>
+          </div>
+        )}
       </div>
     </section>
   );

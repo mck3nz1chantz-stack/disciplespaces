@@ -47,7 +47,9 @@ export function QuickStartChecklist({
     switch (id) {
       case "space":
         if (hasSpaces && firstSpaceId) {
-          navigate(`/space/${firstSpaceId}`);
+          navigate(`/space/${firstSpaceId}`, {
+            state: { groupTab: "tonight" },
+          });
         } else {
           onCreateSpace();
         }

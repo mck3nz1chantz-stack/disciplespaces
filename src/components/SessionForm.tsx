@@ -23,7 +23,7 @@ import { formatPassageRef, passageFromCoveredText } from "../lib/passages";
 import { formatMeetingWhen } from "../lib/meetingCalendar";
 import { Button } from "./Button";
 import { PassageList } from "./PassageList";
-import { PrayerBoard } from "./PrayerBoard";
+import { PrayerBoard, type PrayerSessionScope } from "./PrayerBoard";
 import { PrivateNotesButton } from "./PrivateNotesModal";
 
 export interface SessionFormValues {
@@ -73,6 +73,10 @@ interface SessionFormProps {
   spaceId?: string;
   /** Session id when editing — links prayer posts to this session. */
   sessionId?: string;
+  /** Limits the prayer list to this session window. */
+  prayerScope?: PrayerSessionScope;
+  /** Shown on the past-session form when filing a night into a current study. */
+  pastHint?: string;
   /** Save this day as its own past meeting. */
   onConfirmPrevious?: () => void;
   /** Date, passages, and recap only. */
@@ -100,6 +104,8 @@ export function SessionForm({
   privateNoteCount,
   spaceId,
   sessionId,
+  prayerScope,
+  pastHint,
   onConfirmPrevious,
   variant = "full",
   onOpenBible,
@@ -153,6 +159,7 @@ export function SessionForm({
         onCancel={onCancel}
         saving={saving}
         onOpenBible={onOpenBible}
+        hint={pastHint}
       />
     );
   }
@@ -468,6 +475,7 @@ export function SessionForm({
               spaceId={spaceId}
               members={members}
               sessionId={sessionId}
+              sessionScope={prayerScope}
               compact
               disabled={saving}
             />
@@ -583,8 +591,8 @@ function StepField({
               <span className="font-medium text-primary">
                 {step.title}
                 {step.required && step.fieldType !== "passage-log" && (
-                  <span className="text-danger ml-0.5" aria-label="required">
-                    *
+                  <span className="ml-1 text-xs font-medium text-danger">
+                    Required
                   </span>
                 )}
               </span>
@@ -733,6 +741,7 @@ function PastSessionForm({
   onCancel,
   saving,
   onOpenBible,
+  hint,
 }: {
   values: SessionFormValues;
   onChange: (values: SessionFormValues) => void;
@@ -740,6 +749,7 @@ function PastSessionForm({
   onCancel: () => void;
   saving: boolean;
   onOpenBible?: () => void;
+  hint?: string;
 }) {
   const [draft, setDraft] = useState("");
   const [passageError, setPassageError] = useState("");
@@ -783,7 +793,8 @@ function PastSessionForm({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <p className="text-sm text-muted">
-        One screen for a meeting you already had. This is what Past will show.
+        {hint ??
+          "One screen for a meeting you already had. This is what Past will show."}
       </p>
 
       <label className="block space-y-1.5">
@@ -883,7 +894,9 @@ function PastSessionForm({
           autoComplete="off"
         />
         <span className="text-xs text-muted">
-          This line is the name Past uses for this date.
+          {hint
+            ? "A short recap for this night. It still belongs to the current study."
+            : "This line is the name Past uses for this date."}
         </span>
       </label>
 

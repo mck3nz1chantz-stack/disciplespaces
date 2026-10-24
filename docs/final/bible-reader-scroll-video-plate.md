@@ -64,7 +64,7 @@ While the video plate is active:
 - `.bible-reader` when `--with-video`  
 - `.bible-reader-video-bg` (the absolute full-height host)
 
-Clip the **pin** only: `.bible-reader-video-bg__pin { overflow: hidden; }` — that wrapper is the sticky element’s own box, not an ancestor scrollport that breaks stickiness.
+Clip the **pin** only: `.bible-reader-video-bg__pin { overflow: clip; }` (hidden is the fallback). `clip` does not create a scrollport. `hidden` on that viewport-tall sticky box was swallowing touch pans on phones, so Read would not scroll while logging a passage. Do not put `overflow: hidden` back on the pin.
 
 ---
 

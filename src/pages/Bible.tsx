@@ -343,6 +343,27 @@ export function Bible() {
     void loadTemplates();
   }, [initialize, loadTemplates]);
 
+  // A session dialog sets body overflow:hidden. iOS often stays unscrollable
+  // after that inline style is cleared — which is exactly Open Read → log.
+  useEffect(() => {
+    let cancelled = false;
+    const y = window.scrollY;
+    const release = () => {
+      if (cancelled || document.querySelector("[role='dialog']")) return;
+      document.body.style.overflow = "";
+      delete document.documentElement.dataset.modalOpen;
+      window.scrollTo(0, y);
+    };
+    if (!document.querySelector("[role='dialog']")) {
+      document.body.style.overflow = "auto";
+    }
+    const id = window.requestAnimationFrame(release);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(id);
+    };
+  }, []);
+
   // Persist focus + dim app chrome (header / nav / testing ribbon)
   useEffect(() => {
     saveReaderFocus(focusMode);

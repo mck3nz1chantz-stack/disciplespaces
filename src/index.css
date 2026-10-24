@@ -98,9 +98,17 @@ html:not(.dark) {
   /*
    * Safari blurs inputs inside a fixed dialog while the page background is
    * attachment:fixed. Scroll attachment only for the time a dialog is open.
+   * Phones: fixed attachment also swallows touch scrolling after a dialog
+   * (Open Read from passage logging). Keep the photo scrolling there.
    */
   html[data-modal-open] body {
     background-attachment: scroll, scroll;
+  }
+
+  @media (hover: none) and (pointer: coarse) {
+    body {
+      background-attachment: scroll, scroll;
+    }
   }
 
   html.dark body {
@@ -262,6 +270,8 @@ html:not(.dark) {
     isolation: isolate;
     /* Study hue. Outline only — do not set overflow here. */
     --study-hue: 42;
+    /* Vertical pan on the chapter. A viewport-sized plate must not own the gesture. */
+    touch-action: pan-y;
     outline: 3px solid hsl(var(--study-hue) 72% 38%);
     outline-offset: 2px;
     background:
@@ -310,12 +320,15 @@ html:not(.dark) {
     z-index: 0;
     /* Do NOT set overflow:hidden here — kills sticky in Chrome */
     pointer-events: none;
+    touch-action: none;
     border-radius: inherit;
   }
 
   /*
    * Sticky pin: one viewport tall, stays in view for the whole chapter scroll.
-   * overflow:hidden is OK on THIS box only (clips media), not on ancestors.
+   * Clip the media here only. overflow:hidden would make this a scrollport;
+   * on a phone that viewport-sized port swallows the chapter pan (Read → log).
+   * overflow:clip does not create a scrollport. hidden stays as a fallback.
    */
   .bible-reader-video-bg__pin {
     position: sticky;
@@ -324,6 +337,9 @@ html:not(.dark) {
     height: 100dvh;
     max-height: 100vh;
     overflow: hidden;
+    overflow: clip;
+    pointer-events: none;
+    touch-action: none;
     border-radius: inherit;
   }
 
@@ -335,6 +351,8 @@ html:not(.dark) {
     object-position: center 40%;
     opacity: 0.55;
     filter: saturate(0.95) contrast(1.08);
+    pointer-events: none;
+    touch-action: none;
   }
 
   html.dark .bible-reader-video-bg__media {
@@ -402,7 +420,8 @@ html:not(.dark) {
     margin-inline: -0.35rem;
     transition: background-color 0.15s ease, box-shadow 0.15s ease;
     scroll-margin-top: 8.5rem;
-    touch-action: manipulation;
+    /* pan-y: a drag moves the chapter. manipulation was eating that pan on phones. */
+    touch-action: pan-y;
     -webkit-tap-highlight-color: transparent;
   }
 

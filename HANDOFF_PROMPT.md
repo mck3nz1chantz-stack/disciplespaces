@@ -40,3 +40,7 @@ Two-phone share stays unaccepted. It is sidelined until the study tool is in dai
 ## Still open
 
 Two-phone share accept. Spec limits are in `docs/drafts/reader-and-group-2026-10.md`.
+
+## Next spec
+
+`docs/drafts/group-ux-2026-10.md` is the group-page tidy. U1 through U4 are in git with the phone Read scroll fix and passage removal on a past session. Live: https://disciple-spaces.pages.dev. Relay was not redeployed.

@@ -16,7 +16,11 @@ import { useLiveSpaces, useLiveStudyNoteCount, useLiveStudyQueue } from "../hook
 import { getSpaceTemplateMeta } from "../lib/spaceTemplates";
 import type { Space } from "../types";
 import { maxMembersForSpace, spaceKindLabel } from "../types";
-import { formatMeetingWhen, soonestUpcoming } from "../lib/meetingCalendar";
+import {
+  formatMeetingWhen,
+  localTodayKey,
+  soonestUpcoming,
+} from "../lib/meetingCalendar";
 import { MonthCalendar } from "../components/MonthCalendar";
 import { StudyColorControl } from "../components/StudyColorControl";
 import { isPersonalStudy } from "../lib/study";
@@ -89,11 +93,12 @@ export function Dashboard() {
         return (
           <Link
             to={`/space/${next.spaceId}`}
+            state={{ groupTab: "tonight" }}
             className="block touch-manipulation"
           >
             <Card className="border-primary/30 bg-primary/5">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                Next meeting
+                {next.face.day === localTodayKey() ? "Today" : "Next meeting"}
               </p>
               <p className="text-base font-medium text-primary mt-1">
                 {formatMeetingWhen(next.face.day, next.face.startTime)}
@@ -381,6 +386,7 @@ function StudyCard({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Link
                 to={`/space/${space.id}`}
+                state={{ groupTab: "tonight" }}
                 className="min-w-0 touch-manipulation"
               >
                 <h3 className="text-lg font-semibold truncate text-primary">
@@ -445,6 +451,7 @@ function StudyCard({
           {meeting ? (
             <Link
               to={`/space/${space.id}`}
+              state={{ groupTab: "tonight" }}
               className="block text-sm text-muted touch-manipulation"
               data-next-meeting
             >

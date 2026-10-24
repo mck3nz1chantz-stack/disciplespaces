@@ -120,6 +120,10 @@ interface SessionInput {
   templateId: string;
   /** Optional meeting title (e.g. primary passage / lesson name). */
   title?: string;
+  studyName?: string;
+  sessionNumber?: number;
+  meetingDone?: boolean;
+  studyDone?: boolean;
   attendees: string[];
   responses?: SessionResponses;
   passagesStudied?: Passage[];
@@ -216,6 +220,10 @@ interface AppState {
         | "heldDates"
         | "templateId"
         | "title"
+        | "studyName"
+        | "sessionNumber"
+        | "meetingDone"
+        | "studyDone"
         | "attendees"
         | "responses"
         | "notes"
@@ -355,6 +363,7 @@ interface AppState {
         | "subject"
         | "content"
         | "status"
+        | "sessionId"
       >
     >,
   ) => Promise<PrayerBoardEntry>;
@@ -1050,6 +1059,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     repeatDay,
     templateId,
     title,
+    studyName,
+    sessionNumber,
+    meetingDone,
+    studyDone,
     attendees,
     responses,
     passagesStudied,
@@ -1085,6 +1098,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           : undefined,
       templateId,
       title: title?.trim() || undefined,
+      studyName: studyName?.trim() || undefined,
+      sessionNumber:
+        sessionNumber && sessionNumber >= 1 ? sessionNumber : undefined,
+      meetingDone: meetingDone ? true : undefined,
+      studyDone: studyDone ? true : undefined,
       attendees: validAttendees,
       passagesStudied: passagesStudied ?? [],
       weekPassage: weekPassage ?? undefined,
@@ -2649,6 +2667,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         patch.status !== undefined
           ? normalizePrayerStatus(patch.status)
           : existing.status,
+      sessionId:
+        patch.sessionId !== undefined
+          ? patch.sessionId || undefined
+          : existing.sessionId,
       updatedAt: new Date().toISOString(),
     };
     if (!next.content.trim()) throw new Error("Prayer note cannot be empty");

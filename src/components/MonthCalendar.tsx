@@ -1,15 +1,34 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { Calendar, ChevronDown } from "lucide-react";
+import { Button } from "./Button";
 import {
   formatMeetingWhen,
   isOccurrencePast,
+  localTodayKey,
   meetingsInMonth,
+  savedDateLabel,
   type MonthMeeting,
 } from "../lib/meetingCalendar";
 import type { SavedGroupDate, Session } from "../types";
 import { normalizeHue, PERSONAL_HUE, studyColor } from "../lib/study";
+
+export interface CalendarDayActions {
+  onOpen: (sessionId: string, day: string) => void;
+  onPlan: (day: string) => void;
+  onLog: (
+    day: string,
+    startTime?: string,
+    held?: { sessionId: string; day: string },
+  ) => void;
+  onRemoveMark: (day: string) => void;
+  /** Group key when this session is one of several copies. */
+  copyKey?: (sessionId: string) => string | null;
+  copyCount?: (sessionId: string) => number;
+  onReviewCopies?: (sessionId: string) => void;
+  onRemoveHeld?: (sessionId: string, day: string) => void;
+}
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 type CalendarFilter = "all" | "coming" | "done" | "today";
@@ -23,6 +42,8 @@ const FILTERS: { id: CalendarFilter; label: string }[] = [
 
 export function MonthCalendar({
   groups,
+  dayActions,
+  focusDay,
 }: {
   groups: Array<{
     id: string;
@@ -31,6 +52,10 @@ export function MonthCalendar({
     sessions?: Session[];
     savedDates?: SavedGroupDate[];
   }>;
+  /** Inside one study, a day opens, plans, or logs. Studies home leaves this unset. */
+  dayActions?: CalendarDayActions;
+  /** Open the calendar on this yyyy-MM-dd. */
+  focusDay?: string | null;
 }) {
   const today = new Date();
   const [cursor, setCursor] = useState({
@@ -43,10 +68,24 @@ export function MonthCalendar({
   const [filter, setFilter] = useState<CalendarFilter>("all");
   const [open, setOpen] = useState(false);
 
+  useEffect(() => {
+    if (!focusDay || !/^\d{4}-\d{2}-\d{2}$/.test(focusDay)) return;
+    const year = Number(focusDay.slice(0, 4));
+    const month = Number(focusDay.slice(5, 7));
+    if (!year || !month) return;
+    setOpen(true);
+    setSelected(focusDay);
+    setCursor({ year, month });
+  }, [focusDay]);
+
+  const monthMarks = useMemo(
+    () => meetingsInMonth(groups, cursor.year, cursor.month),
+    [groups, cursor.year, cursor.month],
+  );
   const marks = useMemo(() => {
     const now = new Date();
     const todayKey = format(now, "yyyy-MM-dd");
-    return meetingsInMonth(groups, cursor.year, cursor.month).filter((mark) => {
+    return monthMarks.filter((mark) => {
       if (filter === "all") return true;
       if (filter === "today") return mark.day === todayKey;
       if (mark.savedKind === "completed") return filter === "done";
@@ -54,7 +93,7 @@ export function MonthCalendar({
       const past = isOccurrencePast(mark.day, mark.startTime, now);
       return filter === "done" ? past : !past;
     });
-  }, [groups, cursor.year, cursor.month, filter]);
+  }, [monthMarks, filter]);
   const byDay = useMemo(() => {
     const map = new Map<string, MonthMeeting[]>();
     for (const mark of marks) {
@@ -76,7 +115,17 @@ export function MonthCalendar({
     }
     return map;
   }, [groups]);
+  const allByDay = useMemo(() => {
+    const map = new Map<string, MonthMeeting[]>();
+    for (const mark of monthMarks) {
+      const list = map.get(mark.day) ?? [];
+      list.push(mark);
+      map.set(mark.day, list);
+    }
+    return map;
+  }, [monthMarks]);
   const selectedMarks = selected ? byDay.get(selected) ?? [] : [];
+  const panelDay = selected ?? (filter === "today" ? todayKey : null);
   const countWord = marks.length === 1 ? "1 date" : `${marks.length} dates`;
   const countLabel =
     filter === "all"
@@ -219,11 +268,12 @@ export function MonthCalendar({
                   ? `${dayNum}, ${dayMarks
                       .map((mark) =>
                         [
-                          mark.savedKind === "completed"
-                            ? "completed"
-                            : mark.savedKind === "upcoming"
-                              ? "upcoming"
-                              : "meeting",
+                          mark.savedKind
+                            ? savedDateLabel(
+                                { date: mark.day, kind: mark.savedKind },
+                                todayKey,
+                              )
+                            : "meeting",
                           mark.note,
                         ]
                           .filter(Boolean)
@@ -234,35 +284,42 @@ export function MonthCalendar({
               }
             >
               <span className="block leading-none">{dayNum}</span>
-              {dayMarks.length > 0 && (
-                <span className="mt-1 flex justify-center gap-0.5" aria-hidden>
-                  {dayMarks.slice(0, 3).map((mark) => (
-                    <span
-                      key={`${mark.sessionId}:${mark.savedKind ?? "plan"}`}
-                      className="h-1.5 w-1.5 rounded-full"
-                      data-study-dot={mark.spaceId}
-                      style={{
-                        background:
-                          mark.savedKind === "completed"
-                            ? "var(--color-success)"
-                            : mark.savedKind === "upcoming"
-                              ? "var(--color-upcoming)"
-                              : studyColor(
-                                  hueBySpace.get(mark.spaceId) ?? PERSONAL_HUE,
-                                ).fill,
-                        borderRadius:
-                          mark.savedKind === "upcoming" ? "2px" : "999px",
-                        boxShadow: isSelected ? "0 0 0 1px white" : undefined,
-                      }}
-                    />
-                  ))}
+              {dayMarks.length > 1 ? (
+                <span className="mt-0.5 block text-[10px] leading-tight text-muted">
+                  {dayMarks.length} items
                 </span>
-              )}
+              ) : dayMarks.length === 1 ? (
+                <span className="mt-0.5 flex items-center justify-center gap-1 text-[10px] leading-tight">
+                  <span
+                    className="h-1.5 w-1.5 shrink-0"
+                    data-study-dot={dayMarks[0]!.spaceId}
+                    style={{
+                      background:
+                        dayMarks[0]!.savedKind === "completed"
+                          ? "var(--color-success)"
+                          : dayMarks[0]!.savedKind === "upcoming"
+                            ? "var(--color-upcoming)"
+                            : studyColor(
+                                hueBySpace.get(dayMarks[0]!.spaceId) ?? PERSONAL_HUE,
+                              ).fill,
+                      borderRadius:
+                        dayMarks[0]!.savedKind === "upcoming" ? "2px" : "999px",
+                    }}
+                    aria-hidden
+                  />
+                  <span className={isSelected ? "text-on-primary" : "text-muted"}>
+                    {(dayMarks[0]!.detail?.split(" · ").pop() || "Item").slice(0, 8)}
+                  </span>
+                </span>
+              ) : null}
             </button>
           );
         })}
       </div>
-      {(selected || filter === "today") && (
+      {dayActions && panelDay ? (
+        <StudyDayPanel day={panelDay} marks={actionMarksFor(allByDay, panelDay)} actions={dayActions} />
+      ) : null}
+      {!dayActions && (selected || filter === "today") && (
         <div className="space-y-1">
           {(filter === "today" ? marks : selectedMarks).length === 0 ? (
             <p className="text-sm text-muted">
@@ -275,19 +332,25 @@ export function MonthCalendar({
                     : "Nothing coming this day."}
             </p>
           ) : (
-            (filter === "today" ? marks : selectedMarks).map((mark) => {
-              const kindLabel =
-                mark.savedKind === "completed"
-                  ? "Completed"
-                  : mark.savedKind === "upcoming"
-                    ? "Upcoming"
-                    : "";
+            <>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              On this day
+            </p>
+            {(filter === "today" ? marks : selectedMarks).map((mark) => {
+              const kindLabel = mark.savedKind
+                ? savedDateLabel(
+                    { date: mark.day, kind: mark.savedKind },
+                    localTodayKey(),
+                  )
+                : "";
               const when = formatMeetingWhen(mark.day, mark.startTime);
               const groupName = groups.length > 1 ? ` · ${mark.spaceName}` : "";
+              const title = mark.detail || (kindLabel ? `${kindLabel} · ${when}` : when);
               return (
               <Link
-                key={`${mark.sessionId}-${mark.day}-${mark.savedKind ?? "plan"}`}
+                key={`${mark.sessionId}-${mark.day}-${mark.source}`}
                 to={`/space/${mark.spaceId}`}
+                state={{ groupTab: "meetings", day: mark.day }}
                 className="block min-h-11 py-2 text-sm text-primary touch-manipulation"
               >
                 <span className="inline-flex items-center gap-1.5 font-medium">
@@ -297,21 +360,209 @@ export function MonthCalendar({
                     <span className="h-2 w-2 shrink-0 rounded-sm bg-upcoming" aria-hidden />
                   ) : null}
                   <span className={mark.savedKind === "completed" ? "text-success" : undefined}>
-                    {kindLabel ? `${kindLabel} · ${when}` : when}
+                    {title}
                     {groupName}
                   </span>
                 </span>
-                {mark.note ? (
+                {mark.note && mark.note !== title ? (
                   <span className="mt-0.5 block text-primary">{mark.note}</span>
                 ) : null}
               </Link>
               );
-            })
+            })}
+            </>
           )}
         </div>
       )}
       </div>
       )}
     </section>
+  );
+}
+
+function visibleMarks(
+  marks: MonthMeeting[],
+  actions: CalendarDayActions,
+): MonthMeeting[] {
+  const seen = new Set<string>();
+  const shown: MonthMeeting[] = [];
+  for (const mark of marks) {
+    const key =
+      mark.source === "session" || mark.source === "repeat"
+        ? actions.copyKey?.(mark.sessionId) ?? null
+        : null;
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    shown.push(mark);
+  }
+  return shown;
+}
+
+function RemoveWeekdayMark({ onRemove }: { onRemove: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    return (
+      <Button type="button" variant="secondary" fullWidth onClick={() => setConfirming(true)}>
+        Remove weekday mark
+      </Button>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-primary">This drops the date. The meeting plan stays.</p>
+      <div className="grid grid-cols-2 gap-2">
+        <Button type="button" variant="secondary" fullWidth onClick={() => setConfirming(false)}>
+          Keep
+        </Button>
+        <Button type="button" fullWidth onClick={onRemove}>
+          Remove weekday mark
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function actionMarksFor(
+  byDay: Map<string, MonthMeeting[]>,
+  day: string,
+): MonthMeeting[] {
+  return byDay.get(day) ?? [];
+}
+
+function StudyDayPanel({
+  day,
+  marks,
+  actions,
+}: {
+  day: string;
+  marks: MonthMeeting[];
+  actions: CalendarDayActions;
+}) {
+  if (marks.length === 0) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-muted">Nothing on this day.</p>
+        <Button type="button" fullWidth onClick={() => actions.onPlan(day)}>
+          Plan this day
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+        On this day
+      </p>
+      {visibleMarks(marks, actions).map((mark) => {
+        const when = formatMeetingWhen(mark.day, mark.startTime);
+        const title = mark.detail || when;
+        const copies =
+          mark.source === "session" || mark.source === "repeat"
+            ? actions.copyCount?.(mark.sessionId) ?? 1
+            : 1;
+        return (
+          <div
+            key={`${mark.sessionId}-${mark.day}-${mark.source}`}
+            className="space-y-2 rounded-xl border border-border px-3 py-3"
+          >
+            <p
+              className={[
+                "text-sm font-medium",
+                mark.savedKind === "completed" ? "text-success" : "text-primary",
+              ].join(" ")}
+            >
+              {title}
+            </p>
+            {mark.note && mark.note !== title ? (
+              <p className="text-sm text-primary">{mark.note}</p>
+            ) : null}
+            {copies > 1 && actions.onReviewCopies ? (
+              <Button
+                type="button"
+                fullWidth
+                onClick={() => actions.onReviewCopies?.(mark.sessionId)}
+              >
+                {copies} copies
+              </Button>
+            ) : null}
+            {copies > 1 && mark.hasSavedMark ? (
+              <Button
+                type="button"
+                variant="secondary"
+                fullWidth
+                onClick={() => actions.onRemoveMark(mark.day)}
+              >
+                Remove mark
+              </Button>
+            ) : null}
+            {mark.source === "held" ? (
+              <>
+                <Button
+                  type="button"
+                  fullWidth
+                  onClick={() =>
+                    actions.onLog(mark.day, mark.startTime, {
+                      sessionId: mark.sessionId,
+                      day: mark.day,
+                    })
+                  }
+                >
+                  Log this night
+                </Button>
+                {actions.onRemoveHeld ? (
+                  <RemoveWeekdayMark
+                    onRemove={() => actions.onRemoveHeld?.(mark.sessionId, mark.day)}
+                  />
+                ) : null}
+              </>
+            ) : mark.source === "saved" ? (
+              <>
+                <Button
+                  type="button"
+                  fullWidth
+                  onClick={() =>
+                    mark.savedKind === "completed"
+                      ? actions.onLog(mark.day, mark.startTime)
+                      : actions.onPlan(mark.day)
+                  }
+                >
+                  {mark.savedKind === "completed" ? "Log this night" : "Plan this day"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  fullWidth
+                  onClick={() => actions.onRemoveMark(mark.day)}
+                >
+                  Remove mark
+                </Button>
+              </>
+            ) : copies > 1 ? null : (
+              <>
+                <Button
+                  type="button"
+                  fullWidth
+                  onClick={() => actions.onOpen(mark.sessionId, mark.day)}
+                >
+                  Open
+                </Button>
+                {mark.hasSavedMark ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    fullWidth
+                    onClick={() => actions.onRemoveMark(mark.day)}
+                  >
+                    Remove mark
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

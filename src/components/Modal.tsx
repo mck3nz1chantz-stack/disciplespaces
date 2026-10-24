@@ -25,6 +25,11 @@ interface ModalProps {
    * Prefer this over absolute-positioned panes that collapse to zero height.
    */
   containBody?: boolean;
+  /**
+   * The body fills the shell and does not scroll. A child pane is the only scroller.
+   * Use this when the dialog content already has its own scroll, so two bars do not stack.
+   */
+  nestedScroll?: boolean;
   /** Sticky footer under body (e.g. Done / Back to session). */
   footer?: ReactNode;
 }
@@ -47,6 +52,7 @@ export function Modal({
   activeTab,
   onTabChange,
   containBody = false,
+  nestedScroll = false,
   footer,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -340,7 +346,11 @@ export function Modal({
                 ? `${baseId}-tab-${activeTab}`
                 : undefined
             }
-            className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain"
+            className={
+              nestedScroll
+                ? "relative flex-1 min-h-0 overflow-hidden"
+                : "relative flex-1 min-h-0 overflow-y-auto overscroll-contain"
+            }
           >
             {children}
           </div>

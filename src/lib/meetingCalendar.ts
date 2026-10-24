@@ -22,6 +22,43 @@ export function calendarDay(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
 }
 
+/** Latest session day strictly before `day`. */
+export function previousSessionDay(
+  day: string,
+  days: string[],
+): string | undefined {
+  const target = calendarDay(day);
+  if (!target) return undefined;
+  let best = "";
+  for (const raw of days) {
+    const item = calendarDay(raw);
+    if (item && item < target && item > best) best = item;
+  }
+  return best || undefined;
+}
+
+/** Local calendar day, yyyy-MM-dd. */
+export function localTodayKey(now = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Word shown on a saved day.
+ * Today is the current session. Later days stay Upcoming.
+ */
+export function savedDateLabel(
+  row: { date: string; kind: SavedDateKind },
+  today = localTodayKey(),
+): string {
+  if (row.date === today) {
+    return row.kind === "completed" ? "Completed today" : "Current";
+  }
+  return row.kind === "completed" ? "Completed" : "Upcoming";
+}
+
 /** One row per day. A later save replaces that day’s kind. Empty becomes unset. */
 export function normalizeSavedDates(
   rows: SavedGroupDate[] | undefined,
@@ -89,6 +126,18 @@ export function repeatLabel(session: {
   if (kind === "biweek") return "Every two weeks";
   if (kind === "month") return "Once a month";
   return null;
+}
+
+/** Next date for a repeating plan, or seven days later for a one-time night. */
+export function nextRepeatDay(
+  day: string,
+  repeat: "week" | "biweek" | "month" | "once",
+): string {
+  const current = calendarDay(day);
+  if (!current) return day;
+  if (repeat === "biweek") return addDays(current, 14);
+  if (repeat === "month") return addMonth(current, Number(current.slice(8, 10)));
+  return addDays(current, 7);
 }
 
 function addDays(day: string, n: number): string {
@@ -300,16 +349,62 @@ export function comingForFace(face: MeetingFace): ComingReply[] {
   return face.session.coming ?? [];
 }
 
+export type MonthMarkSource = "session" | "held" | "repeat" | "saved";
+
 export interface MonthMeeting {
   day: string;
   startTime?: string;
   sessionId: string;
   spaceId: string;
   spaceName: string;
+  /** Where this row came from. A repeat is a later week of the living plan. */
+  source: MonthMarkSource;
   /** Set when this phone saved the day. The clock does not decide Done or Coming. */
   savedKind?: SavedDateKind;
   /** Chapters or lesson for this day. */
   note?: string;
+  /** Plain name for the dot, such as "Exodus · Session 1 · Completed". */
+  detail?: string;
+  /** A saved mark sits behind this session. The row is the session. */
+  hasSavedMark?: boolean;
+}
+
+export function studyNameKey(session: {
+  studyName?: string;
+  title?: string;
+}): string {
+  return (session.studyName || session.title || "").trim().toLowerCase();
+}
+
+/** A once night, or a completed night, already stored on this day for this study. */
+export function realSessionOnDay(
+  sessions: Session[],
+  day: string,
+  exceptId?: string,
+  study?: string,
+): Session | undefined {
+  return sessions.find((session) => {
+    if (exceptId && session.id === exceptId) return false;
+    if (calendarDay(session.date) !== day) return false;
+    if (study != null && studyNameKey(session) !== study) return false;
+    return repeatOf(session) === "once" || Boolean(session.meetingDone);
+  });
+}
+
+/** A frozen weekday that already has a real session for that date and study. */
+export function heldCoveredByRealSession(
+  face: MeetingFace,
+  sessions: Session[],
+): boolean {
+  if (!face.held) return false;
+  return Boolean(
+    realSessionOnDay(
+      sessions,
+      face.day,
+      face.session.id,
+      studyNameKey(face.session),
+    ),
+  );
 }
 
 /**
@@ -346,26 +441,68 @@ export function meetingsInMonth(
           ? session.repeatDay
           : Number(calendarDay(session.date).slice(8, 10)) || 1;
 
-      const push = (day: string) => {
+      const push = (
+        day: string,
+        source: MonthMarkSource,
+        startTime?: string,
+      ) => {
         if (day < monthStart || day > monthEnd) return;
-        if (marks.some((row) => row.day === day && row.sessionId === session.id)) return;
+        if (
+          source === "held" &&
+          realSessionOnDay(
+            group.sessions ?? [],
+            day,
+            session.id,
+            studyNameKey(session),
+          )
+        ) {
+          return;
+        }
+        if (marks.some((row) => row.day === day && row.sessionId === session.id)) {
+          return;
+        }
+        const study = (session.studyName || session.title || "").trim();
+        const number = session.sessionNumber ? `Session ${session.sessionNumber}` : "";
+        const today = localTodayKey(now);
+        const done =
+          source === "held"
+            ? true
+            : Boolean(session.meetingDone) || (kind === "once" && day <= today);
+        const state =
+          source === "held"
+            ? "Not logged"
+            : done
+              ? "Completed"
+              : day > today
+                ? "Upcoming"
+                : "Today";
         marks.push({
           day,
-          startTime: time,
+          startTime: startTime ?? time,
           sessionId: session.id,
           spaceId: group.id,
           spaceName: group.name,
+          source,
           note: lessonOnDay(session, day),
+          detail: [study, number, state].filter(Boolean).join(" · "),
+          savedKind:
+            source === "held"
+              ? "completed"
+              : done
+                ? "completed"
+                : day >= today
+                  ? "upcoming"
+                  : undefined,
         });
       };
 
-      for (const held of session.heldDates ?? []) push(held.date);
-
       let day = calendarDay(session.date);
       let guard = 0;
+      let first = true;
       while (day && day <= monthEnd && guard < 80) {
-        push(day);
+        push(day, first || kind === "once" ? "session" : "repeat");
         if (kind === "once") break;
+        first = false;
         day =
           kind === "week"
             ? addDays(day, 7)
@@ -374,10 +511,26 @@ export function meetingsInMonth(
               : addMonth(day, anchor);
         guard += 1;
       }
+      for (const held of session.heldDates ?? []) {
+        push(held.date, "held", normalizeStartTime(held.startTime));
+      }
     }
 
     for (const saved of normalizeSavedDates(group.savedDates) ?? []) {
       if (saved.date < monthStart || saved.date > monthEnd) continue;
+      const behind = marks.filter(
+        (row) =>
+          row.day === saved.date &&
+          row.spaceId === group.id &&
+          row.source !== "saved",
+      );
+      if (behind.length > 0) {
+        const host =
+          behind.find((row) => row.source === "session") ?? behind[0]!;
+        host.hasSavedMark = true;
+        if (saved.covered && !host.note) host.note = saved.covered;
+        continue;
+      }
       const sessionId = `saved:${group.id}:${saved.date}`;
       if (marks.some((row) => row.sessionId === sessionId)) continue;
       marks.push({
@@ -385,8 +538,14 @@ export function meetingsInMonth(
         sessionId,
         spaceId: group.id,
         spaceName: group.name,
+        source: "saved",
         savedKind: saved.kind,
         note: saved.covered,
+        detail: saved.covered
+          ? `${saved.kind === "completed" ? "Completed" : "Upcoming"} · ${saved.covered}`
+          : saved.kind === "completed"
+            ? "Completed date"
+            : "Upcoming date",
       });
     }
   }

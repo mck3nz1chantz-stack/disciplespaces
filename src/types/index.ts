@@ -142,6 +142,17 @@ export interface Session {
    * Never required; empty/undefined is valid.
    */
   title?: string;
+  /**
+   * Living study this meeting belongs to, such as "Exodus".
+   * The study stays current while it holds completed nights and the next one.
+   */
+  studyName?: string;
+  /** 1-based night inside the study. */
+  sessionNumber?: number;
+  /** This night is finished. The study can still be current. */
+  meetingDone?: boolean;
+  /** The whole study is finished and belongs under Past. */
+  studyDone?: boolean;
   attendees: string[]; // array of member ids
   passagesStudied: Passage[];
   /** Answers keyed by TemplateStep.id */

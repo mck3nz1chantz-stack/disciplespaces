@@ -16,7 +16,7 @@ import {
 import { formatMeetingWhen, repeatLabel } from "../lib/meetingCalendar";
 import { PassageList } from "./PassageList";
 import { Button } from "./Button";
-import { PrayerBoard } from "./PrayerBoard";
+import { PrayerBoard, type PrayerSessionScope } from "./PrayerBoard";
 import { PrivateNotesButton } from "./PrivateNotesModal";
 
 interface SessionViewProps {
@@ -25,8 +25,14 @@ interface SessionViewProps {
   members: Member[];
   onEdit: () => void;
   onDelete: () => void;
+  /** Finish this night and keep the study open for the next one. */
+  onCompleteSession?: () => void;
   onClose: () => void;
   onOpenBible?: () => void;
+  /** Drop one logged passage from this session. */
+  onRemovePassage?: (passage: Passage, index: number) => void;
+  /** While a passage removal is saving. */
+  removingPassage?: boolean;
   /**
    * Open device-local private notes for this session.
    * Optional sectionKey for step/section-scoped notes.
@@ -34,6 +40,8 @@ interface SessionViewProps {
   onOpenPrivateNotes?: (sectionKey?: string) => void;
   privateNoteCount?: number;
   spaceId?: string;
+  /** Limits the prayer list to this session window. */
+  prayerScope?: PrayerSessionScope;
 }
 
 export function SessionView({
@@ -42,11 +50,15 @@ export function SessionView({
   members,
   onEdit,
   onDelete,
+  onCompleteSession,
   onClose,
   onOpenBible,
+  onRemovePassage,
+  removingPassage = false,
   onOpenPrivateNotes,
   privateNoteCount,
   spaceId,
+  prayerScope,
 }: SessionViewProps) {
   const dateLabel = formatMeetingWhen(
     session.date,
@@ -142,7 +154,13 @@ export function SessionView({
             />
           )}
         </div>
-        <PassageList passages={passages} readOnly compact />
+        <PassageList
+          passages={passages}
+          readOnly
+          compact
+          disabled={removingPassage}
+          onRemove={onRemovePassage}
+        />
         {onOpenBible && (
           <Button fullWidth onClick={onOpenBible}>
             Open Read
@@ -155,6 +173,7 @@ export function SessionView({
           spaceId={spaceId || session.spaceId}
           members={members}
           sessionId={session.id}
+          sessionScope={prayerScope}
           compact
         />
       )}
@@ -185,6 +204,11 @@ export function SessionView({
       )}
 
       <div className="flex flex-col gap-2 pt-1">
+        {onCompleteSession ? (
+          <Button fullWidth onClick={onCompleteSession}>
+            Complete session
+          </Button>
+        ) : null}
         <Button fullWidth onClick={onEdit}>
           Edit session date
         </Button>

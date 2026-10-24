@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BookOpen, Plus, Trash2 } from "lucide-react";
 import type { Passage } from "../types";
 import {
@@ -20,6 +20,11 @@ interface PassageListProps {
   compact?: boolean;
   /** Emphasize manual entry (Freeform sessions, etc.) */
   emphasizeManual?: boolean;
+  /**
+   * Remove one saved passage. Works on the read-only list so a past
+   * session can drop a bad entry without opening the full editor.
+   */
+  onRemove?: (passage: Passage, index: number) => void;
 }
 
 /**
@@ -36,7 +41,9 @@ export function PassageList({
   disabled = false,
   compact = false,
   emphasizeManual = false,
+  onRemove,
 }: PassageListProps) {
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
   // Assign missing ids so legacy rows keep focus-stable keys while editing.
   useEffect(() => {
     if (readOnly || !onChange || passages.length === 0) return;
@@ -88,8 +95,11 @@ export function PassageList({
       )}
 
       <ul className="space-y-2" aria-label="Logged passages">
-        {passages.map((p, index) => (
-          <li key={p.id ?? `passage-fallback-${index}`}>
+        {passages.map((p, index) => {
+          const rowKey = p.id ?? `passage-fallback-${index}`;
+          const confirming = confirmKey === rowKey;
+          return (
+          <li key={rowKey}>
             {readOnly ? (
               <div
                 className={[
@@ -97,10 +107,47 @@ export function PassageList({
                   compact ? "py-2" : "py-3",
                 ].join(" ")}
               >
-                <p className="font-medium text-primary text-sm flex items-center gap-1.5">
-                  <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {formatPassageRef(p)}
-                </p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="font-medium text-primary text-sm flex items-center gap-1.5 min-w-0">
+                    <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span className="min-w-0">{formatPassageRef(p)}</span>
+                  </p>
+                  {onRemove ? (
+                    confirming ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          className="min-h-11 px-2.5 text-sm font-medium text-danger touch-manipulation"
+                          disabled={disabled}
+                          onClick={() => {
+                            setConfirmKey(null);
+                            onRemove(p, index);
+                          }}
+                        >
+                          Remove
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-11 px-2.5 text-sm font-medium text-primary touch-manipulation"
+                          disabled={disabled}
+                          onClick={() => setConfirmKey(null)}
+                        >
+                          Keep
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="min-h-11 shrink-0 px-2.5 text-sm font-medium text-danger touch-manipulation"
+                        aria-label={`Remove ${formatPassageRef(p)}`}
+                        disabled={disabled}
+                        onClick={() => setConfirmKey(rowKey)}
+                      >
+                        Remove
+                      </button>
+                    )
+                  ) : null}
+                </div>
                 {p.contextNote && (
                   <p className="text-sm text-muted mt-1 whitespace-pre-wrap">
                     {p.contextNote}
@@ -117,7 +164,8 @@ export function PassageList({
               />
             )}
           </li>
-        ))}
+          );
+        })}
       </ul>
 
       {!readOnly && (
