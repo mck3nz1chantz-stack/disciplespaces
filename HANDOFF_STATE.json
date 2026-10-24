@@ -5,15 +5,15 @@
   "kind": "first-party",
   "lastUpdated": "2026-10-24",
   "gitBranch": "main",
-  "lastKnownCommit": "8cf9e55",
+  "lastKnownCommit": "c847140",
   "deploy": {
     "pages": "https://disciple-spaces.pages.dev",
     "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
     "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
-    "latestDeploymentUrl": "https://c2cfec43.disciple-spaces.pages.dev",
-    "notes": "Pages deployed 2026-10-24 from 8cf9e55. Read scrolls on a phone while logging a passage. A past session can remove a bad passage. Relay was not redeployed. Canonical https://disciple-spaces.pages.dev"
+    "latestDeploymentUrl": "https://b1c92c66.disciple-spaces.pages.dev",
+    "notes": "Pages deployed 2026-10-24 from c847140. A session name follows the latest passage that is still logged. Relay was not redeployed. Canonical https://disciple-spaces.pages.dev"
   },
-  "currentSlice": "Deployed 2026-10-24 from 8cf9e55. Phone Read scroll and past-session passage removal are live on https://disciple-spaces.pages.dev. Two-phone sync is sidelined, not accepted.",
+  "currentSlice": "Deployed 2026-10-24 from c847140. Session names follow the latest logged passage on https://disciple-spaces.pages.dev. Two-phone sync is sidelined, not accepted.",
   "nextSlice": "Do not resume two-phone share. Do not start a cross-reference library unless Kenzi names that slice.",
   "sliceStatuses": {
     "sync-relay-harden": "done-partial — field reports still fail to sync live",

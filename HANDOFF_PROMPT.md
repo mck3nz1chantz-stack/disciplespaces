@@ -43,4 +43,4 @@ Two-phone share accept. Spec limits are in `docs/drafts/reader-and-group-2026-10
 
 ## Next spec
 
-`docs/drafts/group-ux-2026-10.md` is the group-page tidy. U1 through U4, the phone Read scroll fix, and past-session passage removal are live from commit 8cf9e55. Live: https://disciple-spaces.pages.dev. Deployment: https://c2cfec43.disciple-spaces.pages.dev. Relay was not redeployed.
+`docs/drafts/group-ux-2026-10.md` is the group-page tidy. Session names follow the latest logged passage, live from commit c847140. Live: https://disciple-spaces.pages.dev. Deployment: https://b1c92c66.disciple-spaces.pages.dev. Relay was not redeployed.
