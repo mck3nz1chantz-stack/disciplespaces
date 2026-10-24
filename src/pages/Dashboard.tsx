@@ -1,8 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, UserPlus, Users } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { AddPersonForm } from "../components/AddPersonForm";
+import { InlineRename } from "../components/InlineRename";
+import { MemberChip } from "../components/MemberChip";
 import {
   consumePendingHomeAction,
   consumePendingJoinRaw,
@@ -11,12 +15,11 @@ import { lastActivityIso, useAppStore } from "../stores/useAppStore";
 import { useLiveSpaces, useLiveStudyNoteCount, useLiveStudyQueue } from "../hooks/useLiveDb";
 import { getSpaceTemplateMeta } from "../lib/spaceTemplates";
 import type { Space } from "../types";
-import { spaceKindLabel } from "../types";
+import { maxMembersForSpace, spaceKindLabel } from "../types";
 import { formatMeetingWhen, soonestUpcoming } from "../lib/meetingCalendar";
 import { MonthCalendar } from "../components/MonthCalendar";
 import { StudyColorControl } from "../components/StudyColorControl";
 import { isPersonalStudy } from "../lib/study";
-import { isSpaceGuest } from "../lib/sync";
 import { formatQueueLabel } from "../lib/studyQueue";
 
 export function Dashboard() {
@@ -29,6 +32,11 @@ export function Dashboard() {
   const error = useAppStore((s) => s.error);
   const initialize = useAppStore((s) => s.initialize);
   const setActiveStudy = useAppStore((s) => s.setActiveStudy);
+  const updateSpace = useAppStore((s) => s.updateSpace);
+  const addMember = useAppStore((s) => s.addMember);
+  const removeMember = useAppStore((s) => s.removeMember);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [addingId, setAddingId] = useState<string | null>(null);
 
   useEffect(() => {
     void initialize();
@@ -185,13 +193,80 @@ export function Dashboard() {
             <li key={space.id}>
               <StudyCard
                 space={space}
+                renaming={renamingId === space.id}
+                adding={addingId === space.id}
                 onOpenRead={() => {
                   setActiveStudy(space.id);
                   navigate("/bible");
                 }}
-                onRename={() =>
-                  navigate(`/space/${space.id}`, { state: { openRename: true } })
-                }
+                onRename={() => {
+                  setAddingId(null);
+                  setRenamingId(space.id);
+                }}
+                onCancelRename={() => {
+                  setRenamingId(null);
+                  window.requestAnimationFrame(() => {
+                    document.getElementById(`rename-${space.id}`)?.focus();
+                  });
+                }}
+                onSaveName={async (name) => {
+                  if (name === space.name) {
+                    setRenamingId(null);
+                    return;
+                  }
+                  try {
+                    await updateSpace(space.id, { name });
+                    toast.success("Name saved");
+                    setRenamingId(null);
+                  } catch (err) {
+                    toast.error(
+                      err instanceof Error ? err.message : "Could not update name",
+                    );
+                    throw err;
+                  }
+                }}
+                onAddPerson={() => {
+                  setRenamingId(null);
+                  setAddingId(space.id);
+                }}
+                onCancelAdd={() => {
+                  setAddingId(null);
+                  window.requestAnimationFrame(() => {
+                    document.getElementById(`add-person-${space.id}`)?.focus();
+                  });
+                }}
+                onSavePerson={async (name) => {
+                  if (
+                    space.members.some(
+                      (m) => m.name.toLowerCase() === name.toLowerCase(),
+                    )
+                  ) {
+                    toast.message(`${name} is already on the list`);
+                    setAddingId(null);
+                    return;
+                  }
+                  try {
+                    await addMember(space.id, name);
+                    toast.success(`${name} added`);
+                    setAddingId(null);
+                  } catch (err) {
+                    toast.error(
+                      err instanceof Error ? err.message : "Could not add person",
+                    );
+                    throw err;
+                  }
+                }}
+                onRemovePerson={async (memberId) => {
+                  const member = space.members.find((m) => m.id === memberId);
+                  try {
+                    await removeMember(space.id, memberId);
+                    toast.success(`${member?.name ?? "Person"} removed`);
+                  } catch (err) {
+                    toast.error(
+                      err instanceof Error ? err.message : "Could not remove person",
+                    );
+                  }
+                }}
               />
             </li>
           ))}
@@ -251,12 +326,28 @@ export function SpaceKindBadge({
 
 function StudyCard({
   space,
+  renaming,
+  adding,
   onOpenRead,
   onRename,
+  onCancelRename,
+  onSaveName,
+  onAddPerson,
+  onCancelAdd,
+  onSavePerson,
+  onRemovePerson,
 }: {
   space: Space;
+  renaming: boolean;
+  adding: boolean;
   onOpenRead: () => void;
   onRename: () => void;
+  onCancelRename: () => void;
+  onSaveName: (name: string) => Promise<void> | void;
+  onAddPerson: () => void;
+  onCancelAdd: () => void;
+  onSavePerson: (name: string) => Promise<void> | void;
+  onRemovePerson: (memberId: string) => Promise<void> | void;
 }) {
   const personal = isPersonalStudy(space);
   const queue = useLiveStudyQueue(space.id);
@@ -273,31 +364,71 @@ function StudyCard({
     noteCount == null
       ? "Notes"
       : `${noteCount} note${noteCount === 1 ? "" : "s"}`;
+  const canAddPerson = space.members.length < maxMembersForSpace(space.spaceKind);
 
   return (
     <Card className="transition-all duration-150 hover:border-primary/40 hover:shadow-md">
       <div className="flex items-start gap-3">
         <StudyColorControl space={space} compact />
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex items-start justify-between gap-2">
-            <Link
-              to={`/space/${space.id}`}
-              className="min-w-0 touch-manipulation"
-            >
-              <h3 className="text-lg font-semibold truncate text-primary">
-                {space.name}
-              </h3>
-            </Link>
-            {!isSpaceGuest(space.sync) && (
-              <Button
-                variant="secondary"
-                className="!py-2 !px-3 text-sm shrink-0"
-                onClick={onRename}
+          {renaming ? (
+            <InlineRename
+              name={space.name}
+              onSave={onSaveName}
+              onCancel={onCancelRename}
+            />
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Link
+                to={`/space/${space.id}`}
+                className="min-w-0 touch-manipulation"
               >
-                Rename
-              </Button>
-            )}
-          </div>
+                <h3 className="text-lg font-semibold truncate text-primary">
+                  {space.name}
+                </h3>
+              </Link>
+              {!adding && (
+                <div className="flex flex-wrap gap-2">
+                  {canAddPerson && (
+                    <Button
+                      id={`add-person-${space.id}`}
+                      className="!py-2 !px-3 text-sm"
+                      onClick={onAddPerson}
+                    >
+                      <UserPlus className="h-4 w-4" aria-hidden />
+                      Add person
+                    </Button>
+                  )}
+                  <Button
+                    id={`rename-${space.id}`}
+                    variant="secondary"
+                    className="!py-2 !px-3 text-sm"
+                    onClick={onRename}
+                  >
+                    Rename
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {adding && !renaming ? (
+            <AddPersonForm onSave={onSavePerson} onCancel={onCancelAdd} />
+          ) : null}
+          {space.members.length > 0 && (
+            <ul
+              className="flex flex-wrap gap-1.5 pt-1"
+              aria-label={`People in ${space.name}`}
+            >
+              {space.members.map((member) => (
+                <li key={member.id}>
+                  <MemberChip
+                    name={member.name}
+                    onRemove={() => void onRemovePerson(member.id)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
           <button
             type="button"
             onClick={onOpenRead}

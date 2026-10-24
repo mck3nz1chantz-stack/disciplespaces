@@ -46,7 +46,7 @@ export const CONNECT_SAFELY_STEPS: ConnectStep[] = [
     n: 3,
     title: "Guests only Join",
     detail:
-      "Same website → Join a group → room key + name. One join links their phone to your room. Guests cannot edit the title or people list.",
+      "Same website → Join a group → room key + name. One join links their phone to your room. Each phone keeps its own people list.",
     who: "guest",
   },
   {
@@ -60,7 +60,7 @@ export const CONNECT_SAFELY_STEPS: ConnectStep[] = [
 
 export const CONNECT_SAFELY_DONT = [
   "Guests: only Join with the host’s room key — never open a second room.",
-  "Guests: do not edit the people list or group title — ask the host, then Sync.",
+  "Each phone adds and removes its own people. Ask the host before changing the shared group title.",
   "One room per group. The server reuses the same room for the group id.",
   "Always use https://disciple-spaces.pages.dev (same site as the host).",
   "Joining one group does not delete or change your other Spaces.",

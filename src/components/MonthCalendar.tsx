@@ -8,13 +8,14 @@ import {
   meetingsInMonth,
   type MonthMeeting,
 } from "../lib/meetingCalendar";
-import type { Session } from "../types";
+import type { SavedGroupDate, Session } from "../types";
 import { normalizeHue, PERSONAL_HUE, studyColor } from "../lib/study";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
-type CalendarFilter = "coming" | "done" | "today";
+type CalendarFilter = "all" | "coming" | "done" | "today";
 
 const FILTERS: { id: CalendarFilter; label: string }[] = [
+  { id: "all", label: "All" },
   { id: "coming", label: "Coming" },
   { id: "done", label: "Done" },
   { id: "today", label: "Today" },
@@ -28,6 +29,7 @@ export function MonthCalendar({
     name: string;
     colorHue?: number;
     sessions?: Session[];
+    savedDates?: SavedGroupDate[];
   }>;
 }) {
   const today = new Date();
@@ -35,15 +37,20 @@ export function MonthCalendar({
     year: today.getFullYear(),
     month: today.getMonth() + 1,
   });
-  const [selected, setSelected] = useState<string | null>(null);
-  const [filter, setFilter] = useState<CalendarFilter>("coming");
+  const [selected, setSelected] = useState<string | null>(
+    format(today, "yyyy-MM-dd"),
+  );
+  const [filter, setFilter] = useState<CalendarFilter>("all");
   const [open, setOpen] = useState(false);
 
   const marks = useMemo(() => {
     const now = new Date();
     const todayKey = format(now, "yyyy-MM-dd");
     return meetingsInMonth(groups, cursor.year, cursor.month).filter((mark) => {
+      if (filter === "all") return true;
       if (filter === "today") return mark.day === todayKey;
+      if (mark.savedKind === "completed") return filter === "done";
+      if (mark.savedKind === "upcoming") return filter === "coming";
       const past = isOccurrencePast(mark.day, mark.startTime, now);
       return filter === "done" ? past : !past;
     });
@@ -70,13 +77,15 @@ export function MonthCalendar({
     return map;
   }, [groups]);
   const selectedMarks = selected ? byDay.get(selected) ?? [] : [];
-  const countWord = marks.length === 1 ? "1 meeting" : `${marks.length} meetings`;
+  const countWord = marks.length === 1 ? "1 date" : `${marks.length} dates`;
   const countLabel =
-    filter === "today"
-      ? `${countWord} today`
-      : filter === "done"
-        ? `${countWord} done this month`
-        : `${countWord} coming this month`;
+    filter === "all"
+      ? `${countWord} this month`
+      : filter === "today"
+        ? `${countWord} today`
+        : filter === "done"
+          ? `${countWord} done this month`
+          : `${countWord} coming this month`;
 
   function shift(delta: number) {
     setSelected(null);
@@ -133,7 +142,7 @@ export function MonthCalendar({
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-1" role="group" aria-label="Show meetings">
+      <div className="grid grid-cols-4 gap-1" role="group" aria-label="Show dates">
         {FILTERS.map((item) => {
           const on = filter === item.id;
           return (
@@ -146,12 +155,18 @@ export function MonthCalendar({
                 if (item.id === "today") {
                   setCursor({ year: today.getFullYear(), month: today.getMonth() + 1 });
                   setSelected(todayKey);
+                } else if (
+                  item.id === "all" &&
+                  cursor.year === today.getFullYear() &&
+                  cursor.month === today.getMonth() + 1
+                ) {
+                  setSelected(todayKey);
                 } else {
                   setSelected(null);
                 }
               }}
               className={[
-                "rounded-lg py-2 text-xs font-medium touch-manipulation",
+                "min-h-11 rounded-lg px-1 py-2 text-xs font-medium touch-manipulation",
                 on ? "bg-primary text-on-primary" : "border border-border text-muted",
               ].join(" ")}
             >
@@ -160,6 +175,16 @@ export function MonthCalendar({
           );
         })}
       </div>
+      <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-success" aria-hidden />
+          Completed
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-sm bg-upcoming" aria-hidden />
+          Upcoming
+        </span>
+      </p>
       <div className="grid grid-cols-7 gap-1 text-center">
         {WEEKDAYS.map((label, index) => (
           <div key={`${label}-${index}`} className="text-[11px] text-muted py-1">
@@ -191,7 +216,20 @@ export function MonthCalendar({
               aria-pressed={isSelected}
               aria-label={
                 dayMarks.length
-                  ? `${dayNum}, ${dayMarks.length} meeting${dayMarks.length === 1 ? "" : "s"}`
+                  ? `${dayNum}, ${dayMarks
+                      .map((mark) =>
+                        [
+                          mark.savedKind === "completed"
+                            ? "completed"
+                            : mark.savedKind === "upcoming"
+                              ? "upcoming"
+                              : "meeting",
+                          mark.note,
+                        ]
+                          .filter(Boolean)
+                          .join(", "),
+                      )
+                      .join("; ")}`
                   : String(dayNum)
               }
             >
@@ -200,13 +238,20 @@ export function MonthCalendar({
                 <span className="mt-1 flex justify-center gap-0.5" aria-hidden>
                   {dayMarks.slice(0, 3).map((mark) => (
                     <span
-                      key={mark.sessionId}
+                      key={`${mark.sessionId}:${mark.savedKind ?? "plan"}`}
                       className="h-1.5 w-1.5 rounded-full"
                       data-study-dot={mark.spaceId}
                       style={{
-                        background: studyColor(
-                          hueBySpace.get(mark.spaceId) ?? PERSONAL_HUE,
-                        ).fill,
+                        background:
+                          mark.savedKind === "completed"
+                            ? "var(--color-success)"
+                            : mark.savedKind === "upcoming"
+                              ? "var(--color-upcoming)"
+                              : studyColor(
+                                  hueBySpace.get(mark.spaceId) ?? PERSONAL_HUE,
+                                ).fill,
+                        borderRadius:
+                          mark.savedKind === "upcoming" ? "2px" : "999px",
                         boxShadow: isSelected ? "0 0 0 1px white" : undefined,
                       }}
                     />
@@ -221,23 +266,47 @@ export function MonthCalendar({
         <div className="space-y-1">
           {(filter === "today" ? marks : selectedMarks).length === 0 ? (
             <p className="text-sm text-muted">
-              {filter === "today"
-                ? "Nothing today."
-                : filter === "done"
-                  ? "Nothing done this day."
-                  : "Nothing coming this day."}
+              {filter === "all"
+                ? "Nothing on this day."
+                : filter === "today"
+                  ? "Nothing today."
+                  : filter === "done"
+                    ? "Nothing done this day."
+                    : "Nothing coming this day."}
             </p>
           ) : (
-            (filter === "today" ? marks : selectedMarks).map((mark) => (
+            (filter === "today" ? marks : selectedMarks).map((mark) => {
+              const kindLabel =
+                mark.savedKind === "completed"
+                  ? "Completed"
+                  : mark.savedKind === "upcoming"
+                    ? "Upcoming"
+                    : "";
+              const when = formatMeetingWhen(mark.day, mark.startTime);
+              const groupName = groups.length > 1 ? ` · ${mark.spaceName}` : "";
+              return (
               <Link
-                key={`${mark.sessionId}-${mark.day}`}
+                key={`${mark.sessionId}-${mark.day}-${mark.savedKind ?? "plan"}`}
                 to={`/space/${mark.spaceId}`}
-                className="block text-sm text-primary touch-manipulation"
+                className="block min-h-11 py-2 text-sm text-primary touch-manipulation"
               >
-                {formatMeetingWhen(mark.day, mark.startTime)}
-                {groups.length > 1 ? ` · ${mark.spaceName}` : ""}
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  {mark.savedKind === "completed" ? (
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-success" aria-hidden />
+                  ) : mark.savedKind === "upcoming" ? (
+                    <span className="h-2 w-2 shrink-0 rounded-sm bg-upcoming" aria-hidden />
+                  ) : null}
+                  <span className={mark.savedKind === "completed" ? "text-success" : undefined}>
+                    {kindLabel ? `${kindLabel} · ${when}` : when}
+                    {groupName}
+                  </span>
+                </span>
+                {mark.note ? (
+                  <span className="mt-0.5 block text-primary">{mark.note}</span>
+                ) : null}
               </Link>
-            ))
+              );
+            })
           )}
         </div>
       )}

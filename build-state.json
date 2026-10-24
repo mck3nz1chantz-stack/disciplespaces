@@ -158,11 +158,11 @@
     "deployCommand": "npm run deploy",
     "status": "deployed",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
-    "deployedAt": "2026-07-22T20:30:00.000Z",
-    "releaseNotes": "Session sheet height fix (Start meeting modal no longer stuck empty); zip restore; SW v4; host reclaim"
+    "latestDeploymentUrl": "https://f5edccb8.disciple-spaces.pages.dev",
+    "deployedAt": "2026-10-24T01:09:18.000Z",
+    "releaseNotes": "Calendar opens on All, so completed, today, and upcoming show together. Direct upload of 03001c3 plus uncommitted files."
   },
-  "grokBuildStatus": "deployed-session-sheet-fix",
+  "grokBuildStatus": "deployed-calendar-all",
   "grokDocsStatus": "pending",
   "grokLawStatus": "pending-prebuild",
   "nextPhase": "Deploy space-relay Worker + set VITE_SPACE_RELAY_URL; opportunistic auto-sync; custom domain when product-ready; GrokDocs / GrokLaw",
@@ -181,7 +181,7 @@
     "defaultMode": "local-only",
     "privateNotes": "never",
     "autoSync": "foreground-connected-only",
-    "versionId": "79d8903d-7418-4834-9c20-81b6077edc9f"
+    "versionId": "b614c621-f91c-47fb-8a19-13f3032a2f53"
   },
   "recentFeatures": {
     "privateNotes": {
@@ -254,18 +254,18 @@
     "summary": "PWA brick prevention + guest host reclaim + zip restore (prior)"
   },
   "lastDeploy": {
-    "at": "2026-07-22T20:30:00.000Z",
+    "at": "2026-10-24T01:09:18.000Z",
     "project": "disciple-spaces",
-    "deploymentUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
+    "deploymentUrl": "https://f5edccb8.disciple-spaces.pages.dev",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "notes": "Session modal height fix for Start today's meeting; prior restore/SW/host fixes included"
+    "notes": "Calendar opens on All, so completed, today, and upcoming show together. Direct upload of 03001c3 plus uncommitted files."
   },
   "hosting": {
     "provider": "Cloudflare Pages",
-    "previewUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
+    "previewUrl": "https://f5edccb8.disciple-spaces.pages.dev",
     "productionDomain": "disciple-spaces.pages.dev",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://3c4f94d0.disciple-spaces.pages.dev",
+    "latestDeploymentUrl": "https://f5edccb8.disciple-spaces.pages.dev",
     "notes": "Recorded from cloudflarePages/lastDeploy for project-health hosting check"
   },
   "discoverability": {

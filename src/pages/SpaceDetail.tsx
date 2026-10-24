@@ -32,6 +32,9 @@ import {
 import { toast } from "sonner";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
+import { AddPersonForm } from "../components/AddPersonForm";
+import { InlineRename } from "../components/InlineRename";
+import { MemberChip } from "../components/MemberChip";
 import { Modal } from "../components/Modal";
 import { MemberEditor } from "../components/MemberEditor";
 import { InviteModal } from "../components/InviteModal";
@@ -76,12 +79,19 @@ import {
   normalizeSectionKey,
   SECTION_GENERAL,
 } from "../lib/sessionSections";
-import type { ComingMark, Member, Session, SpaceKind, Template, WeekReading } from "../types";
+import type {
+  ComingMark,
+  Member,
+  SavedDateKind,
+  Session,
+  Template,
+  WeekReading,
+} from "../types";
 import { formatPassageRef, formatWeekReading, parseWeekPassage } from "../lib/passages";
 import { MonthCalendar } from "../components/MonthCalendar";
+import { SaveGroupDates } from "../components/SaveGroupDates";
 import {
   maxMembersForSpace,
-  normalizeSpaceKind,
   PRIVATE_SECTION,
   spaceKindLabel,
 } from "../types";
@@ -149,6 +159,7 @@ export function SpaceDetail() {
   const deleteSpace = useAppStore((s) => s.deleteSpace);
   const setSpaceMembers = useAppStore((s) => s.setSpaceMembers);
   const addMember = useAppStore((s) => s.addMember);
+  const removeMember = useAppStore((s) => s.removeMember);
   const syncSpaceNow = useAppStore((s) => s.syncSpaceNow);
   const createSession = useAppStore((s) => s.createSession);
   const updateSession = useAppStore((s) => s.updateSession);
@@ -175,6 +186,7 @@ export function SpaceDetail() {
   const notFound = liveSpace === null;
 
   const [editOpen, setEditOpen] = useState(false);
+  const [renamingTitle, setRenamingTitle] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -204,7 +216,6 @@ export function SpaceDetail() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editPlace, setEditPlace] = useState("");
-  const [draftSpaceKind, setDraftSpaceKind] = useState<SpaceKind>("group");
   const [draftMembers, setDraftMembers] = useState<Member[]>([]);
   const [saving, setSaving] = useState(false);
   const [sessionVisible, setSessionVisible] = useState(SESSION_PAGE_SIZE);
@@ -230,8 +241,6 @@ export function SpaceDetail() {
   /** Gather ritual: Meet → Study → Prayer (in-flow under hero). */
   const [gather, setGather] = useState<GatherState>(EMPTY_GATHER);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
-  const [quickName, setQuickName] = useState("");
-  const [quickAdding, setQuickAdding] = useState(false);
   const [claimingHost, setClaimingHost] = useState(false);
   const sessionScrollRef = useRef<HTMLDivElement>(null);
 
@@ -294,7 +303,7 @@ export function SpaceDetail() {
     } | null;
     if (!space || !state) return;
     if (state.openRename) {
-      openEdit();
+      startRename();
       navigate(location.pathname, { replace: true, state: {} });
       return;
     }
@@ -394,6 +403,11 @@ export function SpaceDetail() {
     };
   }, [spaceSessions, updateSession]);
 
+  function startRename() {
+    if (!space) return;
+    setRenamingTitle(true);
+  }
+
   function openEdit() {
     if (!space) return;
     if (isSpaceGuest(space.sync)) {
@@ -405,8 +419,21 @@ export function SpaceDetail() {
     setEditName(space.name);
     setEditDescription(space.description ?? "");
     setEditPlace(space.place ?? "");
-    setDraftSpaceKind(normalizeSpaceKind(space.spaceKind));
     setEditOpen(true);
+  }
+
+  async function saveInlineName(name: string) {
+    if (!space) return;
+    if (name === space.name) {
+      setRenamingTitle(false);
+      return;
+    }
+    await updateSpace(space.id, { name });
+    toast.success("Name saved");
+    setRenamingTitle(false);
+    window.requestAnimationFrame(() => {
+      document.getElementById("group-rename-button")?.focus();
+    });
   }
 
   function openSpacePrivateNotes() {
@@ -428,9 +455,8 @@ export function SpaceDetail() {
   function openMembers() {
     if (!space) return;
     if (isSpaceGuest(space.sync)) {
-      toast.message("Only the host manages who’s here", {
-        description:
-          "Ask the host to add or remove people, then tap Sync to refresh.",
+      toast.message("Only the host renames people", {
+        description: "Tap × on a name to remove someone from this phone.",
       });
       return;
     }
@@ -438,28 +464,69 @@ export function SpaceDetail() {
     setMembersOpen(true);
   }
 
-  async function handleQuickAdd(e?: FormEvent) {
-    e?.preventDefault();
+  function openAddPerson() {
+    setQuickAddOpen(true);
+    window.requestAnimationFrame(() => {
+      document.getElementById("group-add-person")?.scrollIntoView({
+        block: "center",
+      });
+    });
+  }
+
+  async function saveAddedPerson(name: string) {
     if (!space || !id) return;
-    if (isSpaceGuest(space.sync)) {
-      toast.error("Only the host can add people to this group");
-      return;
-    }
-    const name = quickName.trim();
-    if (!name) {
-      toast.error("Enter a name");
-      return;
-    }
-    setQuickAdding(true);
-    try {
-      await addMember(id, name);
-      setQuickName("");
+    if (
+      space.members.some((m) => m.name.toLowerCase() === name.toLowerCase())
+    ) {
+      toast.message(`${name} is already on the list`);
       setQuickAddOpen(false);
-      toast.success(`${name} added`);
+      return;
+    }
+    await addMember(id, name);
+    toast.success(`${name} added`);
+    setQuickAddOpen(false);
+  }
+
+  async function saveGroupDate(
+    date: string,
+    kind: SavedDateKind,
+    covered?: string,
+  ) {
+    if (!space) return;
+    const without = (space.savedDates ?? []).filter((row) => row.date !== date);
+    await updateSpace(space.id, {
+      savedDates: [
+        ...without,
+        {
+          date,
+          kind,
+          covered: kind === "completed" ? covered?.trim() || undefined : undefined,
+        },
+      ],
+    });
+    toast.success(
+      kind === "completed" ? "Completed date saved" : "Upcoming date saved",
+    );
+  }
+
+  async function removeGroupDate(date: string) {
+    if (!space) return;
+    await updateSpace(space.id, {
+      savedDates: (space.savedDates ?? []).filter((row) => row.date !== date),
+    });
+    toast.success("Date removed");
+  }
+
+  async function removePerson(memberId: string) {
+    if (!space || !id) return;
+    const member = space.members.find((m) => m.id === memberId);
+    try {
+      await removeMember(id, memberId);
+      toast.success(`${member?.name ?? "Person"} removed`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not add person");
-    } finally {
-      setQuickAdding(false);
+      toast.error(
+        err instanceof Error ? err.message : "Could not remove person",
+      );
     }
   }
 
@@ -916,7 +983,6 @@ export function SpaceDetail() {
         name: editName,
         description: editDescription,
         place: editPlace,
-        spaceKind: draftSpaceKind,
       });
       toast.success("Name saved");
       setEditOpen(false);
@@ -1301,7 +1367,7 @@ export function SpaceDetail() {
     isGuest &&
     spaceSync.mode === "connected" &&
     Boolean(spaceSync.roomId);
-  const canAddPeople = isHost && peopleCount < maxPeople;
+  const canAddPeople = peopleCount < maxPeople;
   const latestSession = spaceSessions[0];
   const needsRoomOpen =
     isHost &&
@@ -1310,25 +1376,32 @@ export function SpaceDetail() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-2">
+      <div className="space-y-2">
         <NavBreadcrumb
-          className="flex-1"
           items={[
             { label: "Studies", to: "/studies" },
             { label: space.name },
           ]}
         />
-        <div className="flex items-center gap-1 shrink-0">
-          {isHost && (
+        <div className="flex flex-wrap items-center gap-2">
+          {canAddPeople && (
             <Button
-              variant="secondary"
               className="!py-2 !px-3 text-sm"
-              onClick={openEdit}
+              onClick={openAddPerson}
             >
-              <Pencil className="h-4 w-4" aria-hidden />
-              Rename
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Add person
             </Button>
           )}
+          <Button
+            id="group-rename-button"
+            variant="secondary"
+            className="!py-2 !px-3 text-sm"
+            onClick={startRename}
+          >
+            <Pencil className="h-4 w-4" aria-hidden />
+            Rename
+          </Button>
           {!isPersonalStudy(space) && (
           <Button
             variant="ghost"
@@ -1353,9 +1426,31 @@ export function SpaceDetail() {
             {spaceKindLabel(space.spaceKind)}
             {isGuest ? " · Guest on this phone" : " · Your group"}
           </p>
-          <h2 className="text-2xl sm:text-3xl leading-tight tracking-tight">
-            {space.name}
-          </h2>
+          {renamingTitle ? (
+            <InlineRename
+              name={space.name}
+              onSave={async (name) => {
+                try {
+                  await saveInlineName(name);
+                } catch (err) {
+                  toast.error(
+                    err instanceof Error ? err.message : "Could not update space",
+                  );
+                  throw err;
+                }
+              }}
+              onCancel={() => {
+                setRenamingTitle(false);
+                window.requestAnimationFrame(() => {
+                  document.getElementById("group-rename-button")?.focus();
+                });
+              }}
+            />
+          ) : (
+            <h2 className="text-2xl sm:text-3xl leading-tight tracking-tight">
+              {space.name}
+            </h2>
+          )}
           <p className="text-sm text-primary">
             <Link
               to="/bible"
@@ -1372,8 +1467,32 @@ export function SpaceDetail() {
                 : "Not opened yet"}
             </Link>
           </p>
+          {quickAddOpen && canAddPeople && (
+            <AddPersonForm
+              onCancel={() => setQuickAddOpen(false)}
+              onSave={async (name) => {
+                try {
+                  await saveAddedPerson(name);
+                } catch (err) {
+                  toast.error(
+                    err instanceof Error ? err.message : "Could not add person",
+                  );
+                  throw err;
+                }
+              }}
+            />
+          )}
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <StudyColorControl space={space} />
+            {isHost && (
+              <Button
+                variant="secondary"
+                className="!py-2 !px-3 text-sm"
+                onClick={openEdit}
+              >
+                Edit details
+              </Button>
+            )}
             <Button
               variant="secondary"
               className="!py-2 !px-3 text-sm"
@@ -1413,6 +1532,18 @@ export function SpaceDetail() {
               {spaceSessions.length} meeting
               {spaceSessions.length === 1 ? "" : "s"}
             </span>
+          )}
+          {space.members.length > 0 && (
+            <ul className="flex flex-wrap gap-1.5 basis-full" aria-label="People on this phone">
+              {space.members.map((m) => (
+                <li key={m.id}>
+                  <MemberChip
+                    name={m.name}
+                    onRemove={() => void removePerson(m.id)}
+                  />
+                </li>
+              ))}
+            </ul>
           )}
           {typeof prayerBoardCount === "number" && prayerBoardCount > 0 && (
             <button
@@ -1490,8 +1621,14 @@ export function SpaceDetail() {
             name: space.name,
             colorHue: space.colorHue,
             sessions: spaceSessions,
+            savedDates: space.savedDates,
           },
         ]}
+      />
+      <SaveGroupDates
+        dates={space.savedDates ?? []}
+        onSave={saveGroupDate}
+        onRemove={removeGroupDate}
       />
 
       {/* Upcoming, then Past */}
@@ -1980,44 +2117,25 @@ export function SpaceDetail() {
             >
               Edit list
             </button>
-          ) : (
-            <span className="text-xs text-muted px-2">Host manages list</span>
-          )}
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {space.members.map((m) =>
-            isHost ? (
-              <button
-                key={m.id}
-                type="button"
-                onClick={openMembers}
-                className="inline-flex max-w-[9.5rem] min-h-11 items-center rounded-full border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-primary touch-manipulation active:scale-[0.98]"
-                title={m.name}
-              >
-                <span className="truncate">{m.name}</span>
-              </button>
-            ) : (
-              <span
-                key={m.id}
-                className="inline-flex max-w-[9.5rem] min-h-11 items-center rounded-full border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-primary"
-                title={m.name}
-              >
-                <span className="truncate">{m.name}</span>
-              </span>
-            ),
-          )}
+          {space.members.map((m) => (
+            <MemberChip
+              key={m.id}
+              name={m.name}
+              onRemove={() => void removePerson(m.id)}
+            />
+          ))}
           {canAddPeople && (
             <button
               type="button"
-              onClick={() => {
-                setQuickAddOpen((v) => !v);
-                setQuickName("");
-              }}
+              onClick={openAddPerson}
               className="inline-flex min-h-11 items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-3.5 py-2.5 text-sm font-medium text-primary touch-manipulation"
             >
               <Plus className="h-4 w-4" aria-hidden />
-              Add
+              Add person
             </button>
           )}
           {isHost && !needsRoomOpen && (
@@ -2032,31 +2150,7 @@ export function SpaceDetail() {
           )}
         </div>
 
-        {quickAddOpen && canAddPeople && (
-          <form
-            onSubmit={(e) => void handleQuickAdd(e)}
-            className="flex gap-2"
-          >
-            <input
-              value={quickName}
-              onChange={(e) => setQuickName(e.target.value)}
-              className="min-w-0 flex-1 rounded-xl border border-border bg-bg px-3 py-3 text-base"
-              placeholder="Name"
-              maxLength={60}
-              autoFocus
-              disabled={quickAdding}
-              enterKeyHint="done"
-              autoComplete="name"
-            />
-            <Button
-              type="submit"
-              className="shrink-0"
-              disabled={quickAdding || !quickName.trim()}
-            >
-              {quickAdding ? "…" : "Save"}
-            </Button>
-          </form>
-        )}
+
       </section>
 
       {/* Zone 5 — More (collapsed) */}
@@ -2193,56 +2287,6 @@ export function SpaceDetail() {
               placeholder="Room 2"
             />
           </label>
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Space type</legend>
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  {
-                    id: "group" as const,
-                    label: "Group",
-                    hint: `Up to ${maxMembersForSpace("group")}`,
-                  },
-                  {
-                    id: "family" as const,
-                    label: "Family",
-                    hint: `Up to ${maxMembersForSpace("family")}`,
-                  },
-                ] as const
-              ).map((opt) => {
-                const selected = draftSpaceKind === opt.id;
-                return (
-                  <label
-                    key={opt.id}
-                    className={[
-                      "rounded-xl border px-3 py-3 touch-manipulation cursor-pointer text-center",
-                      selected
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-bg",
-                    ].join(" ")}
-                  >
-                    <input
-                      type="radio"
-                      name="edit-space-kind"
-                      className="sr-only"
-                      checked={selected}
-                      onChange={() => setDraftSpaceKind(opt.id)}
-                      disabled={saving}
-                    />
-                    <span className="font-medium text-primary block text-sm">
-                      {opt.label}
-                    </span>
-                    <span className="text-[11px] text-muted">{opt.hint}</span>
-                  </label>
-                );
-              })}
-            </div>
-            <p className="text-xs text-muted">
-              Family spaces allow a larger household while keeping the same
-              sessions and templates. Switching to Group requires{" "}
-              {maxMembersForSpace("group")} or fewer members.
-            </p>
-          </fieldset>
           <div className="rounded-xl border border-border bg-surface-muted/40 px-3 py-3 space-y-2">
             <p className="text-sm font-medium">
               Active mode: {getSpaceTemplateMeta(space.spaceTemplate).name}
@@ -2367,8 +2411,7 @@ export function SpaceDetail() {
       >
         <form onSubmit={handleSaveMembers} className="space-y-4">
           <p className="text-sm text-muted -mt-1">
-            Add or rename people. Max {maxMembersForSpace(space.spaceKind)} for
-            this {spaceKindLabel(space.spaceKind).toLowerCase()}.
+            Add or rename people. A study holds up to {maxMembersForSpace()} people.
           </p>
           <MemberEditor
             members={draftMembers}

@@ -9,11 +9,21 @@ export type SpaceTemplateId =
   | "freeform";
 
 /**
- * Who the Space is for — affects member capacity.
- * - group: classic small discipleship (1–5)
- * - family: household / extended family (1–10)
+ * Stored on older spaces. No longer a size choice — every study holds
+ * {@link MAX_MEMBERS} people. New studies are saved as "group".
  */
 export type SpaceKind = "group" | "family";
+
+export type SavedDateKind = "completed" | "upcoming";
+
+/** One calendar day saved for a group on this phone. */
+export interface SavedGroupDate {
+  /** yyyy-MM-dd */
+  date: string;
+  kind: SavedDateKind;
+  /** Lesson or chapters for a completed day, such as "John 4 & 5". */
+  covered?: string;
+}
 
 export interface Member {
   id: string;
@@ -279,8 +289,8 @@ export interface Space {
   members: Member[];
   /**
    * ISO time of last local roster edit (add/remove/rename/set).
-   * Used so pull does not revive people the host just removed before push lands.
-   * Never required — missing means “accept remote roster on replace-shared pull”.
+   * Set when this phone adds, renames, or removes someone.
+   * A later room pull keeps this list so a removed name does not come back.
    */
   membersUpdatedAt?: string;
   /**
@@ -304,6 +314,11 @@ export interface Space {
    * Group (max 5) or Family (max 10). Defaults to "group".
    */
   spaceKind?: SpaceKind;
+  /**
+   * Dates this phone saved on the calendar. Not a meeting record.
+   * Completed stays under Done. Upcoming stays under Coming.
+   */
+  savedDates?: SavedGroupDate[];
   /**
    * Preferred session template when starting a new session in this space
    * (also used for the auto-created first session).
@@ -456,25 +471,22 @@ export const PRIVATE_SECTION = {
 /** Keys that may appear in a shared export (explicit allow-list). */
 export type ExportableEntity = Space | Session | Template | PrayerBoardEntry;
 
-/** Classic small-group cap. */
-export const MAX_MEMBERS_GROUP = 5;
-/** Family / household cap. */
-export const MAX_MEMBERS_FAMILY = 10;
-/**
- * Default max members (group). Prefer `maxMembersForSpace(space.spaceKind)`.
- */
-export const MAX_MEMBERS = MAX_MEMBERS_GROUP;
+/** One people-list size for every study. */
+export const MAX_MEMBERS = 15;
+/** Older name for the same cap. */
+export const MAX_MEMBERS_GROUP = MAX_MEMBERS;
+/** Older name for the same cap. Family is no longer a separate size. */
+export const MAX_MEMBERS_FAMILY = MAX_MEMBERS;
 
 export function normalizeSpaceKind(value: unknown): SpaceKind {
   return value === "family" ? "family" : "group";
 }
 
+/** Every study uses the same cap. `kind` is ignored. */
 export function maxMembersForSpace(
-  kind?: SpaceKind | string | null,
+  _kind?: SpaceKind | string | null,
 ): number {
-  return normalizeSpaceKind(kind) === "family"
-    ? MAX_MEMBERS_FAMILY
-    : MAX_MEMBERS_GROUP;
+  return MAX_MEMBERS;
 }
 
 export function spaceKindLabel(kind?: SpaceKind | string | null): string {

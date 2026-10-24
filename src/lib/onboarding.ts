@@ -41,7 +41,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   {
     id: "meet",
     title: "One room key per group",
-    body: "When you create a group, open the room and share the room key. Friends only Join with that key — they never open a second room. Only you (host) edit the title and people list; guests tap Sync to stay current. You can go Offline for a gathering, then Online again to refresh.",
+    body: "When you create a group, open the room and share the room key. Friends only Join with that key — they never open a second room. Add and remove people on this phone. You can go Offline for a gathering, then Online again to refresh.",
   },
   {
     id: "backup",

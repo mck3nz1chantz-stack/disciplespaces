@@ -14,6 +14,8 @@
   --color-muted: #6b6560;
   --color-danger: #9b3b3b;
   --color-success: #2d6a4f;
+  /* Gold that stays visible on the parchment background. */
+  --color-upcoming: #8a6e32;
   /* Warm parchment for the Bible reader surface */
   --color-reader: #fbf8f1;
   --color-reader-ink: #1f1c18;
@@ -40,6 +42,7 @@ html.dark {
   --color-muted: #9aa69f;
   --color-danger: #e08a8a;
   --color-success: #6fbf95;
+  --color-upcoming: #d4b56a;
   --color-reader: #121a17;
   --color-reader-ink: #e6ebe7;
 
@@ -90,6 +93,14 @@ html:not(.dark) {
     background-position: center, center 42%;
     background-repeat: no-repeat, no-repeat;
     background-attachment: fixed, fixed;
+  }
+
+  /*
+   * Safari blurs inputs inside a fixed dialog while the page background is
+   * attachment:fixed. Scroll attachment only for the time a dialog is open.
+   */
+  html[data-modal-open] body {
+    background-attachment: scroll, scroll;
   }
 
   html.dark body {

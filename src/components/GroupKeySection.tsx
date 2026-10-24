@@ -154,7 +154,7 @@ export function GroupKeySection({ space }: GroupKeySectionProps) {
             Host only — regenerate anytime (no votes). That retires the old key
             and issues a{" "}
             <strong className="text-primary">new room key</strong> when the room
-            is connected. You alone add or remove people on the list.
+            is connected. Add or remove people on this phone with the × on a name.
           </p>
         </div>
       </div>

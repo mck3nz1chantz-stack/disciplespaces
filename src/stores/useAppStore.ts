@@ -11,6 +11,7 @@ import type {
   Session,
   VerseAnchor,
   SessionResponses,
+  SavedGroupDate,
   Space,
   SpaceKind,
   SpaceSyncState,
@@ -54,7 +55,6 @@ import {
   HOST_ONLY_ROSTER_MESSAGE,
   HOST_ONLY_TITLE_MESSAGE,
   isSpaceGuest,
-  isSpaceHost,
   isSpaceRelayConfigured,
   joinRoom as relayJoinRoom,
   normalizeSpaceSync,
@@ -104,7 +104,11 @@ import {
 import { emptyResponses } from "../lib/sessionResponses";
 import { suggestTitleFromPassages } from "../lib/sessionTitle";
 import { isOnlineModeEnabled } from "../lib/onlineMode";
-import { normalizeStartTime, rollSession } from "../lib/meetingCalendar";
+import {
+  normalizeSavedDates,
+  normalizeStartTime,
+  rollSession,
+} from "../lib/meetingCalendar";
 
 interface SessionInput {
   spaceId: string;
@@ -182,6 +186,7 @@ interface AppState {
       spaceKind?: SpaceKind;
       defaultSessionTemplateId?: string | null;
       place?: string | null;
+      savedDates?: SavedGroupDate[];
     },
   ) => Promise<Space>;
 
@@ -825,12 +830,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const row = await db.spaces.get(id);
     if (!row) throw new Error("Space not found");
 
-    // Guests must not rename host groups or change roster capacity type
+    // A joined phone may rename. Description, place, and type stay with the host.
     if (isSpaceGuest(row.sync)) {
-      const triesName =
-        patch.name !== undefined &&
-        patch.name.trim() !== "" &&
-        patch.name.trim() !== row.name;
       const triesDescription =
         patch.description !== undefined &&
         (patch.description === null
@@ -843,7 +844,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const triesPlace =
         patch.place !== undefined &&
         (patch.place?.trim() || undefined) !== row.place;
-      if (triesName || triesDescription || triesKind || triesPlace) {
+      if (triesDescription || triesKind || triesPlace) {
         throw new Error(HOST_ONLY_TITLE_MESSAGE);
       }
     }
@@ -892,9 +893,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       const max = maxMembersForSpace(kind);
       if (nextRow.members.length > max) {
         throw new Error(
-          `This space has ${nextRow.members.length} members. Remove people before switching to a ${kind === "family" ? "Family" : "Group"} limit of ${max}.`,
+          `This space has ${nextRow.members.length} members. A study holds at most ${max}.`,
         );
       }
+    }
+
+    if (patch.savedDates !== undefined) {
+      nextRow.savedDates = normalizeSavedDates(patch.savedDates);
     }
 
     await db.spaces.put(nextRow);
@@ -958,9 +963,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   addMember: async (spaceId, name) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
-    if (isSpaceGuest(row.sync)) {
-      throw new Error(HOST_ONLY_ROSTER_MESSAGE);
-    }
     const max = maxMembersForSpace(row.spaceKind);
     if (row.members.length >= max) {
       throw new Error(`A space can have at most ${max} members`);
@@ -1011,9 +1013,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   removeMember: async (spaceId, memberId) => {
     const row = await db.spaces.get(spaceId);
     if (!row) throw new Error("Space not found");
-    if (isSpaceGuest(row.sync)) {
-      throw new Error(HOST_ONLY_ROSTER_MESSAGE);
-    }
 
     const nextRow: SpaceRow = {
       ...row,
@@ -1525,41 +1524,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       const remoteMembers = payload.space.members ?? [];
       /**
        * Roster merge:
-       * - replace-shared (room pull): accept remote roster unless this device
-       *   edited people after last successful sync (host remove must not revive).
+       * - replace-shared (room pull): this phone keeps a list it has edited.
+       *   A sync must not put a removed name back.
        * - add-only (file import): classic union by name.
        */
       let nextMembers: Member[];
       let nextMembersUpdatedAt = existing.membersUpdatedAt;
       if (mergeStrategy === "replace-shared") {
-        const localRosterMs = existing.membersUpdatedAt
-          ? Date.parse(existing.membersUpdatedAt)
-          : 0;
-        const lastSyncMs = normalizeSpaceSync(existing.sync).lastSyncedAt
-          ? Date.parse(normalizeSpaceSync(existing.sync).lastSyncedAt!)
-          : 0;
-        const pendingLocalRoster =
-          Number.isFinite(localRosterMs) &&
-          localRosterMs > 0 &&
-          (!Number.isFinite(lastSyncMs) || localRosterMs > lastSyncMs);
-
-        if (pendingLocalRoster && isSpaceHost(existing.sync)) {
-          // Host has unsynced roster edits — keep local, only pick up new names
-          nextMembers = mergeMembers(existing.members, remoteMembers, max);
+        if (existing.membersUpdatedAt) {
+          nextMembers = normalizeMembers(existing.members, max);
         } else {
-          // Room roster is truth (host removals land on guests)
           nextMembers = normalizeMembers(remoteMembers, max);
-          nextMembersUpdatedAt = existing.membersUpdatedAt;
         }
       } else {
         nextMembers = mergeMembers(existing.members, remoteMembers, max);
       }
 
-      // Host rename stays until a push of that name succeeds.
+      // A rename stays until a push of that name succeeds.
       // A failed pull must not put the room's older name back.
       const pendingLocalName =
         mergeStrategy === "replace-shared" &&
-        isSpaceHost(existing.sync) &&
         Boolean(existing.nameUpdatedAt);
 
       spaceRow = {

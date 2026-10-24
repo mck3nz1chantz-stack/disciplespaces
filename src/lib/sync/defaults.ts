@@ -64,7 +64,7 @@ export function isSpaceHost(
 }
 
 export const HOST_ONLY_ROSTER_MESSAGE =
-  "Only the host can add or remove people on the list. Ask them to update who’s here, then tap Sync.";
+  "Only the host can rename people on the list. Add or remove someone on this phone.";
 
 export const HOST_ONLY_TITLE_MESSAGE =
   "Only the host can rename this group. Tap Sync to pull the latest name and meetings.";

@@ -12,7 +12,7 @@ export interface TutorialSection {
 }
 
 export const TUTORIAL_INTRO =
-  "DiscipleSpaces is a living home for Group or Family discipleship. One Space holds study modes, a shared prayer board, and private notes that stay on your phone. Hosts manage the people list and group title; guests Sync to stay current. This guide works offline.";
+  "DiscipleSpaces is a personal study home. One Space holds study modes, a prayer board, and private notes that stay on your phone. You add and remove people on this phone. This guide works offline.";
 
 export const TUTORIAL_SECTIONS: TutorialSection[] = [
   {
@@ -21,7 +21,7 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
     summary: "One container for people, modes, sessions, and prayer.",
     body: [
       "A Space is your group’s or family’s home: name, people list, prayer board, private notes, and every session over time.",
-      "Create a Space as Group (up to 5 people) or Family (up to 10). Capacity is the only difference — modes and sessions work the same way.",
+      "A study holds up to 15 people. Modes and sessions work the same way no matter how many names are on the list.",
       "You never need a new Space for each template. Custom, Guided, Advanced, and Freeform all live inside the same Space.",
       "Shared data can travel with a room key + Sync, a group file (DSX1.), or your Account Key cloud backup. Private “Just for me” notes stay on this device unless you opt into encrypted personal backup.",
     ],
@@ -32,7 +32,7 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
     summary: "Who can edit the group — and who Syncs.",
     body: [
       "Host = you created the group on this phone (or restored it as host). Guests Join with the host’s room key.",
-      "Only the host can rename the group, change Group/Family type, add or remove people, and Invite. Guests see a read-only people list.",
+      "You can rename a group, and add or remove people, on this phone. Inviting someone to the shared room stays with the host.",
       "Guests get a clear Sync button at the top of the group (and again near Start meeting) to pull the latest people, meetings, and prayer board from the host’s room.",
       "After the host changes people or meetings, the host should Sync too — then guests Sync so everyone matches.",
     ],
@@ -50,13 +50,13 @@ export const TUTORIAL_SECTIONS: TutorialSection[] = [
   },
   {
     id: "members",
-    title: "People list (host only)",
-    summary: "Names only — host adds and removes.",
+    title: "People list",
+    summary: "Names only — add and remove on this phone.",
     body: [
-      "The host adds people by display name (Add, Edit list, or when inviting). No email or password is required.",
-      "Only the host can add, rename, or remove people. Guests cannot edit the list — they Sync to see host updates.",
-      "Group spaces hold up to 5; Family spaces hold up to 10. Hosts change type in Edit space (switch to Group only if you have 5 or fewer people).",
-      "When someone Joins with the room key, they pick their name if already on the list, or enter a name the room can add for join. Ongoing roster changes still belong to the host.",
+      "Add a person from Studies or from the group page. No email or password is required.",
+      "Tap × on a name to remove them from this phone. Renaming a person in Edit list stays with the host.",
+      "Every study holds up to 15 people.",
+      "When someone Joins with the room key, they pick their name if already on the list, or enter a name.",
     ],
   },
   {

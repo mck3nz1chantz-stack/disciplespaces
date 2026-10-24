@@ -3,17 +3,17 @@
   "projectName": "DiscipleSpaces",
   "workspacePath": "/Users/kenzi/ChantzMedia/ChantzMediaProjects/DiscipleSpaces",
   "kind": "first-party",
-  "lastUpdated": "2026-10-22",
+  "lastUpdated": "2026-10-24",
   "gitBranch": "main",
-  "lastKnownCommit": "72b302d",
+  "lastKnownCommit": "03001c3",
   "deploy": {
     "pages": "https://disciple-spaces.pages.dev",
     "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
     "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
-    "latestDeploymentUrl": "https://7b90519d.disciple-spaces.pages.dev",
-    "notes": "Pages deployed 2026-10-22 from 72b302d (study-first A1–A5 and beginner B1–B3). Relay unchanged. Canonical https://disciple-spaces.pages.dev"
+    "latestDeploymentUrl": "https://f5edccb8.disciple-spaces.pages.dev",
+    "notes": "Pages deployed 2026-10-24. Calendar opens on All, so completed, today, and upcoming show together. Direct upload of 03001c3 plus uncommitted files. Canonical https://disciple-spaces.pages.dev"
   },
-  "currentSlice": "Deployed 2026-10-22 from 72b302d. Study-first A1–A5 and beginner B1–B3 are on Pages. Two-phone sync is sidelined, not accepted.",
+  "currentSlice": "Deployed 2026-10-24. Calendar All view shows completed, today, and upcoming together. Uncommitted files on top of 03001c3. Two-phone sync is sidelined, not accepted.",
   "nextSlice": "Do not resume two-phone share. Do not start a cross-reference library unless Kenzi names that slice.",
   "sliceStatuses": {
     "sync-relay-harden": "done-partial — field reports still fail to sync live",

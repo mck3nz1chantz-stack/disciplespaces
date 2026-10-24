@@ -30,7 +30,7 @@ interface ModalProps {
 }
 
 const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Full-screen dialog. Always portaled to document.body so it stacks above the
@@ -53,33 +53,58 @@ export function Modal({
   const bodyRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  const dismissibleRef = useRef(dismissible);
   const baseId = useId();
 
-  // Focus trap + Escape + body scroll lock
+  // Latest callbacks without restarting the focus trap on each parent render.
+  // Rename (and other dialog fields) pass a fresh onClose every keystroke.
+  onCloseRef.current = onClose;
+  dismissibleRef.current = dismissible;
+
+  // Capture the trigger before commit. autoFocus on a field runs before
+  // effects, so saving activeElement later would restore a detached input.
+  if (open && !wasOpenRef.current) {
+    const active = document.activeElement;
+    previousFocusRef.current =
+      active instanceof HTMLElement && active !== document.body ? active : null;
+  }
+  wasOpenRef.current = open;
+
+  // Focus trap + Escape + body scroll lock. Depends only on `open` so typing
+  // inside the dialog does not blur the field and move focus to Close.
   useEffect(() => {
     if (!open) return;
-
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
 
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     document.documentElement.dataset.modalOpen = "1";
 
-    // Move focus into dialog after paint
+    // Move focus into the dialog after paint, unless a field already has it
+    // (autoFocus on the name input must survive this).
     const focusTimer = window.requestAnimationFrame(() => {
       const panel = panelRef.current;
       if (!panel) return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        panel.contains(active) &&
+        active !== panel
+      ) {
+        return;
+      }
+      const preferred = panel.querySelector<HTMLElement>(
+        "input[autofocus], textarea[autofocus], select[autofocus], [data-autofocus]",
+      );
       const first = panel.querySelector<HTMLElement>(FOCUSABLE);
-      (first ?? titleRef.current ?? panel).focus();
+      (preferred ?? first ?? titleRef.current ?? panel).focus();
     });
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && dismissible) {
+      if (e.key === "Escape" && dismissibleRef.current) {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !panelRef.current) return;
@@ -106,13 +131,59 @@ export function Modal({
     };
 
     document.addEventListener("keydown", onKey);
+
+    // Safari drops a focused field to the document (relatedTarget null) when
+    // the dialog is position:fixed. Put the caret back. A real click on Close
+    // or the backdrop has a target, so that still dismisses.
+    const panel = panelRef.current;
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget;
+      if (next instanceof Node && panel?.contains(next)) return;
+      if (next instanceof HTMLElement) return;
+      const from = e.target;
+      if (
+        !(from instanceof HTMLInputElement) &&
+        !(from instanceof HTMLTextAreaElement) &&
+        !(from instanceof HTMLSelectElement)
+      ) {
+        return;
+      }
+      if (!panel?.contains(from)) return;
+      // Two frames: a real Tab/click lands on the next control before we
+      // decide the browser dropped the caret onto the document.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (!document.contains(from)) return;
+          const active = document.activeElement;
+          if (
+            active === document.body ||
+            active === document.documentElement ||
+            active == null
+          ) {
+            try {
+              from.focus();
+            } catch {
+              // ignore
+            }
+          }
+        });
+      });
+    };
+    panel?.addEventListener("focusout", onFocusOut);
+
     return () => {
       window.cancelAnimationFrame(focusTimer);
       document.removeEventListener("keydown", onKey);
+      panel?.removeEventListener("focusout", onFocusOut);
       document.body.style.overflow = prevOverflow;
       delete document.documentElement.dataset.modalOpen;
+      // Strict Mode replays this effect while the dialog node is still mounted.
+      // Restoring then would pull focus out of the field and drop the trigger.
+      const stillMounted = panelRef.current;
+      if (stillMounted && document.contains(stillMounted)) return;
       const prev = previousFocusRef.current;
-      if (prev && typeof prev.focus === "function") {
+      previousFocusRef.current = null;
+      if (prev && document.contains(prev) && typeof prev.focus === "function") {
         try {
           prev.focus();
         } catch {
@@ -120,19 +191,29 @@ export function Modal({
         }
       }
     };
-  }, [open, dismissible, onClose]);
+  }, [open]);
 
   // Reset scroll only when the modal opens — not on tab switches (preserve flow).
   useEffect(() => {
     if (!open) return;
-    const panel = panelRef.current;
-    const body = bodyRef.current;
-    if (panel) panel.scrollTop = 0;
-    if (body) body.scrollTop = 0;
-    const id = requestAnimationFrame(() => {
+    const reset = () => {
+      const panel = panelRef.current;
+      const body = bodyRef.current;
+      const active = document.activeElement;
+      // Setting scrollTop while a field is focused blurs it in Safari.
+      if (
+        active instanceof HTMLElement &&
+        active !== panel &&
+        active !== body &&
+        (panel?.contains(active) || body?.contains(active))
+      ) {
+        return;
+      }
       if (panel) panel.scrollTop = 0;
       if (body) body.scrollTop = 0;
-    });
+    };
+    reset();
+    const id = requestAnimationFrame(reset);
     return () => cancelAnimationFrame(id);
   }, [open]);
 
@@ -162,7 +243,7 @@ export function Modal({
           "pb-[max(1.25rem,env(safe-area-inset-bottom))]",
           containBody
             ? "flex flex-col h-[min(92dvh,100%)] max-h-[92dvh] overflow-hidden min-h-0 sm:h-[min(90dvh,100%)] sm:max-h-[90dvh]"
-            : "max-h-[92dvh] overflow-y-auto overscroll-contain sm:max-h-[90dvh] [-webkit-overflow-scrolling:touch]",
+            : "max-h-[92dvh] overflow-y-auto overscroll-contain sm:max-h-[90dvh]",
         ].join(" ")}
       >
         <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
@@ -259,7 +340,7 @@ export function Modal({
                 ? `${baseId}-tab-${activeTab}`
                 : undefined
             }
-            className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+            className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain"
           >
             {children}
           </div>

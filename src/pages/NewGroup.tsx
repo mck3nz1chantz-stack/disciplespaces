@@ -16,8 +16,8 @@ import {
   type SpaceTemplateId,
 } from "../lib/spaceTemplates";
 import { useAppStore } from "../stores/useAppStore";
-import type { Member, SpaceKind } from "../types";
-import { maxMembersForSpace, spaceKindLabel } from "../types";
+import type { Member } from "../types";
+import { MAX_MEMBERS } from "../types";
 import { HueWheel } from "../components/StudyColorControl";
 import {
   closestOtherStudy,
@@ -45,7 +45,6 @@ export function NewGroup() {
 
   const [spaceTemplate, setSpaceTemplate] =
     useState<SpaceTemplateId>("guided");
-  const [spaceKind, setSpaceKind] = useState<SpaceKind>("group");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
@@ -85,7 +84,7 @@ export function NewGroup() {
         description,
         members,
         spaceTemplate,
-        spaceKind,
+        spaceKind: "group",
         createFirstSession: false,
         colorHue: hueValue,
         firstMeeting:
@@ -229,7 +228,7 @@ export function NewGroup() {
               aria-expanded={moreOptionsOpen}
             >
               <span className="text-sm font-semibold text-muted">
-                More options · people, family, meeting style
+                More options · people, meeting style
               </span>
               <ChevronDown
                 className={[
@@ -250,61 +249,12 @@ export function NewGroup() {
                   <MemberEditor
                     members={members}
                     onChange={setMembers}
-                    maxMembers={maxMembersForSpace(spaceKind)}
-                    kindLabel={spaceKindLabel(spaceKind)}
+                    maxMembers={MAX_MEMBERS}
                   />
+                  <p className="text-xs text-muted">
+                    Up to {MAX_MEMBERS} people on this phone.
+                  </p>
                 </div>
-                <fieldset className="space-y-2">
-                  <legend className="text-sm font-medium">Size</legend>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        {
-                          id: "group" as const,
-                          label: "Group",
-                          description: `Up to ${maxMembersForSpace("group")} people`,
-                        },
-                        {
-                          id: "family" as const,
-                          label: "Family",
-                          description: `Up to ${maxMembersForSpace("family")} people`,
-                        },
-                      ] as const
-                    ).map((opt) => {
-                      const selected = spaceKind === opt.id;
-                      return (
-                        <label
-                          key={opt.id}
-                          className={[
-                            "rounded-xl border px-3 py-3 touch-manipulation cursor-pointer transition-colors",
-                            selected
-                              ? "border-primary bg-primary/5"
-                              : "border-border bg-bg hover:border-primary/30",
-                          ].join(" ")}
-                        >
-                          <input
-                            type="radio"
-                            name="space-kind"
-                            className="sr-only"
-                            checked={selected}
-                            onChange={() => {
-                              setSpaceKind(opt.id);
-                              const max = maxMembersForSpace(opt.id);
-                              setMembers((prev) => prev.slice(0, max));
-                            }}
-                            disabled={saving}
-                          />
-                          <span className="font-medium text-primary block text-sm">
-                            {opt.label}
-                          </span>
-                          <span className="text-[11px] text-muted block mt-0.5 leading-snug">
-                            {opt.description}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </fieldset>
 
                 <fieldset className="space-y-2">
                   <legend className="text-sm font-medium">Meeting style</legend>

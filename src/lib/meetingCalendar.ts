@@ -4,7 +4,14 @@
  */
 
 import { format, parseISO } from "date-fns";
-import type { ComingReply, HeldMeetingDate, Session } from "../types";
+import type {
+  ComingReply,
+  HeldMeetingDate,
+  SavedDateKind,
+  SavedGroupDate,
+  Session,
+} from "../types";
+import { formatPassageRef } from "./passages";
 
 /** Keep the newest past dates. Older weeks stay off the room payload. */
 const HELD_CAP = 52;
@@ -13,6 +20,37 @@ const ROLL_GUARD = 520;
 export function calendarDay(iso: string): string {
   const day = iso.slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
+}
+
+/** One row per day. A later save replaces that day’s kind. Empty becomes unset. */
+export function normalizeSavedDates(
+  rows: SavedGroupDate[] | undefined,
+): SavedGroupDate[] | undefined {
+  if (!rows?.length) return undefined;
+  const byDate = new Map<string, SavedGroupDate>();
+  for (const row of rows) {
+    const date = calendarDay(row.date);
+    if (!date) continue;
+    if (row.kind !== "completed" && row.kind !== "upcoming") continue;
+    const covered =
+      row.kind === "completed"
+        ? row.covered?.trim().replace(/\s+/g, " ").slice(0, 100) || undefined
+        : undefined;
+    byDate.set(date, { date, kind: row.kind, covered });
+  }
+  if (byDate.size === 0) return undefined;
+  return [...byDate.values()]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 120);
+}
+
+/** Chapters already stored on a meeting for that exact day. */
+function lessonOnDay(session: Session, day: string): string | undefined {
+  if (calendarDay(session.date) !== day) return undefined;
+  const refs = (session.passagesStudied ?? [])
+    .map((row) => formatPassageRef(row))
+    .filter(Boolean);
+  return refs.length ? refs.join(", ") : undefined;
 }
 
 /** "HH:mm" or undefined. Empty and invalid times mean “no time”. */
@@ -268,14 +306,24 @@ export interface MonthMeeting {
   sessionId: string;
   spaceId: string;
   spaceName: string;
+  /** Set when this phone saved the day. The clock does not decide Done or Coming. */
+  savedKind?: SavedDateKind;
+  /** Chapters or lesson for this day. */
+  note?: string;
 }
 
 /**
- * Meetings that fall in one month.
- * Repeats are shown on each date in that month. Nothing is saved.
+ * Meetings and saved dates that fall in one month.
+ * Repeats are shown on each date in that month.
+ * Saved dates are the ones this phone stored on the group.
  */
 export function meetingsInMonth(
-  groups: Array<{ id: string; name: string; sessions?: Session[] }>,
+  groups: Array<{
+    id: string;
+    name: string;
+    sessions?: Session[];
+    savedDates?: SavedGroupDate[];
+  }>,
   year: number,
   month: number,
   now = new Date(),
@@ -307,6 +355,7 @@ export function meetingsInMonth(
           sessionId: session.id,
           spaceId: group.id,
           spaceName: group.name,
+          note: lessonOnDay(session, day),
         });
       };
 
@@ -325,6 +374,20 @@ export function meetingsInMonth(
               : addMonth(day, anchor);
         guard += 1;
       }
+    }
+
+    for (const saved of normalizeSavedDates(group.savedDates) ?? []) {
+      if (saved.date < monthStart || saved.date > monthEnd) continue;
+      const sessionId = `saved:${group.id}:${saved.date}`;
+      if (marks.some((row) => row.sessionId === sessionId)) continue;
+      marks.push({
+        day: saved.date,
+        sessionId,
+        spaceId: group.id,
+        spaceName: group.name,
+        savedKind: saved.kind,
+        note: saved.covered,
+      });
     }
   }
 

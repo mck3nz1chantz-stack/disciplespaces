@@ -83,6 +83,19 @@ function corsHeaders(req: Request): HeadersInit {
   };
 }
 
+/** Room reads are answered by the Durable Object, which does not add CORS. */
+function withCors(res: Response, req: Request): Response {
+  const headers = new Headers(res.headers);
+  for (const [key, value] of Object.entries(corsHeaders(req))) {
+    headers.set(key, value);
+  }
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
+}
+
 function json(data: unknown, status = 200, req?: Request): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -255,7 +268,7 @@ export default {
         const roomKey = decodeURIComponent(roomMatch[1]!);
         const id = env.SPACE_ROOM.idFromName(`room:${roomKey}`);
         const stub = env.SPACE_ROOM.get(id);
-        return stub.fetch(req);
+        return withCors(await stub.fetch(req), req);
       }
 
       return error("Not found", 404, req);

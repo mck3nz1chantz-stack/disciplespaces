@@ -12,7 +12,7 @@ interface MemberEditorProps {
   /** Show joined dates (edit flow). Hidden for brand-new members in create. */
   showJoinedDates?: boolean;
   disabled?: boolean;
-  /** Capacity — 5 for Group, 10 for Family. */
+  /** Capacity. Every study holds the same number. */
   maxMembers?: number;
   /** Optional capacity context label (e.g. "Family"). */
   kindLabel?: string;
@@ -183,9 +183,7 @@ export function MemberEditor({
 
       {atCapacity ? (
         <p className="text-sm text-muted rounded-xl border border-border bg-surface-muted/50 px-3 py-3">
-          {kindLabel === "Family"
-            ? `Family spaces hold up to ${maxMembers} people. Remove someone to add another.`
-            : `Spaces stay personal on purpose — max ${maxMembers} members. Remove someone to add another.`}
+          {`This list holds ${maxMembers} people. Remove someone to add another.`}
         </p>
       ) : (
         <div className="flex gap-2">
