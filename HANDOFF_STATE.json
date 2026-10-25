@@ -5,15 +5,15 @@
   "kind": "first-party",
   "lastUpdated": "2026-10-25",
   "gitBranch": "main",
-  "lastKnownCommit": "050283d",
+  "lastKnownCommit": "1c35ec2",
   "deploy": {
     "pages": "https://disciple-spaces.pages.dev",
     "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
     "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
-    "latestDeploymentUrl": "https://0a825069.disciple-spaces.pages.dev",
-    "notes": "Pages deployed 2026-10-25 from 050283d. Next opens at the top of the chapter. A saved verse note tucks into a dropdown. Read does not slide sideways. Relay was not redeployed. Canonical https://disciple-spaces.pages.dev"
+    "latestDeploymentUrl": "https://d88735ab.disciple-spaces.pages.dev",
+    "notes": "Pages deployed 2026-10-25 from 1c35ec2. Tap off a highlighted passage in Read to clear it. Relay was not redeployed. Canonical https://disciple-spaces.pages.dev"
   },
-  "currentSlice": "Deployed 2026-10-25 from 050283d. Next lands at the top, a saved verse note tucks away, and Read stays in place on https://disciple-spaces.pages.dev. Two-phone sync is sidelined, not accepted.",
+  "currentSlice": "Deployed 2026-10-25 from 1c35ec2. Tap off a highlighted passage to clear it on https://disciple-spaces.pages.dev. Two-phone sync is sidelined, not accepted.",
   "nextSlice": "Do not resume two-phone share. Do not start a cross-reference library unless Kenzi names that slice.",
   "sliceStatuses": {
     "sync-relay-harden": "done-partial — field reports still fail to sync live",

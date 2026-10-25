@@ -158,11 +158,11 @@
     "deployCommand": "npm run deploy",
     "status": "deployed",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://0a825069.disciple-spaces.pages.dev",
-    "deployedAt": "2026-10-25T19:54:59.000Z",
-    "releaseNotes": "Next opens at the top of the chapter. A saved verse note tucks into a dropdown. Read does not slide sideways. Commit 050283d. Relay was not redeployed."
+    "latestDeploymentUrl": "https://d88735ab.disciple-spaces.pages.dev",
+    "deployedAt": "2026-10-25T20:12:21.000Z",
+    "releaseNotes": "Tap off a highlighted passage in Read to clear it. Commit 1c35ec2. Relay was not redeployed."
   },
-  "grokBuildStatus": "deployed-read-next-and-note",
+  "grokBuildStatus": "deployed-read-tap-off",
   "grokDocsStatus": "pending",
   "grokLawStatus": "pending-prebuild",
   "nextPhase": "Deploy space-relay Worker + set VITE_SPACE_RELAY_URL; opportunistic auto-sync; custom domain when product-ready; GrokDocs / GrokLaw",
@@ -254,18 +254,18 @@
     "summary": "PWA brick prevention + guest host reclaim + zip restore (prior)"
   },
   "lastDeploy": {
-    "at": "2026-10-25T19:54:59.000Z",
+    "at": "2026-10-25T20:12:21.000Z",
     "project": "disciple-spaces",
-    "deploymentUrl": "https://0a825069.disciple-spaces.pages.dev",
+    "deploymentUrl": "https://d88735ab.disciple-spaces.pages.dev",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "notes": "Next opens at the top of the chapter. A saved verse note tucks into a dropdown. Read does not slide sideways. Commit 050283d. Relay was not redeployed."
+    "notes": "Tap off a highlighted passage in Read to clear it. Commit 1c35ec2. Relay was not redeployed."
   },
   "hosting": {
     "provider": "Cloudflare Pages",
-    "previewUrl": "https://0a825069.disciple-spaces.pages.dev",
+    "previewUrl": "https://d88735ab.disciple-spaces.pages.dev",
     "productionDomain": "disciple-spaces.pages.dev",
     "productionUrl": "https://disciple-spaces.pages.dev",
-    "latestDeploymentUrl": "https://0a825069.disciple-spaces.pages.dev",
+    "latestDeploymentUrl": "https://d88735ab.disciple-spaces.pages.dev",
     "notes": "Recorded from cloudflarePages/lastDeploy for project-health hosting check"
   },
   "discoverability": {
