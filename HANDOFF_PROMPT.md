@@ -43,4 +43,4 @@ Two-phone share accept. Spec limits are in `docs/drafts/reader-and-group-2026-10
 
 ## Next spec
 
-`docs/drafts/group-ux-2026-10.md` is the group-page tidy. Session names follow the latest logged passage, live from commit c847140. Live: https://disciple-spaces.pages.dev. Deployment: https://b1c92c66.disciple-spaces.pages.dev. Relay was not redeployed.
+`docs/drafts/group-ux-2026-10.md` is the group-page tidy. Next lands at the top of the chapter, a saved verse note tucks into a dropdown, and Read does not slide sideways, live from commit 050283d. Live: https://disciple-spaces.pages.dev. Deployment: https://0a825069.disciple-spaces.pages.dev. Relay was not redeployed.

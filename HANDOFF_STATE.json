@@ -3,17 +3,17 @@
   "projectName": "DiscipleSpaces",
   "workspacePath": "/Users/kenzi/ChantzMedia/ChantzMediaProjects/DiscipleSpaces",
   "kind": "first-party",
-  "lastUpdated": "2026-10-24",
+  "lastUpdated": "2026-10-25",
   "gitBranch": "main",
-  "lastKnownCommit": "c847140",
+  "lastKnownCommit": "050283d",
   "deploy": {
     "pages": "https://disciple-spaces.pages.dev",
     "relay": "https://disciple-spaces-relay.mck3nz1-chantz.workers.dev",
     "github": "https://github.com/mck3nz1chantz-stack/disciplespaces.git",
-    "latestDeploymentUrl": "https://b1c92c66.disciple-spaces.pages.dev",
-    "notes": "Pages deployed 2026-10-24 from c847140. A session name follows the latest passage that is still logged. Relay was not redeployed. Canonical https://disciple-spaces.pages.dev"
+    "latestDeploymentUrl": "https://0a825069.disciple-spaces.pages.dev",
+    "notes": "Pages deployed 2026-10-25 from 050283d. Next opens at the top of the chapter. A saved verse note tucks into a dropdown. Read does not slide sideways. Relay was not redeployed. Canonical https://disciple-spaces.pages.dev"
   },
-  "currentSlice": "Deployed 2026-10-24 from c847140. Session names follow the latest logged passage on https://disciple-spaces.pages.dev. Two-phone sync is sidelined, not accepted.",
+  "currentSlice": "Deployed 2026-10-25 from 050283d. Next lands at the top, a saved verse note tucks away, and Read stays in place on https://disciple-spaces.pages.dev. Two-phone sync is sidelined, not accepted.",
   "nextSlice": "Do not resume two-phone share. Do not start a cross-reference library unless Kenzi names that slice.",
   "sliceStatuses": {
     "sync-relay-harden": "done-partial — field reports still fail to sync live",
