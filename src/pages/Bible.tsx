@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -107,6 +108,16 @@ import {
 
 type Panel = "read" | "search";
 
+/** Instant top align. Smooth scroll loses to scroll anchoring when the chapter swaps. */
+function forcePageTop() {
+  const root = document.scrollingElement;
+  if (root) {
+    root.scrollTop = 0;
+    root.scrollLeft = 0;
+  }
+  window.scrollTo(0, 0);
+}
+
 export function Bible() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -198,6 +209,9 @@ export function Bible() {
   );
   const [privateNoteDraft, setPrivateNoteDraft] = useState("");
   const [showPrivateNote, setShowPrivateNote] = useState(false);
+  /** After a verse note exists, tuck Note / Save so the chapter keeps the screen. */
+  const [noteToolsOpen, setNoteToolsOpen] = useState(false);
+  const [noteBarCollapsed, setNoteBarCollapsed] = useState(false);
   const [logging, setLogging] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   /** One-shot “picking up where you left off” when no session context. */
@@ -220,6 +234,8 @@ export function Bible() {
   );
 
   const readerTopRef = useRef<HTMLDivElement>(null);
+  /** Next / prev / next passage: re-apply top after the new chapter paints. */
+  const landAtTopRef = useRef(false);
   /** Applied after chapter load so trail jumps keep their range selection. */
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(
     null,
@@ -342,6 +358,57 @@ export function Bible() {
     void initialize();
     void loadTemplates();
   }, [initialize, loadTemplates]);
+
+  // Read stays in a vertical column. overflow-x on html breaks the video plate.
+  useEffect(() => {
+    document.documentElement.dataset.readerRoute = "true";
+    const lockX = () => {
+      const x =
+        window.scrollX ||
+        document.documentElement.scrollLeft ||
+        document.body.scrollLeft ||
+        0;
+      if (x !== 0) window.scrollTo(0, window.scrollY);
+    };
+    let startX = 0;
+    let startY = 0;
+    let axis: "x" | "y" | null = null;
+    const onStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      axis = null;
+    };
+    const onMove = (event: TouchEvent) => {
+      if (event.touches.length !== 1) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(".bible-study-scroller, input, textarea, select")
+      ) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) return;
+      const dx = Math.abs(touch.clientX - startX);
+      const dy = Math.abs(touch.clientY - startY);
+      if (!axis) {
+        if (dx < 8 && dy < 8) return;
+        axis = dx > dy ? "x" : "y";
+      }
+      if (axis === "x" && event.cancelable) event.preventDefault();
+    };
+    window.addEventListener("scroll", lockX, { passive: true });
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchmove", onMove, { passive: false });
+    return () => {
+      delete document.documentElement.dataset.readerRoute;
+      window.removeEventListener("scroll", lockX);
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+    };
+  }, []);
 
   // A session dialog sets body overflow:hidden. iOS often stays unscrollable
   // after that inline style is cleared — which is exactly Open Read → log.
@@ -686,27 +753,29 @@ export function Bible() {
     setSearchResults([]);
   }
 
-  // Scroll to highlighted verse + optional soft pulse
+  // Scroll to highlighted verse + optional soft pulse.
+  // A chapter handoff owns the scroll until it lands at the top.
   useEffect(() => {
     if (highlightVerse == null || loadingChapter || !proseReveal) return;
     const el = document.getElementById(`v-${highlightVerse}`);
-    if (el) {
+    if (el && !landAtTopRef.current) {
       el.scrollIntoView({
         behavior: prefersReducedMotion ? "auto" : "smooth",
         block: "center",
       });
-      if (!prefersReducedMotion) {
-        setPulseVerse(highlightVerse);
-        const pulseT = window.setTimeout(() => setPulseVerse(null), 1200);
-        const clearT = window.setTimeout(() => setHighlightVerse(null), 2500);
-        return () => {
-          window.clearTimeout(pulseT);
-          window.clearTimeout(clearT);
-        };
-      }
-      const t = window.setTimeout(() => setHighlightVerse(null), 2500);
-      return () => window.clearTimeout(t);
     }
+    if (!el) return;
+    if (!prefersReducedMotion) {
+      setPulseVerse(highlightVerse);
+      const pulseT = window.setTimeout(() => setPulseVerse(null), 1200);
+      const clearT = window.setTimeout(() => setHighlightVerse(null), 2500);
+      return () => {
+        window.clearTimeout(pulseT);
+        window.clearTimeout(clearT);
+      };
+    }
+    const t = window.setTimeout(() => setHighlightVerse(null), 2500);
+    return () => window.clearTimeout(t);
   }, [
     highlightVerse,
     loadingChapter,
@@ -783,10 +852,7 @@ export function Bible() {
     setPanel("read");
     setBookPickerOpen(false);
     setChapterPickerOpen(false);
-    readerTopRef.current?.scrollIntoView({
-      behavior: prefersReducedMotion ? "auto" : "smooth",
-      block: "start",
-    });
+    if (!samePlace) scrollBibleToTop();
   }
 
   function startAtBeginning() {
@@ -840,20 +906,43 @@ export function Bible() {
     };
   }
 
-  /** Next/prev chapter: jump to top of page so reading + video plate restart cleanly. */
+  /**
+   * Next/prev chapter and the next passage: top of the page, after the new
+   * chapter paints. Instant — smooth scroll is cancelled when verse height swaps
+   * and the focused Next control pulls the bottom back into view.
+   */
   const scrollBibleToTop = useCallback(() => {
-    const behavior: ScrollBehavior = prefersReducedMotion ? "auto" : "smooth";
-    try {
-      window.scrollTo({ top: 0, left: 0, behavior });
-    } catch {
-      window.scrollTo(0, 0);
+    landAtTopRef.current = true;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.tagName === "BUTTON") {
+      active.blur();
     }
-    // Also align the Bible page anchor (covers nested focus / sticky chrome)
-    readerTopRef.current?.scrollIntoView({ behavior, block: "start" });
-  }, [prefersReducedMotion]);
+    forcePageTop();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!landAtTopRef.current || loadingChapter) return;
+    forcePageTop();
+    let cancelled = false;
+    const raf = window.requestAnimationFrame(() => {
+      if (!cancelled) forcePageTop();
+    });
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      forcePageTop();
+      landAtTopRef.current = false;
+    }, 80);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [loadingChapter, chapterData, bookId, chapter, proseReveal]);
 
   function prevChapter() {
     if (!currentBook) return;
+    setHighlightVerse(null);
+    setPulseVerse(null);
     if (chapter > 1) {
       setChapter(chapter - 1);
       scrollBibleToTop();
@@ -870,6 +959,8 @@ export function Bible() {
 
   function nextChapter() {
     if (!currentBook) return;
+    setHighlightVerse(null);
+    setPulseVerse(null);
     if (chapter < currentBook.chapterCount) {
       setChapter(chapter + 1);
       scrollBibleToTop();
@@ -896,9 +987,12 @@ export function Bible() {
     referenceLandingRef.current = null;
     setReferenceLine(null);
     if (selectStart == null || (selectStart != null && selectEnd != null)) {
-      // Start fresh selection
+      // Start fresh selection. Note tools stay available until a note exists.
       setSelectStart(verseNum);
       setSelectEnd(null);
+      setShowPrivateNote(false);
+      setNoteBarCollapsed(false);
+      setNoteToolsOpen(false);
       return;
     }
     // Extend selection
@@ -986,6 +1080,8 @@ export function Bible() {
     setSelectEnd(null);
     setPrivateNoteDraft("");
     setShowPrivateNote(false);
+    setNoteBarCollapsed(false);
+    setNoteToolsOpen(false);
   }
 
   function openLogModal(opts?: {
@@ -1086,6 +1182,8 @@ export function Bible() {
     setSelectEnd(note.verse.endVerse);
     setPrivateNoteDraft(note.content);
     setShowPrivateNote(true);
+    setNoteBarCollapsed(false);
+    setNoteToolsOpen(true);
     referenceLandingRef.current = `${bookId}|${chapter}`;
     setReferenceLine(formatReferenceSentence(note.verse));
   }
@@ -1102,6 +1200,7 @@ export function Bible() {
     const existing = noteForThisStudy(chapterNotes ?? [], key);
     setPrivateNoteDraft(existing?.content ?? "");
     setShowPrivateNote(true);
+    setNoteToolsOpen(true);
   }
 
   /** Save the selected verses on the active study. Words are optional. */
@@ -1124,6 +1223,8 @@ export function Bible() {
         spaceId: activeStudyId ?? undefined,
       });
       setShowPrivateNote(false);
+      setNoteBarCollapsed(true);
+      setNoteToolsOpen(false);
       toast.success(
         text ? "Note saved on this phone" : "Verse saved on this phone",
       );
@@ -1377,12 +1478,41 @@ export function Bible() {
       ? "Log to this session"
       : "Log passage";
 
+  const selectionNote =
+    currentBook && selectionRange
+      ? noteForThisStudy(
+          studyNotes,
+          makeVerseKey({
+            version: bibleVersion,
+            bookId: currentBook.id,
+            chapter,
+            startVerse: selectionRange.start,
+            endVerse: selectionRange.end,
+          }),
+        )
+      : undefined;
+  const showNoteMenu = noteBarCollapsed || Boolean(selectionNote);
+  const tuckNoteTools = showNoteMenu && !noteToolsOpen;
+  const selectionRefLabel =
+    currentBook && selectionRange
+      ? `${currentBook.name} ${chapter}:${selectionRange.start}${
+          selectionRange.end !== selectionRange.start
+            ? `–${selectionRange.end}`
+            : ""
+        }`
+      : "";
+  const noteMenuLabel = selectionNote
+    ? selectionNote.content.trim()
+      ? "Note"
+      : "Verse saved"
+    : "Note";
+
   return (
-    <div className="space-y-3" ref={readerTopRef}>
+    <div className="bible-page space-y-3" ref={readerTopRef}>
       {!focusMode && studyChips.length > 0 && (
         <div className="flex items-center gap-2">
           <div
-            className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1"
+            className="bible-study-scroller flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1"
             role="tablist"
             aria-label="Studies"
           >
@@ -2040,111 +2170,142 @@ export function Bible() {
           {/* Sticky log + private reflection — above bottom nav */}
           <div
             className={[
-              "bible-sticky-log rounded-2xl border border-border/70 bg-surface/90 backdrop-blur-xl p-2.5 shadow-[var(--shadow-card)] space-y-2",
+              "rounded-2xl border border-border/70 bg-surface/90 backdrop-blur-xl p-2.5 shadow-[var(--shadow-card)] space-y-2",
+              /* A tucked note must not stay pinned over the verses. */
+              tuckNoteTools ? "relative" : "bible-sticky-log",
               selectionRange ? "ring-1 ring-primary/20" : "",
             ].join(" ")}
           >
             {selectionRange && (
               <div className="space-y-2">
-                {!showPrivateNote ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={openNoteComposer}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation"
-                    >
-                      <Pencil className="h-4 w-4" aria-hidden />
-                      Note
-                    </button>
-                    <button
-                      type="button"
-                      data-save-verse
-                      disabled={savingNote}
-                      onClick={() => void handleSaveThisVerse()}
-                      className="inline-flex items-center justify-center rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation disabled:opacity-50"
-                    >
-                      {savingNote ? "Saving…" : "Save this verse"}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-primary/15 bg-primary/5 p-2.5 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-primary inline-flex items-center gap-1">
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
-                          Note on this verse
-                        </p>
-                        {currentBook && selectionRange ? (
-                          <p
-                            className="text-sm text-muted"
-                            data-reference-sentence
-                          >
-                            {formatReferenceSentence({
-                              bookName: currentBook.name,
-                              chapter,
-                              startVerse: selectionRange.start,
-                              endVerse: selectionRange.end,
-                            })}
-                          </p>
-                        ) : null}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowPrivateNote(false);
-                          setPrivateNoteDraft("");
-                        }}
-                        className="text-xs text-muted hover:text-primary px-1 py-1"
-                      >
-                        Hide
-                      </button>
-                    </div>
-                    <textarea
-                      value={privateNoteDraft}
-                      onChange={(e) => setPrivateNoteDraft(e.target.value)}
-                      rows={2}
-                      placeholder="What stood out? What will you obey?"
-                      className="w-full rounded-lg border border-border bg-bg/90 px-2.5 py-2 text-sm resize-y min-h-[52px]"
-                      disabled={logging || savingNote}
+                {showNoteMenu && (
+                  <button
+                    type="button"
+                    className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-2 py-2 text-left text-sm font-medium text-primary touch-manipulation hover:bg-surface-muted/60"
+                    aria-expanded={noteToolsOpen}
+                    aria-controls={noteToolsOpen ? "verse-note-tools" : undefined}
+                    onClick={() => setNoteToolsOpen((open) => !open)}
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <Pencil className="h-4 w-4 shrink-0" aria-hidden />
+                      <span className="truncate">
+                        {noteMenuLabel}
+                        {selectionRefLabel ? ` · ${selectionRefLabel}` : ""}
+                      </span>
+                    </span>
+                    <ChevronDown
+                      className={[
+                        "h-4 w-4 shrink-0 transition-transform",
+                        noteToolsOpen ? "rotate-180" : "",
+                      ].join(" ")}
+                      aria-hidden
                     />
-                    <div className="flex gap-2">
+                  </button>
+                )}
+                {!tuckNoteTools && (
+                  <div id="verse-note-tools" className="space-y-2">
+                    {selectionNote?.content.trim() && !showPrivateNote ? (
+                      <p className="px-1 text-sm leading-snug text-muted whitespace-pre-wrap">
+                        {selectionNote.content.trim()}
+                      </p>
+                    ) : null}
+                    {!showPrivateNote ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={openNoteComposer}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation"
+                        >
+                          <Pencil className="h-4 w-4" aria-hidden />
+                          Note
+                        </button>
+                        <button
+                          type="button"
+                          data-save-verse
+                          disabled={savingNote}
+                          onClick={() => void handleSaveThisVerse()}
+                          className="inline-flex items-center justify-center rounded-xl px-2 py-2 min-h-11 text-sm font-medium text-primary hover:bg-surface-muted/60 touch-manipulation disabled:opacity-50"
+                        >
+                          {savingNote ? "Saving…" : "Save this verse"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-primary/15 bg-primary/5 p-2.5 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-primary inline-flex items-center gap-1">
+                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                              Note on this verse
+                            </p>
+                            {currentBook && selectionRange ? (
+                              <p
+                                className="text-sm text-muted"
+                                data-reference-sentence
+                              >
+                                {formatReferenceSentence({
+                                  bookName: currentBook.name,
+                                  chapter,
+                                  startVerse: selectionRange.start,
+                                  endVerse: selectionRange.end,
+                                })}
+                              </p>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNoteToolsOpen(false);
+                              setNoteBarCollapsed(true);
+                            }}
+                            className="text-xs text-muted hover:text-primary px-1 py-1 min-h-11"
+                          >
+                            Hide
+                          </button>
+                        </div>
+                        <textarea
+                          value={privateNoteDraft}
+                          onChange={(e) => setPrivateNoteDraft(e.target.value)}
+                          rows={2}
+                          placeholder="What stood out? What will you obey?"
+                          className="w-full rounded-lg border border-border bg-bg/90 px-2.5 py-2 text-sm resize-y min-h-[52px]"
+                          disabled={logging || savingNote}
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            className="!py-2 !px-3 text-xs flex-1"
+                            data-save-verse
+                            disabled={savingNote}
+                            onClick={() => void handleSaveThisVerse()}
+                          >
+                            {savingNote ? "Saving…" : "Save this verse"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
                       <Button
                         variant="secondary"
-                        className="!py-2 !px-3 text-xs flex-1"
-                        data-save-verse
-                        disabled={savingNote}
-                        onClick={() => void handleSaveThisVerse()}
+                        fullWidth
+                        className="!py-2.5 text-sm"
+                        disabled={logging}
+                        onClick={openPrayFromSelection}
                       >
-                        {savingNote ? "Saving…" : "Save this verse"}
+                        <HandHeart className="h-4 w-4" aria-hidden />
+                        Pray this
                       </Button>
-
+                      <Button
+                        variant="ghost"
+                        fullWidth
+                        className="!py-2.5 text-sm"
+                        disabled={logging}
+                        onClick={clearSelection}
+                      >
+                        Clear
+                      </Button>
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-
-            {selectionRange && (
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="secondary"
-                  fullWidth
-                  className="!py-2.5 text-sm"
-                  disabled={logging}
-                  onClick={openPrayFromSelection}
-                >
-                  <HandHeart className="h-4 w-4" aria-hidden />
-                  Pray this
-                </Button>
-                <Button
-                  variant="ghost"
-                  fullWidth
-                  className="!py-2.5 text-sm"
-                  disabled={logging}
-                  onClick={clearSelection}
-                >
-                  Clear
-                </Button>
               </div>
             )}
 

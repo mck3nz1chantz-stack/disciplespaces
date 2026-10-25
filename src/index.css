@@ -266,8 +266,40 @@ html:not(.dark) {
    * Bible sanctuary reader — book-like surface; optional cross video under scrim
    * (AnimateStudio · Bible read section).
    */
+  /*
+   * Read column. Do not set overflow-x/y here — a scrollport on this box
+   * kills the sticky video plate. Width lock lives on the page + html.
+   */
+  .bible-page {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-anchor: none;
+    overscroll-behavior-x: none;
+  }
+
+  /* Study chips are the one horizontal scroller. Contain the pan. */
+  .bible-study-scroller {
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
+    max-width: 100%;
+  }
+
+  /*
+   * Phone Read: stop the sideways rubber-band.
+   * Do NOT set overflow-x other than visible on html/body — that kills
+   * position:sticky on the video plate (Chrome).
+   */
+  html[data-reader-route],
+  html[data-reader-route] body {
+    overscroll-behavior-x: none;
+    overflow-anchor: none;
+    max-width: 100%;
+  }
+
   .bible-reader {
     isolation: isolate;
+    max-width: 100%;
     /* Study hue. Outline only — do not set overflow here. */
     --study-hue: 42;
     /* Vertical pan on the chapter. A viewport-sized plate must not own the gesture. */
@@ -334,6 +366,7 @@ html:not(.dark) {
     position: sticky;
     top: 0;
     width: 100%;
+    max-width: 100%;
     height: 100dvh;
     max-height: 100vh;
     overflow: hidden;
@@ -341,6 +374,20 @@ html:not(.dark) {
     pointer-events: none;
     touch-action: none;
     border-radius: inherit;
+  }
+
+  /*
+   * Phones: dvh changes when the browser chrome shows and hides, so the plate
+   * (and the page) jumps while you scroll. svh stays put for the gesture.
+   */
+  @media (hover: none) and (pointer: coarse) {
+    .bible-reader-video-bg__pin {
+      height: 100svh;
+    }
+
+    .bible-reader {
+      outline-offset: 0;
+    }
   }
 
   .bible-reader-video-bg__media {
@@ -402,6 +449,8 @@ html:not(.dark) {
     font-weight: 400;
     letter-spacing: 0.01em;
     font-optical-sizing: auto;
+    max-width: 100%;
+    overflow-wrap: break-word;
   }
 
   @media (min-width: 400px) {
@@ -414,10 +463,12 @@ html:not(.dark) {
   .bible-reader-verse {
     display: block;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     text-align: left;
     border-radius: 0.65rem;
     padding: 0.35rem 0.55rem;
-    margin-inline: -0.35rem;
+    overflow-wrap: break-word;
     transition: background-color 0.15s ease, box-shadow 0.15s ease;
     scroll-margin-top: 8.5rem;
     /* pan-y: a drag moves the chapter. manipulation was eating that pan on phones. */
@@ -621,9 +672,9 @@ html:not(.dark) {
 [data-sonner-toaster] {
   position: fixed !important;
   z-index: 320 !important;
-  --width: min(22rem, calc(100vw - 1.5rem)) !important;
-  width: min(22rem, calc(100vw - 1.5rem)) !important;
-  max-width: calc(100vw - 1.5rem) !important;
+  --width: min(22rem, calc(100% - 1.5rem)) !important;
+  width: min(22rem, calc(100% - 1.5rem)) !important;
+  max-width: calc(100% - 1.5rem) !important;
   box-sizing: border-box;
   /* Don’t let the toast region steal layout from the page */
   pointer-events: none !important;

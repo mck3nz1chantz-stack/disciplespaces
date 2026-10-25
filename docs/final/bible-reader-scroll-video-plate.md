@@ -144,7 +144,7 @@ Then bump `?v=scrubN` in `BIBLE_CROSS_VIDEO_SRC` and redeploy.
 In `Bible.tsx`:
 
 1. **`passageKey={\`${bibleVersion}-${bookId}-${chapter}\`}`** on `BibleReaderVideoBg` → remount / reset plate.  
-2. **Next / Prev** call `scrollBibleToTop()` (`window.scrollTo(0)` + `readerTopRef.scrollIntoView`).  
+2. **Next / Prev / next passage** call `scrollBibleToTop()`: blur the focused control, `scrollTop/scrollLeft = 0` immediately, then again after the new chapter paints (`useLayoutEffect`). Do not use smooth `scrollIntoView` — scroll anchoring and the focused Next button put the reader back at the bottom. `overflow-anchor: none` on `.bible-page`. Phone plate height is `100svh` so browser-chrome `dvh` changes do not shove the page. Do **not** set `overflow-x` on `html` or `body` to lock sideways pans — that disables this sticky plate. Sideways pans are cancelled in the Read touch handler instead.  
 
 Without (1)+(2), the plate stays mid-timeline on a new chapter.
 
@@ -175,7 +175,8 @@ Without (1)+(2), the plate stays mid-timeline on a new chapter.
 - [ ] Progress uses `.bible-reader__content` height + ResizeObserver  
 - [ ] Encode is all-I-frame (or proven scrub-safe) + blob load  
 - [ ] Desktop Chrome: long chapter — plate **stays in view** to last verse and ends on woodgrain  
-- [ ] Next chapter → top of page + plate at frame ~0  
+- [ ] Next chapter → top of page (`scrollY === 0`) + plate at frame ~0, including when Next was pressed at the bottom
+- [ ] Phone pin uses `100svh` so the plate does not jump when the browser chrome shows or hides  
 - [ ] `prefers-reduced-motion: reduce` → no plate  
 
 ---
