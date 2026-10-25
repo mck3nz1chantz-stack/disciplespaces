@@ -1084,6 +1084,41 @@ export function Bible() {
     setNoteToolsOpen(false);
   }
 
+  // Tap off a highlight to drop it. Leave the composer alone so a draft stays.
+  useEffect(() => {
+    if (selectStart == null || showPrivateNote) return;
+    const onClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest(
+          ".bible-reader-verse, [data-verse-actions], [role='dialog'], [data-sonner-toaster]",
+        )
+      ) {
+        return;
+      }
+      clearSelection();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      clearSelection();
+    };
+    document.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [selectStart, showPrivateNote]);
+
   function openLogModal(opts?: {
     startVerse?: number;
     endVerse?: number;
@@ -2161,7 +2196,7 @@ export function Bible() {
 
               {!focusMode && (
                 <p className="mt-6 text-center text-[11px] font-sans text-muted/80">
-                  Tap a verse to select · tap another for a range
+                  Tap a verse to select · tap another for a range · tap off to clear
                 </p>
               )}
             </div>
@@ -2169,6 +2204,7 @@ export function Bible() {
 
           {/* Sticky log + private reflection — above bottom nav */}
           <div
+            data-verse-actions
             className={[
               "rounded-2xl border border-border/70 bg-surface/90 backdrop-blur-xl p-2.5 shadow-[var(--shadow-card)] space-y-2",
               /* A tucked note must not stay pinned over the verses. */
